@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.15
+
+- Take an unknown audio sample from the first minutes of the file, and keep the Dolby Digital packets in that window, so a seek does not come back empty.
+
+## 0.0.14
+
+- Read picture subtitles from several points in the film and try French and Spanish as well, so a quiet stretch is not mistaken for an unreadable language.
+
 ## 0.0.13
 
 - Show the subtitle file next to the video first, under its English language name, even when the file name does not match the video. The picture-subtitle reader typechecks so the image build can finish.

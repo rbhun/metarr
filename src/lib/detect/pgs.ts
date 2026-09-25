@@ -83,7 +83,22 @@ function toBitmap(indexes: Uint8Array, width: number, height: number, palette: M
   return { width: croppedWidth, height: croppedHeight, rgba };
 }
 
-export function readPgsImages(data: Uint8Array): Bitmap[] {
+export function scaleBitmap(bitmap: Bitmap, factor: number): Bitmap {
+  if (factor <= 1) return bitmap;
+  const width = bitmap.width * factor;
+  const height = bitmap.height * factor;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.floor(y / factor);
+    for (let x = 0; x < width; x += 1) {
+      const source = (sourceY * bitmap.width + Math.floor(x / factor)) * 4;
+      rgba.set(bitmap.rgba.subarray(source, source + 4), (y * width + x) * 4);
+    }
+  }
+  return { width, height, rgba };
+}
+
+export function readPgsImages(data: Uint8Array, limit = 48): Bitmap[] {
   const images: Bitmap[] = [];
   const palette = new Map<number, PaletteEntry>();
   let pending: { width: number; height: number; expected: number; rle: Uint8Array } | null = null;
@@ -96,6 +111,7 @@ export function readPgsImages(data: Uint8Array): Bitmap[] {
     if (!indexes) return;
     const bitmap = toBitmap(indexes, current.width, current.height, palette);
     if (bitmap) images.push(bitmap);
+    if (images.length >= limit) offset = data.length;
   };
 
   while (offset + 13 <= data.length) {

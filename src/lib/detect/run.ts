@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { audioClipArgs, sampleOffsets } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
 import type { DetectJob } from "@/lib/detect/store";
-import { readPgsImages, writePng } from "@/lib/detect/pgs";
+import { readPgsImages, scaleBitmap, writePng } from "@/lib/detect/pgs";
 import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
@@ -54,13 +55,6 @@ async function durationSeconds(file: string): Promise<number | null> {
   } catch {
     return null;
   }
-}
-
-function sampleOffsets(duration: number | null): number[] {
-  if (duration == null || duration < 90) return [15];
-  return [0.12, 0.38, 0.62]
-    .map((ratio) => Math.round(Math.min(Math.max(duration * ratio, 20), duration - 30)))
-    .filter((offset, index, all) => all.indexOf(offset) === index);
 }
 
 type Speech = { language: string; probability: number; text: string };
@@ -153,7 +147,11 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
     const transcript: string[] = [];
     for (const [index, offset] of offsets.entries()) {
       const wav = path.join(directory, `clip-${index}.wav`);
-      await runCommand("ffmpeg", ["-y", "-ss", String(offset), "-i", file, "-map", `0:a:${job.ordinal}`, "-t", "20", "-ac", "1", "-ar", "16000", "-vn", wav]);
+      try {
+        await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav), 60_000);
+      } catch {
+        continue;
+      }
       if (!fs.existsSync(wav) || fs.statSync(wav).size < 8_000) continue;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
@@ -174,11 +172,18 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
   }
 }
 
+const OCR_ORDER = ["eng", "hun", "fra", "spa", "deu", "ita"];
+
 async function ocrLanguages(): Promise<string[]> {
   const { stdout, stderr } = await runCommand("tesseract", ["--list-langs"], 20_000);
   const installed = new Set(`${stdout}\n${stderr}`.split("\n").map((line) => line.trim()).filter((line) => /^[a-z0-9_]+$/i.test(line) && line !== "osd"));
-  const chosen = ["eng", "hun"].filter((language) => installed.has(language));
+  const chosen = OCR_ORDER.filter((language) => installed.has(language));
   return chosen.length ? chosen : [...installed].slice(0, 1);
+}
+
+function spread<T>(items: T[], limit: number): T[] {
+  if (items.length <= limit) return items;
+  return Array.from({ length: limit }, (_, index) => items[Math.min(items.length - 1, Math.floor(((index + 0.5) * items.length) / limit))] as T);
 }
 
 function clearDirectory(directory: string) {
@@ -186,24 +191,29 @@ function clearDirectory(directory: string) {
 }
 
 async function pgsFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
+  const duration = await durationSeconds(file);
+  const starts = duration && duration > 900
+    ? [0.2, 0.4, 0.6, 0.8].map((ratio) => Math.round(Math.min(duration * ratio, Math.max(duration - 200, 0))))
+    : [600, 1800, 3000];
   const sup = path.join(directory, "track.sup");
-  for (const start of [300, 900]) {
+  const bitmaps = [];
+  for (const start of starts) {
     clearDirectory(directory);
     try {
-      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup), 60_000);
+      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup), 90_000);
     } catch (error) {
       const failed = error instanceof Error ? error : new Error(String(error));
       if (!/empty|nothing was written/i.test(failed.message)) throw failed;
       continue;
     }
     if (!fs.existsSync(sup) || fs.statSync(sup).size < 32) continue;
-    const images = readPgsImages(fs.readFileSync(sup)).slice(0, 4);
-    images.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
+    bitmaps.push(...readPgsImages(fs.readFileSync(sup), 12));
     fs.rmSync(sup, { force: true });
-    const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
-    if (frames.length > 0) return frames;
+    if (bitmaps.length >= 24) break;
   }
-  return [];
+  const frames = spread(bitmaps, 8).map((bitmap) => scaleBitmap(bitmap, 3));
+  frames.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
+  return frames.length ? fs.readdirSync(directory).filter((name) => name.endsWith(".png")) : [];
 }
 
 async function tightenFrame(file: string) {
@@ -250,6 +260,7 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
       }
       const detected = detectTextLanguage(pieces.join(" "));
       if (detected.language && detected.confidence > best.confidence) best = detected;
+      if (best.language && best.confidence >= 0.1) break;
     }
     return {
       language: best.language,

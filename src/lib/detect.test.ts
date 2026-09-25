@@ -14,7 +14,8 @@ import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars"
 import { rollupSubtitles } from "@/lib/detect/rollup";
 import { subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
-import { readPgsImages } from "@/lib/detect/pgs";
+import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
+import { audioClipArgs, sampleOffsets } from "@/lib/detect/audio";
 import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { shownLanguage } from "@/lib/format";
@@ -145,12 +146,22 @@ test("a series unknown subtitle queues every episode that still has it", () => {
   assert.deepEqual(queued.map((target) => target.path), ["/tv/Show/S01E02.mkv", "/tv/Show/S01E03.mkv"]);
 });
 
+test("an audio sample is taken from the first minutes and keeps the decoded packets", () => {
+  assert.deepEqual(sampleOffsets(6360), [90, 300, 600]);
+  assert.deepEqual(sampleOffsets(200), [90, 170]);
+  const args = audioClipArgs("/movies/Adjustment.m2ts", 0, 90, "/tmp/clip.wav");
+  assert.ok(args.indexOf("-t") < args.indexOf("-i"));
+  assert.equal(args[args.indexOf("-map") + 1], "0:a:0");
+  assert.equal(args[args.indexOf("-c:a") + 1], "pcm_s16le");
+});
+
 test("a pgs subtitle is copied out of the video instead of decoding the picture", () => {
   const args = pgsCopyArgs("/movies/Adjustment.m2ts", 4, 300, "/tmp/track.sup");
   assert.equal(args[args.indexOf("-map") + 1], "0:s:4");
   assert.equal(args[args.indexOf("-c") + 1], "copy");
   assert.equal(args.includes("-filter_complex"), false);
   assert.equal(args.at(-2), "sup");
+  assert.equal(args[args.indexOf("-t") + 1], "180");
 });
 
 test("a vobsub picture is drawn as an image and cropped to the text", () => {
@@ -191,6 +202,9 @@ test("pgs bitmap text is read back from the subtitle stream", () => {
   assert.equal(images.length, 1);
   assert.ok((images[0]?.width ?? 0) >= 8);
   assert.ok(images[0]?.rgba.includes(255));
+  const scaled = scaleBitmap(images[0]!, 3);
+  assert.equal(scaled.width, (images[0]?.width ?? 0) * 3);
+  assert.ok(scaled.rgba.includes(255));
 });
 
 test("text language detection reads english and hungarian subtitles", () => {
