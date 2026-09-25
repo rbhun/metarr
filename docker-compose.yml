@@ -1,0 +1,15 @@
+services:
+  metarr:
+    build: .
+    ports:
+      - "4317:4317"
+    environment:
+      PORT: "4317"
+      HOSTNAME: "0.0.0.0"
+      DATABASE_PATH: /app/data/library.db
+    volumes:
+      - metarr-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  metarr-data:
