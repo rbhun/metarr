@@ -10,6 +10,7 @@ import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, enqueueTargets, saveDetection } from "@/lib/detect/store";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
+import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -68,12 +69,26 @@ test("subtitle cues drop timestamps and ass styling", () => {
   assert.equal(cueText(ass), "Becsukta az ajtót.");
 });
 
+test("an untagged sidecar takes its language from the file name and is not a third subtitle", () => {
+  const video = "/mnt/media/Movies/10 Things I Hate About You (1999)/10 Things I Hate About You 1999.avi";
+  const names = ["10 Things I Hate About You 1999.en.srt", "10 Things I Hate About You 1999.hu.srt", "notes.txt"];
+  const tracks = assignSidecars(video, [
+    { language: "English", placement: "external", format: "SRT", forced: false },
+    { language: null, placement: "external", format: "SRT", forced: false },
+  ], names);
+  assert.equal(tracks[0]?.file?.endsWith(".en.srt"), true);
+  assert.equal(tracks[1]?.language, "Hungarian");
+  assert.equal(tracks[1]?.file?.endsWith(".hu.srt"), true);
+  assert.equal(languageFromSubtitleName("movie.you.srt"), null);
+});
+
 test("text language detection reads english and hungarian subtitles", () => {
   const english = Array(6).fill("She closed the door and walked into the kitchen while the rain started again on the empty street.").join(" ");
   const hungarian = Array(6).fill("Becsukta az ajtót, és kiment a konyhába, miközben az eső újra eleredt az üres utcán.").join(" ");
   assert.equal(detectTextLanguage(english).language, "English");
   assert.equal(detectTextLanguage(hungarian).language, "Hungarian");
   assert.equal(detectTextLanguage("Hi").language, null);
+  assert.equal(detectTextLanguage("AVI LIST hdrl avih strl movi idx1 JUNK RIFF WAVE fmt data LIST INFO ISFT Lavf BPS DURATION NUMBER OF FRAMES".repeat(4)).language, null);
 });
 
 test("unknown audio and subtitles are scanned, labeled tracks and discs are not", () => {

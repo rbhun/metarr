@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { parseAudioTracks, parseSubtitleTracks, parseVersions } from "@/lib/db";
+import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
 import type { ScanFile } from "@/lib/detect/targets";
+import type { SubtitleTrack } from "@/lib/types";
 
 type TitleFileRow = {
   id: number;
@@ -44,6 +46,10 @@ function episodeCode(season: number | null, episode: number | null): string {
   return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }
 
+function withSidecars(videoPath: string | null, tracks: SubtitleTrack[]): SubtitleTrack[] {
+  return assignSidecars(videoPath, tracks, readSidecarNames(videoPath));
+}
+
 function fromTitle(row: TitleFileRow): ScanFile {
   const name = row.year ? `${row.title} (${row.year})` : row.title;
   return {
@@ -52,8 +58,11 @@ function fromTitle(row: TitleFileRow): ScanFile {
     container: row.container,
     playableLabel: row.playable_label,
     audioTracks: parseAudioTracks(jsonValue(row.audio_tracks)),
-    subtitleTracks: parseSubtitleTracks(jsonValue(row.subtitle_tracks)),
-    versions: parseVersions(row.versions_json),
+    subtitleTracks: withSidecars(row.path, parseSubtitleTracks(jsonValue(row.subtitle_tracks))),
+    versions: parseVersions(row.versions_json).map((version) => ({
+      ...version,
+      subtitleTracks: withSidecars(version.path, version.subtitleTracks),
+    })),
   };
 }
 
@@ -64,8 +73,11 @@ function fromEpisode(row: EpisodeFileRow): ScanFile {
     container: row.container,
     playableLabel: row.playable_label,
     audioTracks: parseAudioTracks(jsonValue(row.audio_tracks)),
-    subtitleTracks: parseSubtitleTracks(jsonValue(row.subtitle_tracks)),
-    versions: parseVersions(row.versions_json),
+    subtitleTracks: withSidecars(row.path, parseSubtitleTracks(jsonValue(row.subtitle_tracks))),
+    versions: parseVersions(row.versions_json).map((version) => ({
+      ...version,
+      subtitleTracks: withSidecars(version.path, version.subtitleTracks),
+    })),
   };
 }
 

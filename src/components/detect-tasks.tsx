@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 type DetectJobView = {
   id: number;
@@ -19,6 +20,39 @@ type DetectBody = {
   jobs?: DetectJobView[];
 };
 
+const taskDialogOpeners = new Set<() => void>();
+
+export function openTasksDialog() {
+  for (const open of taskDialogOpeners) open();
+}
+
+export function toastDetection(message: string) {
+  const index = message.indexOf("Tasks");
+  if (index < 0) {
+    toast.success(message);
+    return;
+  }
+  const handle: { id: string | number } = { id: 0 };
+  handle.id = toast.success(
+    <span>
+      {message.slice(0, index)}
+      <button
+        type="button"
+        className="underline underline-offset-2"
+        onClick={(event) => {
+          event.stopPropagation();
+          openTasksDialog();
+          toast.dismiss(handle.id);
+        }}
+      >
+        Tasks
+      </button>
+      {message.slice(index + "Tasks".length)}
+    </span>,
+    { duration: 8000 },
+  );
+}
+
 function taskState(job: DetectJobView): string {
   if (job.status === "running") return job.kind === "audio" ? "Listening" : "Reading";
   if (job.status === "pending" && job.priority === "window") return "Waiting for the window";
@@ -28,8 +62,34 @@ function taskState(job: DetectJobView): string {
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 
-export function DetectTasks({ collapsed = false, compact = false, bump }: { collapsed?: boolean; compact?: boolean; bump: () => void }) {
+export function DetectTasks({
+  collapsed = false,
+  compact = false,
+  dialog = false,
+  className,
+  bump,
+}: {
+  collapsed?: boolean;
+  compact?: boolean;
+  dialog?: boolean;
+  className?: string;
+  bump: () => void;
+}) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!dialog) return;
+    const openDialog = () => setOpen(true);
+    taskDialogOpeners.add(openDialog);
+    return () => {
+      taskDialogOpeners.delete(openDialog);
+    };
+  }, [dialog]);
+
+  function showTasks() {
+    if (dialog) setOpen(true);
+    else openTasksDialog();
+  }
   const [jobs, setJobs] = useState<DetectJobView[]>([]);
   const [active, setActive] = useState(0);
 
@@ -65,12 +125,20 @@ export function DetectTasks({ collapsed = false, compact = false, bump }: { coll
 
   return (
     <>
-      <Button variant="outline" size={compact ? "sm" : "default"} title="Tasks" className={collapsed ? "w-full px-0" : compact ? "" : "w-full"} aria-label="Tasks" onClick={() => setOpen(true)}>
-        <ListTodo />
-        {collapsed ? <span className="sr-only">Tasks</span> : "Tasks"}
-        {!collapsed && active > 0 ? <span className="text-xs text-muted-foreground">{active}</span> : null}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      {compact ? (
+        <Button variant="ghost" size="sm" title="Tasks" aria-label="Tasks" className="text-muted-foreground" onClick={showTasks}>
+          <ListTodo />
+          Tasks
+          {active > 0 ? <span className="text-xs">{active}</span> : null}
+        </Button>
+      ) : (
+        <button type="button" title={collapsed ? "Tasks" : undefined} aria-label="Tasks" className={className} onClick={showTasks}>
+          <ListTodo />
+          {collapsed ? <span className="sr-only">Tasks</span> : "Tasks"}
+          {!collapsed && active > 0 ? <span className="ml-auto text-xs">{active}</span> : null}
+        </button>
+      )}
+      {dialog ? <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Tasks</DialogTitle>
@@ -92,7 +160,7 @@ export function DetectTasks({ collapsed = false, compact = false, bump }: { coll
             ))}
           </div>
         </DialogContent>
-      </Dialog>
+      </Dialog> : null}
     </>
   );
 }

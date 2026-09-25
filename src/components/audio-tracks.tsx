@@ -1,6 +1,7 @@
 "use client";
 
 import { enqueueTrack } from "@/components/detect-actions";
+import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { UnknownLabel } from "@/components/marked-text";
 import { audioTarget } from "@/lib/detect/track";
@@ -62,7 +63,7 @@ function Dts({ hd }: { hd?: boolean }) {
 
 async function detectUnknown(track: NonNullable<ReturnType<typeof audioTarget>>) {
   try {
-    toast.success(await enqueueTrack(track));
+    toastDetection(await enqueueTrack(track));
   } catch (caught) {
     toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
   }

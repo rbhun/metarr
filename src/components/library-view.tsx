@@ -3,6 +3,7 @@
 import { AudioTracks } from "@/components/audio-tracks";
 import { SubtitleRows } from "@/components/subtitle-rows";
 import { enqueueDetection } from "@/components/detect-actions";
+import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { RemuxStatus } from "@/components/remux-status";
@@ -435,7 +436,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       if (episode) episodes.push(Number(episode[1]));
     }
     try {
-      toast.success(await enqueueDetection(mode, titles, episodes));
+      toastDetection(await enqueueDetection(mode, titles, episodes));
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
     }

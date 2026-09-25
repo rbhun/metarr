@@ -2,6 +2,7 @@
 
 import { AudioTracks } from "@/components/audio-tracks";
 import { enqueueDetection } from "@/components/detect-actions";
+import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { SubtitleRows } from "@/components/subtitle-rows";
 import { FileBrowserButton } from "@/components/file-browser-button";
@@ -54,7 +55,7 @@ export function TitleDetail({
     if (!title) return;
     setDetectBusy(true);
     try {
-      toast.success(await enqueueDetection("now", episode ? [] : [title.id], episode ? [episode.id] : []));
+      toastDetection(await enqueueDetection("now", episode ? [] : [title.id], episode ? [episode.id] : []));
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
     } finally {

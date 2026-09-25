@@ -9,6 +9,7 @@ import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
 import type { DetectJob } from "@/lib/detect/store";
 import { isPictureSubtitle } from "@/lib/detect/targets";
+import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { languageName } from "@/lib/media";
 
@@ -28,7 +29,12 @@ function runCommand(command: string, args: string[], timeout = 120_000): Promise
       const err = stderr?.toString() ?? "";
       if (error) {
         const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-        const detail = err.trim().split("\n").slice(-4).join(" ");
+        const detail = err
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith("_STATISTICS_"))
+          .slice(-4)
+          .join(" ");
         reject(new Error(missing ? `${command} is not installed.` : detail || error.message));
         return;
       }
@@ -158,7 +164,7 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       language,
       role,
       confidence: agreed.confidence,
-      message: language ? null : "The language was not confident enough to replace Unknown.",
+      message: language ? null : "This language cannot be reliably recognized.",
     };
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -175,7 +181,25 @@ async function ocrLanguages(): Promise<string> {
 async function detectPictureSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
   try {
-    await runCommand("ffmpeg", ["-y", "-ss", "300", "-i", file, "-map", `0:s:${job.ordinal}`, "-frames:v", "4", "-vf", "scale=960:-1", path.join(directory, "cue-%02d.png")]);
+    await runCommand("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      "300",
+      "-i",
+      file,
+      "-map",
+      `0:s:${job.ordinal}`,
+      "-frames:v",
+      "4",
+      "-vf",
+      "scale=960:-1",
+      "-c:v",
+      "png",
+      path.join(directory, "cue-%02d.png"),
+    ]);
     const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
     if (frames.length === 0) return { language: null, role: null, confidence: 0, message: "No subtitle images could be read." };
     const languages = await ocrLanguages();
@@ -189,7 +213,7 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
       language: detected.language,
       role: null,
       confidence: detected.confidence,
-      message: detected.language ? null : "The subtitle images did not yield a clear language.",
+      message: detected.language ? null : "This language cannot be reliably recognized.",
     };
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -197,13 +221,29 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
 }
 
 async function detectTextSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
+  if (job.placement === "external" && !isSubtitleFile(file)) {
+    return {
+      language: null,
+      role: null,
+      confidence: 0,
+      message: "Plex did not name this subtitle file, so the video was not read as text.",
+    };
+  }
   let raw = "";
-  if (job.placement === "external" || /\.(srt|ass|ssa|vtt)$/i.test(file)) {
+  if (isSubtitleFile(file)) {
     const handle = fs.openSync(file, "r");
     try {
       const buffer = Buffer.alloc(256_000);
       const bytes = fs.readSync(handle, buffer, 0, buffer.length, 0);
-      raw = buffer.subarray(0, bytes).toString("utf8");
+      const sample = buffer.subarray(0, bytes);
+      let noisy = 0;
+      for (const byte of sample) {
+        if (byte === 0 || byte < 9 || (byte > 13 && byte < 32)) noisy += 1;
+      }
+      if (bytes === 0 || noisy / bytes > 0.02) {
+        return { language: null, role: null, confidence: 0, message: "The subtitle file is not readable text." };
+      }
+      raw = sample.toString("utf8");
     } finally {
       fs.closeSync(handle);
     }
@@ -216,7 +256,7 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
     language: detected.language,
     role: null,
     confidence: detected.confidence,
-    message: detected.language ? null : "The subtitle text did not yield a clear language.",
+    message: detected.language ? null : "This language cannot be reliably recognized.",
   };
 }
 

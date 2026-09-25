@@ -3,6 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
+import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { mergeAudioTracks, mergeSubtitleTracks } from "@/lib/media";
 import { displayLocalTitle, enrichmentKey } from "@/lib/online";
@@ -1053,12 +1054,16 @@ type TitleRow = {
   versions_json: string | null;
 };
 
+function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections: Map<string, StoredDetection>): SubtitleTrack[] {
+  return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
+}
+
 function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, detections: Map<string, StoredDetection>): LibraryTitle {
   const path = row.path;
   const versions = parseVersions(row.versions_json).map((version) => ({
     ...version,
     audioTracks: overlayAudio(version.path, version.audioTracks, detections),
-    subtitleTracks: overlaySubtitles(version.path, version.subtitleTracks, detections),
+    subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
   }));
   return {
     id: row.id,
@@ -1085,7 +1090,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
     audioTracks: overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
-    subtitleTracks: overlaySubtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    subtitleTracks: subtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
     posterPath: row.poster_path,
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
@@ -1246,8 +1251,8 @@ function libraryTitles(
       ? versions.flatMap((version) => overlayAudio(version.path, version.audioTracks, detections))
       : overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections);
     const subtitleTracks = versions.length
-      ? versions.flatMap((version) => overlaySubtitles(version.path, version.subtitleTracks, detections))
-      : overlaySubtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections);
+      ? versions.flatMap((version) => subtitles(version.path, version.subtitleTracks, detections))
+      : subtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections);
     const list = grouped.get(episode.catalog_id) ?? [];
     list.push({ audioTracks, subtitleTracks });
     grouped.set(episode.catalog_id, list);
@@ -1316,13 +1321,13 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
     audioTracks: overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
-    subtitleTracks: overlaySubtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    subtitleTracks: subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
     versions: parseVersions(row.versions_json).map((version) => ({
       ...version,
       audioTracks: overlayAudio(version.path, version.audioTracks, detections),
-      subtitleTracks: overlaySubtitles(version.path, version.subtitleTracks, detections),
+      subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
     })),
     inPlex: row.in_plex === 1,
     inSonarr: row.in_sonarr === 1,

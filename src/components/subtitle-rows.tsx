@@ -1,6 +1,7 @@
 "use client";
 
 import { enqueueTrack } from "@/components/detect-actions";
+import { toastDetection } from "@/components/detect-tasks";
 import { UnknownLabel } from "@/components/marked-text";
 import { subtitleTarget } from "@/lib/detect/track";
 import { shownLanguage } from "@/lib/format";
@@ -9,7 +10,7 @@ import { toast } from "sonner";
 
 async function detectUnknown(track: NonNullable<ReturnType<typeof subtitleTarget>>) {
   try {
-    toast.success(await enqueueTrack(track));
+    toastDetection(await enqueueTrack(track));
   } catch (caught) {
     toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
   }
@@ -29,7 +30,6 @@ export function SubtitleRows({
   if (tracks.length === 0) {
     return languages.length ? languages.map((language) => <p key={language}>{language}</p>) : <p>—</p>;
   }
-  const named = new Set(tracks.map((track) => shownLanguage(track)?.toLowerCase()).filter((language): language is string => Boolean(language)));
   return (
     <>
       {tracks.map((track, index) => {
@@ -44,9 +44,6 @@ export function SubtitleRows({
           </p>
         );
       })}
-      {languages.filter((language) => !named.has(language.toLowerCase())).map((language) => (
-        <p key={language}>{language}</p>
-      ))}
     </>
   );
 }
