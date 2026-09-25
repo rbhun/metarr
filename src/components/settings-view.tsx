@@ -64,7 +64,7 @@ async function readError(response: Response): Promise<string> {
 }
 
 export function SettingsView() {
-  const { bump } = useShell();
+  const { bump, epoch, startSync, status } = useShell();
   const [forms, setForms] = useState<Partial<Record<ConnectorId, FormState>>>({});
   const [saved, setSaved] = useState<ConnectorSettings[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,6 +173,14 @@ export function SettingsView() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (epoch === 0) return;
+    const timer = window.setTimeout(() => {
+      void refreshSaved();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [epoch]);
 
   function update(id: ConnectorId, patch: Partial<FormState>) {
     setForms((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }));
@@ -382,6 +390,14 @@ export function SettingsView() {
                     <Button size="sm" variant="outline" onClick={() => void test(id)} disabled={!form || busy === `test:${id}`}>
                       Test connection
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void startSync(id)}
+                      disabled={!stored?.baseUrl || !stored.apiKey || status?.running}
+                    >
+                      Sync
+                    </Button>
                     {id === "plex" ? (
                       <Button
                         type="button"
@@ -450,7 +466,7 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>File Browser</CardTitle>
               <CardDescription>
-                Opens the folder that contains a file. Paste the File Browser address, such as http://192.168.30.4:8080. If that app’s root is a folder rather than the whole disk, set the same path here so /mnt/media/Movies becomes /files/Movies.
+                Opens the folder that contains a file. Paste the File Browser address, such as http://192.168.30.4:8080. Files start at is the folder that app calls home. If home is /mnt, a file at /mnt/media/Movies opens as /files/media/Movies.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -468,7 +484,7 @@ export function SettingsView() {
                 <Input
                   id="file-browser-root"
                   value={fileBrowserRoot}
-                  placeholder="/mnt/media"
+                  placeholder="/mnt"
                   onChange={(event) => setFileBrowserRoot(event.target.value)}
                 />
               </div>

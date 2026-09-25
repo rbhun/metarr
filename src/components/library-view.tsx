@@ -25,7 +25,7 @@ import {
 import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText, subtitleLines } from "@/lib/format";
 import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
-import type { HdrLabel, LibraryEpisode, LibraryResponse, LibraryTitle, MediaVersion, PlayableLabel, TitleKind } from "@/lib/types";
+import { CONNECTOR_LABEL, type ConnectorId, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { LibraryFilters } from "@/components/library-filters";
@@ -257,8 +257,8 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
-  function openIn(titleId: number, app: ServiceApp) {
-    void openService(titleId, app)
+  function openIn(titleId: number, app: ServiceApp, episodeId?: number) {
+    void openService(titleId, app, episodeId)
       .then((message) => toast.success(message))
       .catch((caught: unknown) => toast.error(caught instanceof Error ? caught.message : "The request failed."));
   }
@@ -785,20 +785,18 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                         </TableRow>
                         ))}
                         {open ? (
-                          <TableRow key={`${title.id}-episodes`}>
-                            <TableCell colSpan={COLUMNS} className="bg-muted/30">
-                              <EpisodeList
-                                series={title}
-                                detail={detail}
-                                selected={selected}
-                                onToggle={toggleSelected}
-                                onOpen={(episode) => {
-                                  setDetail(title);
-                                  setDetailEpisode(episode);
-                                }}
-                              />
-                            </TableCell>
-                          </TableRow>
+                          <EpisodeRows
+                            series={title}
+                            detail={detail}
+                            configured={data?.configured ?? []}
+                            selected={selected}
+                            onToggle={toggleSelected}
+                            onOpen={(episode) => {
+                              setDetail(title);
+                              setDetailEpisode(episode);
+                            }}
+                            onOpenIn={(app, episodeId) => openIn(title.id, app, episodeId)}
+                          />
                         ) : null}
                       </Fragment>
                     );
@@ -936,6 +934,184 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
         onLookup={(id) => void lookup([id])}
       />
     </div>
+  );
+}
+
+function EpisodeRows({
+  series,
+  detail,
+  configured,
+  selected,
+  onToggle,
+  onOpen,
+  onOpenIn,
+}: {
+  series: LibraryTitle;
+  detail: LibraryEpisode[] | "loading" | "error" | undefined;
+  configured: ConnectorId[];
+  selected: Map<string, SelectedRow>;
+  onToggle: (row: SelectedRow, on: boolean) => void;
+  onOpen: (episode: LibraryEpisode) => void;
+  onOpenIn: (app: ServiceApp, episodeId?: number) => void;
+}) {
+  const [openSeasons, setOpenSeasons] = useState<Set<string>>(() => new Set());
+  if (!detail || detail === "loading") {
+    return (
+      <TableRow>
+        <TableCell colSpan={COLUMNS} className="text-xs text-muted-foreground">Loading episodes…</TableCell>
+      </TableRow>
+    );
+  }
+  if (detail === "error") {
+    return (
+      <TableRow>
+        <TableCell colSpan={COLUMNS} className="text-xs text-rose-700 dark:text-rose-300">Episodes could not be loaded.</TableCell>
+      </TableRow>
+    );
+  }
+  if (detail.length === 0) {
+    return (
+      <TableRow>
+        <TableCell colSpan={COLUMNS} className="text-xs text-muted-foreground">No episode metadata stored.</TableCell>
+      </TableRow>
+    );
+  }
+  const seasons = new Map<string, LibraryEpisode[]>();
+  for (const episode of detail) {
+    const key = episode.season == null ? "specials" : String(episode.season);
+    const list = seasons.get(key) ?? [];
+    list.push(episode);
+    seasons.set(key, list);
+  }
+  return (
+    <>
+      {[...seasons.entries()].map(([key, seasonEpisodes]) => {
+        const seasonOpen = openSeasons.has(key);
+        const label = key === "specials" ? "Specials" : `Season ${key}`;
+        return (
+          <Fragment key={`${series.id}-season-${key}`}>
+            <TableRow className="bg-muted/30">
+              <TableCell />
+              <TableCell colSpan={COLUMNS - 1}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between py-1 text-left text-sm font-medium"
+                  onClick={() =>
+                    setOpenSeasons((current) => {
+                      const next = new Set(current);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                >
+                  <span>{label}</span>
+                  <span className="text-xs text-muted-foreground">{seasonOpen ? "Hide" : `${seasonEpisodes.length} episodes`}</span>
+                </button>
+              </TableCell>
+            </TableRow>
+            {seasonOpen
+              ? seasonEpisodes.map((episode) => {
+                  const versions = episode.versions.length > 1 ? episode.versions : [null];
+                  const row = episodeSelection(series, episode);
+                  return versions.map((version, index) => (
+                    <TableRow key={`${episode.id}-${version?.path ?? index}`} className="align-top">
+                      {index === 0 ? (
+                        <>
+                          <TableCell rowSpan={versions.length > 1 ? versions.length : undefined}>
+                            <Checkbox
+                              checked={selected.has(row.key)}
+                              onCheckedChange={(value) => onToggle(row, value === true)}
+                              aria-label={`Select ${row.label}`}
+                            />
+                          </TableCell>
+                          <TableCell rowSpan={versions.length > 1 ? versions.length : undefined} className="whitespace-normal">
+                            <button type="button" className="block text-left" onClick={() => onOpen(episode)}>
+                              <p className="font-medium">
+                                {episodeCode(episode.season, episode.episode)} {episode.title}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatRuntime(episode.runtimeMinutes)}
+                                {episode.airDate ? ` · ${episode.airDate}` : ""}
+                              </p>
+                            </button>
+                          </TableCell>
+                          <TableCell rowSpan={versions.length > 1 ? versions.length : undefined}>
+                            <div className="flex max-w-48 flex-wrap gap-1">
+                              <Presence yes={episode.inPlex} label="Plex" onOpen={episode.inPlex ? () => onOpenIn("plex", episode.id) : undefined} />
+                              {(["sonarr", "bazarr"] as const).filter((id) => configured.includes(id)).map((id) => {
+                                const present = id === "sonarr" ? episode.inSonarr : episode.inBazarr;
+                                return (
+                                  <Presence key={id} yes={present} label={CONNECTOR_LABEL[id]} onOpen={present ? () => onOpenIn(id) : undefined} />
+                                );
+                              })}
+                            </div>
+                          </TableCell>
+                          <TableCell rowSpan={versions.length > 1 ? versions.length : undefined}>—</TableCell>
+                          <TableCell rowSpan={versions.length > 1 ? versions.length : undefined}>—</TableCell>
+                        </>
+                      ) : null}
+                      {version ? (
+                        <>
+                          <TableCell className="whitespace-normal">
+                            <CellScroll>
+                              <VideoSummary
+                                container={version.container}
+                                resolution={version.resolution}
+                                is3d={version.is3d}
+                                hdr={version.hdr}
+                                qualityName={version.qualityName}
+                                bitrateKbps={version.bitrateKbps}
+                                playableLabel={version.playableLabel}
+                                missing={version.missing}
+                                flags={version.flags}
+                                length={lengthText(version, differingLength(episode.versions))}
+                              />
+                            </CellScroll>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <CellScroll>
+                              <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} scroll={false} />
+                            </CellScroll>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? episode.subtitleWanted : []} />
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className="whitespace-normal">
+                            <CellScroll>
+                              <VideoSummary
+                                container={episode.container}
+                                resolution={episode.resolution}
+                                is3d={episode.is3d}
+                                hdr={episode.hdr}
+                                qualityName={episode.qualityName}
+                                bitrateKbps={null}
+                                playableLabel={episode.playableLabel}
+                                missing={episode.versions[0]?.missing}
+                              />
+                            </CellScroll>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <CellScroll>
+                              <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} scroll={false} />
+                            </CellScroll>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <SubtitleCell tracks={episode.subtitleTracks} present={episode.subtitleLanguages} wanted={episode.subtitleWanted} />
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ));
+                })
+              : null}
+          </Fragment>
+        );
+      })}
+    </>
   );
 }
 

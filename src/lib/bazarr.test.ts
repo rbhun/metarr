@@ -17,8 +17,11 @@ test("Bazarr 1.6 episodes keep the series title supplied by the series list", ()
     subtitles: [],
     missing_subtitles: [{ name: "Hungarian", code2: "hu" }],
     monitored: true,
+    path: "/mnt/media/TV/Breaking Bad/Season 1/Breaking Bad - S01E02.mkv",
   });
   assert.ok(episode);
+  assert.equal(episode.path, "/mnt/media/TV/Breaking Bad/Season 1/Breaking Bad - S01E02.mkv");
+  assert.deepEqual(episode.audioLanguages, []);
   assert.equal(episode.seriesTitle, "Breaking Bad");
   assert.equal(episode.season, 1);
   assert.equal(episode.episode, 2);

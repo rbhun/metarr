@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { CONNECTOR_LABEL, type SyncStatus } from "@/lib/types";
+import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
@@ -20,7 +20,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 type ShellContextValue = {
   status: SyncStatus | null;
   epoch: number;
-  startSync: () => Promise<void>;
+  startSync: (id?: ConnectorId) => Promise<void>;
   bump: () => void;
 };
 
@@ -111,9 +111,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [refresh, status?.running, syncOpen]);
 
-  const startSync = useCallback(async () => {
+  const startSync = useCallback(async (id?: ConnectorId) => {
     setSyncOpen(true);
-    await fetch("/api/sync", { method: "POST" });
+    await fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(id ? { id } : {}),
+    });
     await refresh();
   }, [refresh]);
 

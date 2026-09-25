@@ -245,3 +245,60 @@ test("both resolutions of one movie stay on the title", () => {
   assert.equal(library.titles[0]?.versions.length, 2);
   db.close();
 });
+
+test("the same file from Plex and Bazarr is one version", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, [
+    withMedia(
+      sourceDraft({
+        connector: "plex",
+        kind: "movie",
+        externalKey: "item:ten",
+        title: "10 Things",
+        year: 1999,
+        imdbId: "tt0147800",
+      }),
+      [
+        {
+          container: "avi",
+          path: "/mnt/media/Movies/10 Things.avi",
+          qualityName: null,
+          resolution: "352p",
+          hdr: "none",
+          is3d: false,
+          audioLanguages: [],
+          subtitleLanguages: ["English"],
+          audioTracks: [{ language: null, layout: "2.0", codec: "MP3" }],
+          subtitleTracks: [{ language: "English", placement: "external", format: "SRT", forced: false }],
+          bitrateKbps: 1033,
+        },
+      ],
+    ),
+    sourceDraft({
+      connector: "bazarr",
+      kind: "movie",
+      externalKey: "radarr:33",
+      title: "10 Things",
+      year: 1999,
+      imdbId: "tt0147800",
+      hasFile: true,
+      path: "/mnt/media/Movies/10 Things.avi",
+      container: "avi",
+      audioLanguages: ["English"],
+      subtitleLanguages: ["English", "Hungarian"],
+    }),
+  ]);
+  rebuildCatalog(db);
+  const row = db.prepare(`SELECT versions_json FROM catalog_titles WHERE title = '10 Things'`).get() as { versions_json: string };
+  const versions = JSON.parse(row.versions_json) as Array<{
+    resolution: string | null;
+    audioTracks: Array<{ language: string | null }>;
+    subtitleLanguages: string[];
+  }>;
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0]?.resolution, "352p");
+  assert.equal(versions[0]?.audioTracks[0]?.language, null);
+  assert.deepEqual(versions[0]?.subtitleLanguages, ["English", "Hungarian"]);
+  db.close();
+});

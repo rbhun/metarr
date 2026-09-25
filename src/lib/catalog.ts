@@ -126,9 +126,52 @@ function notesFrom(records: SourceDraft[]) {
   return records.find((record) => record.connector === "plex" && record.notes)?.notes ?? records.find((record) => record.notes)?.notes ?? null;
 }
 
+function filePathKey(path: string | null | undefined): string | null {
+  const normalized = path?.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized ? normalized.toLowerCase() : null;
+}
+
+function filledText(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
+}
+
+function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
+  const leftRank = resolutionRank(left.resolution);
+  const rightRank = resolutionRank(right.resolution);
+  const leftScore = leftRank + (left.bitrateKbps ? 1 : 0) + (left.audioTracks?.length ?? 0) + (left.fileBytes ? 1 : 0);
+  const rightScore = rightRank + (right.bitrateKbps ? 1 : 0) + (right.audioTracks?.length ?? 0) + (right.fileBytes ? 1 : 0);
+  const primary = rightScore > leftScore ? right : left;
+  const extra = primary === left ? right : left;
+  const audioTracks = mergeAudioTracks([primary.audioTracks ?? [], extra.audioTracks ?? []]);
+  const audioLanguages = mergeLanguages(primary.audioLanguages, extra.audioLanguages);
+  return {
+    container: filledText(primary.container) ?? filledText(extra.container),
+    path: primary.path ?? extra.path,
+    qualityName: filledText(primary.qualityName) ?? filledText(extra.qualityName),
+    resolution: leftRank >= rightRank ? left.resolution ?? right.resolution : right.resolution ?? left.resolution,
+    hdr: primary.hdr !== "none" ? primary.hdr : extra.hdr,
+    is3d: primary.is3d || extra.is3d,
+    audioLanguages,
+    subtitleLanguages: mergeLanguages(primary.subtitleLanguages, extra.subtitleLanguages),
+    audioTracks,
+    subtitleTracks: mergeSubtitleTracks([primary.subtitleTracks ?? [], extra.subtitleTracks ?? []]),
+    bitrateKbps: primary.bitrateKbps ?? extra.bitrateKbps ?? null,
+    videoCodec: filledText(primary.videoCodec) ?? filledText(extra.videoCodec),
+    videoProfile: filledText(primary.videoProfile) ?? filledText(extra.videoProfile),
+    frameRate: filledText(primary.frameRate) ?? filledText(extra.frameRate),
+    width: primary.width ?? extra.width ?? null,
+    height: primary.height ?? extra.height ?? null,
+    bitDepth: primary.bitDepth ?? extra.bitDepth ?? null,
+    aspectRatio: filledText(primary.aspectRatio) ?? filledText(extra.aspectRatio),
+    fileBytes: primary.fileBytes ?? extra.fileBytes ?? null,
+    durationMinutes: primary.durationMinutes ?? extra.durationMinutes ?? null,
+  };
+}
+
 function filesFrom(records: SourceDraft[]): MediaFile[] {
   const files: MediaFile[] = [];
-  const seen = new Set<string>();
+  const indexByKey = new Map<string, number>();
   for (const record of records) {
     const own = record.files.length
       ? record.files
@@ -147,10 +190,19 @@ function filesFrom(records: SourceDraft[]): MediaFile[] {
           ]
         : [];
     for (const file of own) {
-      const key = `${file.path ?? ""}|${file.container ?? ""}|${file.resolution ?? ""}|${file.qualityName ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      files.push(file);
+      const normalized =
+        record.connector === "bazarr" ? { ...file, audioLanguages: [], audioTracks: [] } : file;
+      const pathKey = filePathKey(normalized.path);
+      const key = pathKey
+        ? `path:${pathKey}`
+        : `loose:${file.container ?? ""}|${file.resolution ?? ""}|${file.qualityName ?? ""}`;
+      const existing = indexByKey.get(key);
+      if (existing == null) {
+        indexByKey.set(key, files.length);
+        files.push(normalized);
+        continue;
+      }
+      files[existing] = mergeMediaFiles(files[existing], normalized);
     }
   }
   return files;
@@ -198,7 +250,10 @@ function buildEpisode(records: SourceDraft[]): EpisodeInsert {
   const files = filesFrom(records);
   const summary = summarizeFiles(files, records.map((record) => record.title));
   const missing = episodeMissing(records);
-  const audio = mergeLanguages(summary.audioLanguages, records.map((record) => record.audioLanguages).flat());
+  const audio = mergeLanguages(
+    summary.audioLanguages,
+    records.filter((record) => record.connector !== "bazarr").flatMap((record) => record.audioLanguages),
+  );
   const subtitles = mergeLanguages(
     summary.subtitleLanguages,
     records.flatMap((record) => record.subtitleLanguages),
@@ -374,7 +429,10 @@ export function rebuildCatalog(db: Database.Database) {
         hdr: summary.hdr === "none" ? bestHdr(group.map((record) => record.hdr)) : summary.hdr,
         is3d: summary.is3d || group.some((record) => record.is3d) ? 1 : 0,
         audioLanguages: JSON.stringify(
-          mergeLanguages(summary.audioLanguages, group.flatMap((record) => record.audioLanguages)),
+          mergeLanguages(
+            summary.audioLanguages,
+            group.filter((record) => record.connector !== "bazarr").flatMap((record) => record.audioLanguages),
+          ),
         ),
         subtitleLanguages: JSON.stringify(
           mergeLanguages(summary.subtitleLanguages, group.flatMap((record) => record.subtitleLanguages)),

@@ -71,16 +71,7 @@ export function getSyncStatus(): SyncStatus {
   }
   const status = getMeta(getDb(), "last_sync_status");
   const finishedAt = getMeta(getDb(), "last_sync_at");
-  const notes = persistedNotes();
-  const connectors = freshConnectors().map((item) => {
-    const note = notes.find((entry) => entry.id === item.id);
-    if (!note) return { ...item, state: "skipped" as const, message: "Not synced yet" };
-    return {
-      ...item,
-      state: note.ok == null ? ("skipped" as const) : note.ok ? ("success" as const) : ("error" as const),
-      message: note.message,
-    };
-  });
+  const connectors = rememberedConnectors();
   return {
     running: false,
     startedAt: null,
@@ -114,20 +105,25 @@ async function pullConnector(
   return pullBazarr(baseUrl, apiKey, onProgress);
 }
 
-async function runSync() {
+async function runSync(only?: ConnectorId) {
   const status = memory();
   const db = getDb();
   const wasDemo = isDemo(db);
   const staged = new Map<ConnectorId, SourceDraft[]>();
-  let failures = 0;
 
   for (const connector of listConnectors(db)) {
+    if (only && connector.id !== only) continue;
     const slot = status.connectors.find((item) => item.id === connector.id);
     if (!slot) continue;
-    const configured = connector.enabled && connector.baseUrl.trim() && connector.apiKey.trim();
+    const hasCredentials = Boolean(connector.baseUrl.trim() && connector.apiKey.trim());
+    const configured = only ? hasCredentials : connector.enabled && hasCredentials;
     if (!configured) {
       slot.state = "skipped";
-      slot.message = connector.enabled ? "Add a base URL and key before syncing." : "Disconnected";
+      slot.message = only
+        ? "Save a base URL and key before syncing."
+        : connector.enabled
+          ? "Add a base URL and key before syncing."
+          : "Disconnected";
       continue;
     }
     slot.state = "running";
@@ -144,7 +140,6 @@ async function runSync() {
       slot.fetched = records.length;
       slot.total = records.length;
     } catch (error) {
-      failures += 1;
       slot.state = "error";
       slot.message = error instanceof Error ? error.message : "Sync failed.";
     }
@@ -153,6 +148,7 @@ async function runSync() {
   const demoCleared = wasDemo && staged.size > 0;
   for (const slot of status.connectors) {
     if (slot.state !== "error") continue;
+    if (only && slot.id !== only) continue;
     if (demoCleared) {
       slot.message = `${slot.message} Sample rows for this app were cleared because another app synced.`;
     } else if (!wasDemo && connectorHasRecords(db, slot.id)) {
@@ -175,6 +171,7 @@ async function runSync() {
         recordConnectorSync(id, true, slot?.message ?? "Synced.", db);
       }
       for (const slot of status.connectors) {
+        if (only && slot.id !== only) continue;
         if (slot.state === "error") recordConnectorSync(slot.id, false, slot.message, db);
       }
       rebuildCatalog(db);
@@ -182,18 +179,26 @@ async function runSync() {
     write();
   } else {
     for (const slot of status.connectors) {
+      if (only && slot.id !== only) continue;
       if (slot.state === "error") recordConnectorSync(slot.id, false, slot.message, db);
     }
   }
 
-  const successes = status.connectors.filter((slot) => slot.state === "success").length;
-  const outcome = successes > 0 && failures > 0 ? "partial" : successes > 0 ? "success" : failures > 0 ? "error" : "idle";
   const finishedAt = new Date().toISOString();
-  const notes: SyncNote[] = status.connectors.map((slot) => ({
-    id: slot.id,
-    ok: slot.state === "success" ? true : slot.state === "error" ? false : null,
-    message: slot.message,
-  }));
+  const previous = persistedNotes();
+  const notes: SyncNote[] = status.connectors.map((slot) => {
+    if (only && slot.id !== only) {
+      return previous.find((note) => note.id === slot.id) ?? { id: slot.id, ok: null, message: slot.message };
+    }
+    return {
+      id: slot.id,
+      ok: slot.state === "success" ? true : slot.state === "error" ? false : null,
+      message: slot.message,
+    };
+  });
+  const noteFailures = notes.filter((note) => note.ok === false).length;
+  const noteSuccesses = notes.filter((note) => note.ok === true).length;
+  const outcome = noteSuccesses > 0 && noteFailures > 0 ? "partial" : noteSuccesses > 0 ? "success" : noteFailures > 0 ? "error" : "idle";
   setMeta(db, "last_sync_at", finishedAt);
   setMeta(db, "last_sync_status", outcome);
   setMeta(db, "last_sync_notes", JSON.stringify(notes));
@@ -203,15 +208,30 @@ async function runSync() {
   status.status = outcome;
 }
 
-export function startSync(): { started: boolean; status: SyncStatus } {
+function rememberedConnectors(): ConnectorProgress[] {
+  const notes = persistedNotes();
+  return freshConnectors().map((item) => {
+    const note = notes.find((entry) => entry.id === item.id);
+    if (!note) return { ...item, state: "skipped" as const, message: "Not synced yet" };
+    return {
+      ...item,
+      state: note.ok == null ? ("skipped" as const) : note.ok ? ("success" as const) : ("error" as const),
+      message: note.message,
+    };
+  });
+}
+
+export function startSync(only?: ConnectorId): { started: boolean; status: SyncStatus } {
   const status = memory();
   if (status.running) return { started: false, status: getSyncStatus() };
   status.running = true;
   status.startedAt = new Date().toISOString();
   status.finishedAt = null;
   status.status = "running";
-  status.connectors = freshConnectors();
-  void runSync().catch((error: unknown) => {
+  status.connectors = (only ? rememberedConnectors() : freshConnectors()).map((item) =>
+    !only || item.id === only ? { id: item.id, state: "pending", message: "Waiting", fetched: 0, total: null } : item,
+  );
+  void runSync(only).catch((error: unknown) => {
     const current = memory();
     current.running = false;
     current.finishedAt = new Date().toISOString();

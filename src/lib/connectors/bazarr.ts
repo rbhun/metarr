@@ -18,7 +18,6 @@ export function parseBazarrMovie(value: unknown): SourceDraft | null {
   const radarrId = movie.radarrId ?? movie.radarrid;
   const imdbId = normalizeImdb(movie.imdbId ?? movie.imdbid);
   const externalKey = radarrId != null ? `radarr:${radarrId}` : imdbId ? `imdb:${imdbId}` : title;
-  const audioLanguages = languageList(movie.audio_language ?? movie.audio_languages);
   const subtitleLanguages = languageList(movie.subtitles);
   const draft = sourceDraft({
     connector: "bazarr",
@@ -28,7 +27,7 @@ export function parseBazarrMovie(value: unknown): SourceDraft | null {
     year: parseYear(movie.year),
     imdbId,
     tmdbId: normalizeNumericId(movie.tmdbId ?? movie.tmdbid),
-    audioLanguages,
+    audioLanguages: [],
     subtitleLanguages,
     subtitleWanted: languageList(movie.missing_subtitles),
     monitored: true,
@@ -42,7 +41,7 @@ export function parseBazarrMovie(value: unknown): SourceDraft | null {
     resolution: null,
     hdr: "none",
     is3d: false,
-    audioLanguages,
+    audioLanguages: [],
     subtitleLanguages,
     audioTracks: [],
     subtitleTracks: [],
@@ -67,7 +66,8 @@ export function parseBazarrEpisode(value: unknown): SourceDraft | null {
     sonarrEpisodeId != null
       ? `sonarr-episode:${sonarrEpisodeId}`
       : `${sonarrSeriesId ?? seriesTitle}:${season ?? "x"}:${episodeNumber ?? title}`;
-  return sourceDraft({
+  const subtitleLanguages = languageList(episode.subtitles);
+  const draft = sourceDraft({
     connector: "bazarr",
     kind: "episode",
     externalKey,
@@ -79,11 +79,30 @@ export function parseBazarrEpisode(value: unknown): SourceDraft | null {
     imdbId: normalizeImdb(episode.imdbId ?? episode.imdbid),
     tvdbId: normalizeNumericId(episode.tvdbId ?? episode.tvdbid ?? episode.seriesTvdbId),
     parentKey: sonarrSeriesId != null ? `sonarr-series:${sonarrSeriesId}` : null,
-    audioLanguages: languageList(episode.audio_language ?? episode.audio_languages),
-    subtitleLanguages: languageList(episode.subtitles),
+    subtitleLanguages,
     subtitleWanted: languageList(episode.missing_subtitles),
     monitored: episode.monitored !== false,
   });
+  const filePath = typeof episode.path === "string" ? episode.path.trim() : "";
+  if (!filePath) return draft;
+  return withMedia(
+    draft,
+    [
+      {
+        container: null,
+        path: filePath,
+        qualityName: null,
+        resolution: null,
+        hdr: "none",
+        is3d: false,
+        audioLanguages: [],
+        subtitleLanguages,
+        audioTracks: [],
+        subtitleTracks: [],
+      },
+    ],
+    [title],
+  );
 }
 
 function numberOrNull(value: unknown): number | null {

@@ -86,10 +86,15 @@ export function formatAudio(tracks: AudioTrack[], languages: string[]): string {
 
 export function subtitleLines(tracks: SubtitleTrack[], languages: string[]): string[] {
   if (tracks.length > 0) {
-    return tracks.map((track) => {
+    const lines = tracks.map((track) => {
       const place = track.placement === "burn-in" ? "burn-in" : track.placement;
       return [shownLanguage(track) ?? "Unknown", place, track.format, track.forced ? "forced" : null].filter(Boolean).join(" · ");
     });
+    const named = new Set(tracks.map((track) => shownLanguage(track)?.toLowerCase()).filter((language): language is string => Boolean(language)));
+    for (const language of languages) {
+      if (!named.has(language.toLowerCase())) lines.push(language);
+    }
+    return lines.length ? lines : ["—"];
   }
   return languages.length ? languages : ["—"];
 }
