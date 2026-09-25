@@ -20,8 +20,10 @@ export type OnlineMeta = {
   overview: string | null;
   posterUrl: string | null;
   originalTitle: string | null;
+  localTitles: Record<string, string>;
   runtimeMinutes: number | null;
   rating: number | null;
+  contentRating: string | null;
   genres: string[];
   imdbId: string | null;
   tmdbId: string | null;
@@ -30,13 +32,35 @@ export type OnlineMeta = {
   message: string | null;
 };
 
-export type PlayableLabel = "video" | "disc" | "missing";
+export type PlayableLabel = "video" | "dvd" | "bluray" | "iso" | "dvd-iso" | "bluray-iso" | "disc" | "missing";
 
 export type HdrLabel = "Dolby Vision" | "HDR10+" | "HDR10" | "HLG" | "none";
 
 export type TitleKind = "movie" | "series";
 
 export type RecordKind = TitleKind | "episode";
+
+export type AudioTrack = {
+  language: string | null;
+  layout: string | null;
+  codec: string | null;
+  streamIndex?: number | null;
+  label?: string | null;
+  detectedLanguage?: string | null;
+  detectedRole?: "commentary" | null;
+};
+
+export type SubtitlePlacement = "burn-in" | "internal" | "external";
+
+export type SubtitleTrack = {
+  language: string | null;
+  placement: SubtitlePlacement;
+  format: string | null;
+  forced: boolean;
+  streamIndex?: number | null;
+  file?: string | null;
+  detectedLanguage?: string | null;
+};
 
 export type MediaFile = {
   container: string | null;
@@ -47,6 +71,71 @@ export type MediaFile = {
   is3d: boolean;
   audioLanguages: string[];
   subtitleLanguages: string[];
+  audioTracks?: AudioTrack[];
+  subtitleTracks?: SubtitleTrack[];
+  bitrateKbps?: number | null;
+  videoCodec?: string | null;
+  videoProfile?: string | null;
+  frameRate?: string | null;
+  width?: number | null;
+  height?: number | null;
+  bitDepth?: number | null;
+  aspectRatio?: string | null;
+  fileBytes?: number | null;
+  durationMinutes?: number | null;
+};
+
+export type TitleNotes = {
+  summary: string | null;
+  studio: string | null;
+  tagline: string | null;
+  released: string | null;
+  addedAt: string | null;
+  directors: string[];
+  writers: string[];
+  countries: string[];
+  collections: string[];
+};
+
+export type FileBrief = {
+  name: string;
+  container: string | null;
+  resolution: string | null;
+  frameRate: string | null;
+  videoCodec: string | null;
+};
+
+export type MediaVersion = {
+  name: string;
+  path: string | null;
+  container: string | null;
+  resolution: string | null;
+  hdr: HdrLabel;
+  is3d: boolean;
+  qualityName: string | null;
+  bitrateKbps: number | null;
+  playableLabel: PlayableLabel;
+  edition: string | null;
+  audioLanguages: string[];
+  subtitleLanguages: string[];
+  audioTracks: AudioTrack[];
+  subtitleTracks: SubtitleTrack[];
+  missing: string[];
+  flags: string[];
+  fileBytes: number | null;
+  durationMinutes: number | null;
+};
+
+export type MediaDetail = TitleNotes & {
+  videoCodec: string | null;
+  videoProfile: string | null;
+  frameRate: string | null;
+  width: number | null;
+  height: number | null;
+  bitDepth: number | null;
+  aspectRatio: string | null;
+  fileBytes: number | null;
+  files: FileBrief[];
 };
 
 export type SourceDraft = {
@@ -75,7 +164,13 @@ export type SourceDraft = {
   audioLanguages: string[];
   subtitleLanguages: string[];
   subtitleWanted: string[];
+  audioTracks: AudioTrack[];
+  subtitleTracks: SubtitleTrack[];
+  posterPath: string | null;
+  runtimeMinutes: number | null;
+  notes: TitleNotes | null;
   rating: number | null;
+  contentRating: string | null;
   genres: string[];
   files: MediaFile[];
   airDate: string | null;
@@ -130,6 +225,11 @@ export type LibraryEpisode = {
   audioLanguages: string[];
   subtitleLanguages: string[];
   subtitleWanted: string[];
+  audioTracks: AudioTrack[];
+  subtitleTracks: SubtitleTrack[];
+  runtimeMinutes: number | null;
+  detail: MediaDetail | null;
+  versions: MediaVersion[];
   inPlex: boolean;
   inSonarr: boolean;
   inBazarr: boolean;
@@ -160,8 +260,17 @@ export type LibraryTitle = {
   audioLanguages: string[];
   subtitleLanguages: string[];
   subtitleWanted: string[];
+  audioTracks: AudioTrack[];
+  subtitleTracks: SubtitleTrack[];
+  posterPath: string | null;
+  runtimeMinutes: number | null;
+  detail: MediaDetail | null;
+  versions: MediaVersion[];
   rating: number | null;
+  contentRating: string | null;
+  bitrateKbps: number | null;
   genres: string[];
+  localTitle: string | null;
   missingReason: string | null;
   episodeCount: number;
   episodeFileCount: number;
@@ -181,6 +290,8 @@ export type LibraryResponse = {
   lastSyncAt: string | null;
   lastSyncStatus: Exclude<SyncStatusName, "running"> | null;
   syncNotes: SyncNote[];
+  fileBrowserUrl: string;
+  fileBrowserRoot: string;
   stats: {
     total: number;
     missing: number;

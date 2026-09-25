@@ -1,5 +1,11 @@
 "use client";
 
+import { AudioTracks } from "@/components/audio-tracks";
+import { enqueueDetection } from "@/components/detect-actions";
+import { DetectStatus } from "@/components/detect-status";
+import { CellScroll, LineScroll } from "@/components/line-scroll";
+import { MarkedText } from "@/components/marked-text";
+import { MediaPills } from "@/components/media-pills";
 import { useShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,14 +20,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { arrPresence, episodeCode, formatList, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
+import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText, subtitleLines } from "@/lib/format";
+import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
-import type { LibraryEpisode, LibraryResponse, LibraryTitle, PlayableLabel, TitleKind } from "@/lib/types";
+import type { HdrLabel, LibraryEpisode, LibraryResponse, LibraryTitle, MediaVersion, PlayableLabel, TitleKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
-import { TitleDetail } from "@/components/title-detail";
+import { LibraryFilters } from "@/components/library-filters";
+import { GenreLines, TitleDetail } from "@/components/title-detail";
+import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versions";
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
+import { openService, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 
 type KindFilter = "all" | TitleKind;
@@ -32,13 +42,13 @@ type SelectedRow = {
   path: string | null;
 };
 
-const COLUMNS = 9;
+const COLUMNS = 8;
 
 function titleSelection(title: LibraryTitle): SelectedRow {
   return {
     key: `title:${title.id}`,
     label: title.year ? `${title.title} (${title.year})` : title.title,
-    path: title.path,
+    path: title.versions.length > 1 ? title.versions.map((version) => version.path).filter(Boolean).join(" | ") : title.path,
   };
 }
 
@@ -46,42 +56,58 @@ function episodeSelection(series: LibraryTitle, episode: LibraryEpisode): Select
   return {
     key: `episode:${episode.id}`,
     label: `${series.title} ${episodeCode(episode.season, episode.episode)} ${episode.title}`.trim(),
-    path: episode.path,
+    path: episode.versions.length > 1 ? episode.versions.map((version) => version.path).filter(Boolean).join(" | ") : episode.path,
   };
 }
 
 function playableClass(label: PlayableLabel): string {
-  if (label === "disc") return "text-amber-300";
-  if (label === "missing") return "text-rose-300";
+  if (label === "missing") return "text-rose-700 dark:text-rose-300";
+  if (label !== "video") return "text-amber-800 dark:text-amber-300";
   return "text-foreground";
 }
 
-function Presence({ yes, label }: { yes: boolean; label: string }) {
+function Presence({ yes, label, onOpen }: { yes: boolean; label: string; onOpen?: () => void }) {
+  const className = yes
+    ? "border-emerald-600/40 bg-emerald-500/15 text-emerald-900 dark:text-emerald-100"
+    : "border-rose-600/40 bg-rose-500/10 text-rose-800 dark:text-rose-200";
+  if (yes && onOpen) {
+    return (
+      <Badge variant="outline" asChild className={cn(className, "cursor-pointer hover:underline")}>
+        <button type="button" onClick={onOpen} aria-label={`Open in ${label}`}>
+          {label}
+        </button>
+      </Badge>
+    );
+  }
   return (
-    <Badge
-      variant="outline"
-      className={
-        yes
-          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-100"
-          : "border-rose-500/40 bg-rose-500/10 text-rose-200"
-      }
-    >
+    <Badge variant="outline" className={className}>
       {yes ? label : `No ${label}`}
     </Badge>
   );
 }
 
-function SubtitleCell({ present, wanted }: { present: string[]; wanted: string[] }) {
+function SubtitleCell({
+  tracks,
+  present,
+  wanted,
+}: {
+  tracks: LibraryTitle["subtitleTracks"];
+  present: string[];
+  wanted: string[];
+}) {
+  const lines = subtitleLines(tracks, present);
   return (
-    <div className="min-w-36">
-      <p>{formatList(present)}</p>
-      {wanted.length ? <p className="text-xs text-amber-300">Bazarr missing: {wanted.join(", ")}</p> : null}
-    </div>
+    <CellScroll>
+      {lines.map((line, index) => (
+        <p key={`${line}-${index}`}><MarkedText text={line} /></p>
+      ))}
+      {wanted.length ? <p className="text-xs text-amber-800 dark:text-amber-300">Bazarr missing: {wanted.join(", ")}</p> : null}
+    </CellScroll>
   );
 }
 
 function Poster({ title, className }: { title: LibraryTitle; className?: string }) {
-  const src = title.online?.posterUrl;
+  const src = title.online?.posterUrl || (title.posterPath ? `/api/library/${title.id}/poster` : null);
   if (!src) {
     return <div className={cn("shrink-0 rounded-md bg-muted", className)} aria-hidden />;
   }
@@ -92,45 +118,129 @@ function Poster({ title, className }: { title: LibraryTitle; className?: string 
   );
 }
 
-function TitleCell({ title }: { title: LibraryTitle }) {
+function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () => void; action?: React.ReactNode }) {
   const rating = displayRating(title.rating, title.online);
+  const runtime = formatRuntime(title.runtimeMinutes ?? title.online?.runtimeMinutes);
   return (
-    <div className="flex min-w-56 gap-3">
+    <div className="flex w-full min-w-0 items-start gap-3">
       <Poster title={title} className="h-16 w-11" />
-      <div>
-        <p className="font-medium">
-          {title.title}
-          {title.year ? <span className="ml-1.5 font-normal text-muted-foreground">{title.year}</span> : null}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {title.kind === "movie" ? "Movie" : `${title.episodeFileCount} of ${title.episodeCount} episodes on disk`}
-          {rating.value != null ? ` · ${formatRating(rating.value)}` : ""}
-          {title.online?.runtimeMinutes ? ` · ${formatRuntime(title.online.runtimeMinutes)}` : ""}
-        </p>
-        {title.missingReason ? <p className="text-xs text-rose-300">{title.missingReason}</p> : null}
+      <div className="min-w-0">
+        <button type="button" className="block text-left" onClick={onOpen}>
+          <p className="font-medium">
+            {title.title}
+            {title.year ? <span className="ml-1.5 font-normal text-muted-foreground">{title.year}</span> : null}
+          </p>
+          {title.localTitle ? <p className="text-xs text-muted-foreground">{title.localTitle}</p> : null}
+          <p className="text-xs text-muted-foreground">
+            {title.kind === "movie" ? "Movie" : `${title.episodeFileCount} of ${title.episodeCount} episodes on disk`}
+            {rating.value != null ? ` · ${formatRating(rating.value)}` : ""}
+            {runtime !== "—" ? ` · ${runtime}` : ""}
+          </p>
+          {title.missingReason ? <p className="text-xs text-rose-700 dark:text-rose-300">{title.missingReason}</p> : null}
+        </button>
+        {action ? <div className="mt-2">{action}</div> : null}
       </div>
     </div>
   );
 }
 
-function episodeStatus(episode: LibraryEpisode): { label: string; className: string } {
-  if (episode.playableLabel === "video") return { label: "Video file", className: "text-foreground" };
-  if (episode.playableLabel === "disc") return { label: "Disc image", className: "text-amber-300" };
+function lengthText(version: MediaVersion, kind: "runtime" | "size" | null): string | null {
+  if (kind === "runtime") return formatRuntime(version.durationMinutes);
+  if (kind === "size") return formatBytes(version.fileBytes);
+  return null;
+}
+
+function VideoSummary({
+  container,
+  resolution,
+  is3d,
+  hdr,
+  qualityName,
+  bitrateKbps,
+  playableLabel,
+  missing,
+  flags,
+  note,
+  length,
+}: {
+  container: string | null;
+  resolution: string | null;
+  is3d: boolean;
+  hdr: HdrLabel;
+  qualityName: string | null;
+  bitrateKbps: number | null;
+  playableLabel?: PlayableLabel | null;
+  missing?: string[];
+  flags?: string[];
+  note?: string | null;
+  length?: string | null;
+}) {
+  return (
+    <div>
+      {playableLabel && playableLabel !== "video" ? (
+        <p className={cn("whitespace-nowrap", playableClass(playableLabel))}>{playableText(playableLabel)}</p>
+      ) : null}
+      <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+        <MediaPills container={container} resolution={resolution} threeD={is3d} />
+        {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
+        {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
+      </p>
+      {length ? <p className="text-[11px] text-muted-foreground">{length}</p> : null}
+      {flags?.length ? (
+        <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">{flags.map((flag) => (flag === "sample" ? "Sample" : "Short")).join(" · ")}</p>
+      ) : null}
+      {missing?.length ? <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">Missing {missing.join(", ")}</p> : null}
+      {note ? <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">{note}</p> : null}
+    </div>
+  );
+}
+
+function VersionBands({ versions, wanted }: { versions: MediaVersion[]; wanted: string[] }) {
+  const length = differingLength(versions);
+  return (
+    <div className="divide-y">
+      {versions.map((version, index) => (
+        <div key={`${version.path ?? version.name}-${index}`} className="grid grid-cols-3 gap-3 py-2 first:pt-0 last:pb-0">
+          <VideoSummary
+            container={version.container}
+            resolution={version.resolution}
+            is3d={version.is3d}
+            hdr={version.hdr}
+            qualityName={version.qualityName}
+            bitrateKbps={version.bitrateKbps}
+            playableLabel={version.playableLabel}
+            missing={version.missing}
+            flags={version.flags}
+            length={lengthText(version, length)}
+          />
+          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} />
+          <div>
+            <LineScroll>
+              {subtitleLines(version.subtitleTracks, version.subtitleLanguages).map((line, lineIndex) => (
+                <p key={`${line}-${lineIndex}`}><MarkedText text={line} /></p>
+              ))}
+            </LineScroll>
+            {index === 0 && wanted.length ? <p className="text-xs text-amber-800 dark:text-amber-300">Bazarr missing: {wanted.join(", ")}</p> : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function episodeStatus(episode: LibraryEpisode): { label: string; className: string } | null {
+  if (episode.playableLabel === "video") return null;
+  if (episode.playableLabel !== "missing") return { label: playableText(episode.playableLabel), className: "text-amber-800 dark:text-amber-300" };
   if (!episode.wanted && episode.airDate && Date.parse(episode.airDate) > Date.now()) {
     return { label: "Not aired", className: "text-muted-foreground" };
   }
-  return { label: "Missing file", className: "text-rose-300" };
+  return { label: "Missing file", className: "text-rose-700 dark:text-rose-300" };
 }
 
 export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const { epoch, bump, status } = useShell();
   const [kind, setKind] = useState<KindFilter>("all");
-  const [missing, setMissing] = useState(false);
-  const [notInPlex, setNotInPlex] = useState(false);
-  const [notPlayable, setNotPlayable] = useState(false);
-  const [missingEnglish, setMissingEnglish] = useState(false);
-  const [only3d, setOnly3d] = useState(false);
-  const [hungarian, setHungarian] = useState(false);
+  const [rules, setRules] = useState<FilterRule[]>([]);
   const [selected, setSelected] = useState<Map<string, SelectedRow>>(() => new Map());
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -140,8 +250,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [loading, setLoading] = useState(!initial);
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<LibraryTitle | null>(null);
+  const [detailEpisode, setDetailEpisode] = useState<LibraryEpisode | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
+
+  function openIn(titleId: number, app: ServiceApp) {
+    void openService(titleId, app)
+      .then((message) => toast.success(message))
+      .catch((caught: unknown) => toast.error(caught instanceof Error ? caught.message : "The request failed."));
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -154,12 +271,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({ kind, offset: String(offset), limit: "50" });
-    if (missing) params.set("missing", "1");
-    if (notInPlex) params.set("notInPlex", "1");
-    if (notPlayable) params.set("notPlayable", "1");
-    if (missingEnglish) params.set("missingEnglish", "1");
-    if (only3d) params.set("only3d", "1");
-    if (hungarian) params.set("hungarian", "1");
+    if (rules.length) params.set("rules", JSON.stringify(rules));
     if (debounced.trim()) params.set("q", debounced.trim());
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -184,7 +296,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [kind, missing, notInPlex, notPlayable, missingEnglish, only3d, hungarian, debounced, offset, epoch]);
+  }, [kind, rules, debounced, offset, epoch]);
 
   async function toggleEpisodes(title: LibraryTitle) {
     if (title.kind !== "series") return;
@@ -205,6 +317,22 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function clearLibrary() {
+    if (!window.confirm("Remove every title stored in Metarr? Addresses and keys stay. Nothing is deleted on Plex or the *arr apps.")) return;
+    const response = await fetch("/api/library", { method: "DELETE" });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      toast.error(body?.error || "The library could not be cleared.");
+      return;
+    }
+    setSelected(new Map());
+    setDetail(null);
+    setDetailEpisode(null);
+    setOffset(0);
+    bump();
+    toast.success("Library cleared. Server settings were kept.");
+  }
+
   async function loadDemo() {
     const response = await fetch("/api/demo", { method: "POST" });
     if (response.ok) bump();
@@ -216,8 +344,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const pageStart = filtered === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + (data?.page.limit ?? 50), filtered);
   const failedNotes = (data?.syncNotes ?? []).filter((note) => note.ok === false);
-  const filtersActive =
-    kind !== "all" || missing || notInPlex || notPlayable || missingEnglish || only3d || hungarian || debounced.trim().length > 0;
+  const filtersActive = kind !== "all" || rules.length > 0 || debounced.trim().length > 0;
   const pageAllSelected = titles.length > 0 && titles.every((title) => selected.has(titleSelection(title).key));
   const pageSomeSelected = titles.some((title) => selected.has(titleSelection(title).key));
 
@@ -252,6 +379,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     let found = 0;
     let missing = 0;
     let errors = 0;
+    let limitNote: string | null = null;
     try {
       for (let step = 0; step < 40; step += 1) {
         const response = await fetch("/api/enrich", {
@@ -267,11 +395,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
           remaining?: number;
           processedIds?: number[];
           processed?: number;
+          message?: string | null;
+          omdbStopped?: boolean;
         } | null;
         if (!response.ok) throw new Error(body?.error || "Lookup failed.");
         found += body?.found ?? 0;
         missing += body?.missing ?? 0;
         errors += body?.errors ?? 0;
+        if (body?.message) limitNote = body.message;
+        if (body?.omdbStopped) break;
         if (!body?.processed) break;
         if (pending) {
           const done = new Set(body.processedIds ?? []);
@@ -283,11 +415,29 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       }
       bump();
       const parts = [`${found} found`, missing ? `${missing} unmatched` : "", errors ? `${errors} failed` : ""].filter(Boolean);
-      toast.success(`Lookup finished. ${parts.join(", ")}. Nothing was written back to Plex or the *arr apps.`);
+      toast.success(
+        `Lookup finished. ${parts.join(", ")}.${limitNote ? ` ${limitNote}` : ""} Nothing was written back to Plex or the *arr apps.`,
+      );
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
     } finally {
       setLookupBusy(false);
+    }
+  }
+
+  async function detectSelected(mode: "now" | "queue") {
+    const titles: number[] = [];
+    const episodes: number[] = [];
+    for (const row of selected.values()) {
+      const title = row.key.match(/^title:(\d+)$/);
+      const episode = row.key.match(/^episode:(\d+)$/);
+      if (title) titles.push(Number(title[1]));
+      if (episode) episodes.push(Number(episode[1]));
+    }
+    try {
+      toast.success(await enqueueDetection(mode, titles, episodes));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
     }
   }
 
@@ -317,6 +467,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               Last sync {formatWhen(data?.lastSyncAt ?? status?.finishedAt)}
               {status?.running ? " · sync in progress" : ""}
             </p>
+            <DetectStatus />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -328,10 +479,18 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <Button size="sm" variant="outline" disabled={lookupBusy || (data?.stats.total ?? 0) === 0} onClick={() => void lookup(null)}>
               {lookupBusy ? "Looking up…" : "Fill missing metadata"}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={(data?.stats.total ?? 0) === 0 || status?.running}
+              onClick={() => void clearLibrary()}
+            >
+              Clear library
+            </Button>
           </div>
         </div>
         {data?.demo ? (
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          <p className="rounded-lg border border-amber-700/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-950 dark:text-amber-100">
             Demo library. These rows are built-in samples so you can try filters before a server answers. Saved settings are untouched.
           </p>
         ) : null}
@@ -376,74 +535,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                 {label}
               </Button>
             ))}
-            <Button
-              size="sm"
-              variant={missing ? "default" : "outline"}
-              aria-pressed={missing}
-              onClick={() => {
-                setMissing((value) => !value);
-                setOffset(0);
-              }}
-            >
-              Missing
-            </Button>
-            <Button
-              size="sm"
-              variant={notInPlex ? "default" : "outline"}
-              aria-pressed={notInPlex}
-              onClick={() => {
-                setNotInPlex((value) => !value);
-                setOffset(0);
-              }}
-            >
-              Not in Plex
-            </Button>
-            <Button
-              size="sm"
-              variant={notPlayable ? "default" : "outline"}
-              aria-pressed={notPlayable}
-              onClick={() => {
-                setNotPlayable((value) => !value);
-                setOffset(0);
-              }}
-            >
-              Disc / not playable
-            </Button>
-            <Button
-              size="sm"
-              variant={missingEnglish ? "default" : "outline"}
-              aria-pressed={missingEnglish}
-              onClick={() => {
-                setMissingEnglish((value) => !value);
-                setOffset(0);
-              }}
-            >
-              No English subs
-            </Button>
-            <Button
-              size="sm"
-              variant={only3d ? "default" : "outline"}
-              aria-pressed={only3d}
-              onClick={() => {
-                setOnly3d((value) => !value);
-                setOffset(0);
-              }}
-            >
-              3D only
-            </Button>
-            <Button
-              size="sm"
-              variant={hungarian ? "default" : "outline"}
-              aria-pressed={hungarian}
-              onClick={() => {
-                setHungarian((value) => !value);
-                setOffset(0);
-              }}
-            >
-              Hungarian
-            </Button>
           </div>
         </div>
+        <LibraryFilters
+          rules={rules}
+          onChange={(next) => {
+            setRules(next);
+            setOffset(0);
+          }}
+        />
         {selected.size > 0 ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
             <span className="font-medium">{selected.size} selected</span>
@@ -463,6 +563,12 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               }))}
             >
               Look up selected
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void detectSelected("now")}>
+              Detect languages now
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void detectSelected("queue")}>
+              Queue language detection
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear
@@ -513,7 +619,17 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
         ) : (
           <>
             <div className="hidden md:block">
-              <Table className="min-w-[1100px]">
+              <Table className="table-fixed">
+                <colgroup>
+                  <col className="w-10" />
+                  <col className="w-[137px]" />
+                  <col className="w-28" />
+                  <col className="w-16" />
+                  <col className="w-32" />
+                  <col className="w-[176px]" />
+                  <col className="w-[229px]" />
+                  <col />
+                </colgroup>
                 <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
                     <TableHead className="w-10">
@@ -523,14 +639,13 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                         aria-label="Select all titles on this page"
                       />
                     </TableHead>
-                    <TableHead>Title</TableHead>
+                    <TableHead className="w-[137px]">Title</TableHead>
                     <TableHead>Where</TableHead>
-                    <TableHead>File</TableHead>
-                    <TableHead>Picture</TableHead>
-                    <TableHead>Audio</TableHead>
-                    <TableHead>Subtitles</TableHead>
                     <TableHead>Rating</TableHead>
                     <TableHead>Genres</TableHead>
+                    <TableHead className="w-[176px]">Video</TableHead>
+                    <TableHead className="w-[229px]">Audio</TableHead>
+                    <TableHead>Subtitles</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -540,62 +655,110 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                     const detail = episodes[title.id];
                     return (
                       <Fragment key={title.id}>
-                        <TableRow className="align-top">
-                          <TableCell>
+                        {(title.versions.length > 1 ? title.versions : [null]).map((version, index) => (
+                        <TableRow key={`${title.id}-${version?.path ?? index}`} className="align-top">
+                          {index === 0 ? (
+                          <>
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined}>
                             <Checkbox
                               checked={selected.has(titleSelection(title).key)}
                               onCheckedChange={(value) => toggleSelected(titleSelection(title), value === true)}
                               aria-label={`Select ${title.title}`}
                             />
                           </TableCell>
-                          <TableCell>
-                            <button type="button" className="text-left" onClick={() => setDetail(title)}>
-                              <TitleCell title={title} />
-                            </button>
-                            {title.kind === "series" ? (
-                              <button type="button" className="mt-1 text-xs text-primary" onClick={() => void toggleEpisodes(title)}>
-                                {open ? "Hide episodes" : "Show episodes"}
-                              </button>
-                            ) : null}
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined} className="w-[137px] max-w-[137px] whitespace-normal">
+                            <TitleCell
+                              title={title}
+                              onOpen={() => { setDetailEpisode(null); setDetail(title); }}
+                              action={title.kind === "series" ? (
+                                <Button size="lg" variant="outline" className="w-full px-2" onClick={() => void toggleEpisodes(title)}>
+                                  {open ? "Hide episodes" : "Show episodes"}
+                                </Button>
+                              ) : null}
+                            />
                           </TableCell>
-                          <TableCell>
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined}>
                             <div className="flex max-w-48 flex-wrap gap-1">
-                              <Presence yes={title.inPlex} label="Plex" />
+                              <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} />
                               {arr.apps.map((app) => (
-                                <Presence key={app.id} yes={app.present} label={app.label} />
+                                <Presence key={app.id} yes={app.present} label={app.label} onOpen={app.present ? () => openIn(title.id, app.id) : undefined} />
                               ))}
                             </div>
                           </TableCell>
-                          <TableCell>
-                            <p className={cn("whitespace-nowrap", playableClass(title.playableLabel))}>
-                              {playableText(title.playableLabel)}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {[title.container, title.resolution, title.qualityName].filter(Boolean).join(" · ") || "—"}
-                            </p>
-                            {title.playableNote ? <p className="text-[11px] text-amber-200/80">{title.playableNote}</p> : null}
-                          </TableCell>
-                          <TableCell>
-                            <p>{title.is3d ? "3D" : "2D"}</p>
-                            <p className={title.hdr === "none" ? "text-[11px] text-muted-foreground" : "text-[11px]"}>{hdrText(title.hdr)}</p>
-                          </TableCell>
-                          <TableCell>{formatList(title.audioLanguages)}</TableCell>
-                          <TableCell>
-                            <SubtitleCell present={title.subtitleLanguages} wanted={title.subtitleWanted} />
-                          </TableCell>
-                          <TableCell>
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined}>
                             {formatRating(displayRating(title.rating, title.online).value)}
+                            {title.contentRating || title.online?.contentRating ? (
+                              <p className="text-[11px] text-muted-foreground">{title.contentRating || title.online?.contentRating}</p>
+                            ) : null}
                             {title.rating == null && title.online?.rating != null ? (
                               <p className="text-[11px] text-muted-foreground">{displayRating(title.rating, title.online).source}</p>
                             ) : null}
                           </TableCell>
-                          <TableCell className="max-w-48">
-                            {formatList(displayGenres(title.genres, title.online).genres)}
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined} className="max-w-48 whitespace-normal">
+                            <CellScroll>
+                            <GenreLines genres={displayGenres(title.genres, title.online).genres} />
                             {displayGenres(title.genres, title.online).filled ? (
                               <p className="text-[11px] text-muted-foreground">Filled online</p>
                             ) : null}
+                            </CellScroll>
                           </TableCell>
+                          </>
+                          ) : null}
+                          {version ? (
+                            <>
+                              <TableCell className="whitespace-normal">
+                                <CellScroll>
+                                <VideoSummary
+                                  container={version.container}
+                                  resolution={version.resolution}
+                                  is3d={version.is3d}
+                                  hdr={version.hdr}
+                                  qualityName={version.qualityName}
+                                  bitrateKbps={version.bitrateKbps}
+                                  playableLabel={version.playableLabel}
+                                  missing={version.missing}
+                                  length={lengthText(version, differingLength(title.versions))}
+                                />
+                                </CellScroll>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <CellScroll>
+                                  <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} scroll={false} />
+                                </CellScroll>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? title.subtitleWanted : []} />
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
+                              <TableCell className="whitespace-normal">
+                                <CellScroll>
+                                <VideoSummary
+                                  container={title.container}
+                                  resolution={title.resolution}
+                                  is3d={title.is3d}
+                                  hdr={title.hdr}
+                                  qualityName={title.qualityName}
+                                  bitrateKbps={title.bitrateKbps}
+                                  playableLabel={title.playableLabel}
+                                  missing={title.versions[0]?.missing}
+                                  note={title.playableNote}
+                                />
+                                </CellScroll>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <CellScroll>
+                                  <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} scroll={false} />
+                                </CellScroll>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} />
+                              </TableCell>
+                            </>
+                          )}
                         </TableRow>
+                        ))}
                         {open ? (
                           <TableRow key={`${title.id}-episodes`}>
                             <TableCell colSpan={COLUMNS} className="bg-muted/30">
@@ -604,6 +767,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 detail={detail}
                                 selected={selected}
                                 onToggle={toggleSelected}
+                                onOpen={(episode) => {
+                                  setDetail(title);
+                                  setDetailEpisode(episode);
+                                }}
                               />
                             </TableCell>
                           </TableRow>
@@ -627,77 +794,85 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                         onCheckedChange={(value) => toggleSelected(titleSelection(title), value === true)}
                         aria-label={`Select ${title.title}`}
                       />
-                      <button type="button" className="text-left" onClick={() => setDetail(title)}>
-                        <TitleCell title={title} />
-                      </button>
+                      <div className="min-w-0">
+                        <TitleCell
+                          title={title}
+                          onOpen={() => { setDetailEpisode(null); setDetail(title); }}
+                          action={title.kind === "series" ? (
+                            <Button size="lg" variant="outline" onClick={() => void toggleEpisodes(title)}>
+                              {open ? "Hide episodes" : "Show episodes"}
+                            </Button>
+                          ) : null}
+                        />
+                        {open ? (
+                          <div className="mt-3">
+                            <EpisodeList
+                              series={title}
+                              detail={episodes[title.id]}
+                              selected={selected}
+                              onToggle={toggleSelected}
+                              onOpen={(episode) => {
+                                setDetail(title);
+                                setDetailEpisode(episode);
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                     <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                       <div>
-                        <dt className="text-muted-foreground">Format</dt>
-                        <dd>{title.container ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Playable</dt>
-                        <dd className={playableClass(title.playableLabel)}>{playableText(title.playableLabel)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Resolution</dt>
-                        <dd>{title.resolution ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Quality</dt>
-                        <dd>{title.qualityName ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">3D</dt>
-                        <dd>{title.is3d ? "Yes" : "No"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">HDR</dt>
-                        <dd>{hdrText(title.hdr)}</dd>
-                      </div>
-                      <div className="col-span-2">
-                        <dt className="text-muted-foreground">Audio</dt>
-                        <dd>{formatList(title.audioLanguages)}</dd>
-                      </div>
-                      <div className="col-span-2">
-                        <dt className="text-muted-foreground">Subtitles</dt>
-                        <dd>
-                          {formatList(title.subtitleLanguages)}
-                          {title.subtitleWanted.length ? ` · Bazarr missing: ${title.subtitleWanted.join(", ")}` : ""}
-                        </dd>
-                      </div>
-                      <div>
                         <dt className="text-muted-foreground">Rating</dt>
-                        <dd>{formatRating(title.rating)}</dd>
+                        <dd>{formatRating(displayRating(title.rating, title.online).value)}</dd>
                       </div>
                       <div>
                         <dt className="text-muted-foreground">Genres</dt>
-                        <dd>{formatList(title.genres)}</dd>
+                        <dd><GenreLines genres={displayGenres(title.genres, title.online).genres} /></dd>
                       </div>
+                      {title.versions.length > 1 ? (
+                        <div className="col-span-2">
+                          <VersionBands versions={title.versions} wanted={title.subtitleWanted} />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="col-span-2">
+                            <dt className="text-muted-foreground">Video</dt>
+                            <dd className="mt-1">
+                              <VideoSummary
+                                container={title.container}
+                                resolution={title.resolution}
+                                is3d={title.is3d}
+                                hdr={title.hdr}
+                                qualityName={title.qualityName}
+                                bitrateKbps={title.bitrateKbps}
+                                playableLabel={title.playableLabel}
+                                missing={title.versions[0]?.missing}
+                                note={title.playableNote}
+                              />
+                            </dd>
+                          </div>
+                          <div className="col-span-2">
+                            <dt className="text-muted-foreground">Audio</dt>
+                            <dd>
+                              <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} />
+                            </dd>
+                          </div>
+                          <div className="col-span-2">
+                            <dt className="text-muted-foreground">Subtitles</dt>
+                            <dd>
+                              <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} />
+                            </dd>
+                          </div>
+                        </>
+                      )}
                     </dl>
                     <div className="mt-3 flex flex-wrap gap-1">
-                      <Presence yes={title.inPlex} label="Plex" />
+                      <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} />
                       {arr.apps.map((app) => (
-                        <Presence key={app.id} yes={app.present} label={app.label} />
+                        <Presence key={app.id} yes={app.present} label={app.label} onOpen={app.present ? () => openIn(title.id, app.id) : undefined} />
                       ))}
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">{arr.summary}</p>
-                    {title.kind === "series" ? (
-                      <Button className="mt-3" size="sm" variant="outline" onClick={() => void toggleEpisodes(title)}>
-                        {open ? "Hide episodes" : "Show episodes"}
-                      </Button>
-                    ) : null}
-                    {open ? (
-                      <div className="mt-3">
-                        <EpisodeList
-                          series={title}
-                          detail={episodes[title.id]}
-                          selected={selected}
-                          onToggle={toggleSelected}
-                        />
-                      </div>
-                    ) : null}
                   </article>
                 );
               })}
@@ -724,8 +899,14 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
         title={detailTitle}
         configured={data?.configured ?? []}
         busy={lookupBusy}
+        fileBrowserUrl={data?.fileBrowserUrl ?? ""}
+        fileBrowserRoot={data?.fileBrowserRoot ?? ""}
+        episode={detailEpisode}
         onOpenChange={(open) => {
-          if (!open) setDetail(null);
+          if (!open) {
+            setDetail(null);
+            setDetailEpisode(null);
+          }
         }}
         onLookup={(id) => void lookup([id])}
       />
@@ -738,36 +919,100 @@ function EpisodeList({
   detail,
   selected,
   onToggle,
+  onOpen,
 }: {
   series: LibraryTitle;
   detail: LibraryEpisode[] | "loading" | "error" | undefined;
   selected: Map<string, SelectedRow>;
   onToggle: (row: SelectedRow, on: boolean) => void;
+  onOpen: (episode: LibraryEpisode) => void;
 }) {
+  const [openSeasons, setOpenSeasons] = useState<Set<string>>(() => new Set());
   if (!detail || detail === "loading") return <p className="text-xs text-muted-foreground">Loading episodes…</p>;
-  if (detail === "error") return <p className="text-xs text-rose-300">Episodes could not be loaded.</p>;
+  if (detail === "error") return <p className="text-xs text-rose-700 dark:text-rose-300">Episodes could not be loaded.</p>;
   if (detail.length === 0) return <p className="text-xs text-muted-foreground">No episode metadata stored.</p>;
+  const seasons = new Map<string, LibraryEpisode[]>();
+  for (const episode of detail) {
+    const key = episode.season == null ? "specials" : String(episode.season);
+    const list = seasons.get(key) ?? [];
+    list.push(episode);
+    seasons.set(key, list);
+  }
   return (
     <div className="grid gap-2">
-      {detail.map((episode) => {
-        const status = episodeStatus(episode);
-        const row = episodeSelection(series, episode);
+      {[...seasons.entries()].map(([key, episodes]) => {
+        const open = openSeasons.has(key);
+        const label = key === "specials" ? "Specials" : `Season ${key}`;
         return (
-          <div key={episode.id} className="grid gap-1 border-b border-border/60 pb-2 text-xs last:border-0 md:grid-cols-[1.25rem_7rem_1fr_8rem_8rem_1fr] md:items-center">
-            <Checkbox
-              checked={selected.has(row.key)}
-              onCheckedChange={(value) => onToggle(row, value === true)}
-              aria-label={`Select ${row.label}`}
-            />
-            <p className="font-medium">{episodeCode(episode.season, episode.episode)}</p>
-            <p>{episode.title}</p>
-            <p className={status.className}>{status.label}</p>
-            <p>{episode.container ?? "—"} {episode.qualityName ? `· ${episode.qualityName}` : ""}</p>
-            <p className="text-muted-foreground">
-              Audio {formatList(episode.audioLanguages)} · Subs {formatList(episode.subtitleLanguages)}
-              {episode.subtitleWanted.length ? ` · Bazarr missing: ${episode.subtitleWanted.join(", ")}` : ""}
-            </p>
-          </div>
+          <section key={key}>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left text-xs font-medium hover:bg-muted"
+              onClick={() =>
+                setOpenSeasons((current) => {
+                  const next = new Set(current);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                })
+              }
+            >
+              <span>{label}</span>
+              <span className="text-muted-foreground">{open ? "Hide" : `${episodes.length} episodes`}</span>
+            </button>
+            {open ? (
+              <div className="grid max-h-36 gap-2 overflow-y-auto overscroll-contain pt-1 [scrollbar-width:thin]">
+                {episodes.map((episode) => {
+                  const status = episodeStatus(episode);
+                  const row = episodeSelection(series, episode);
+                  return (
+                    <div key={episode.id} className="grid gap-1 border-b border-border/60 pb-2 text-xs last:border-0 md:grid-cols-[1.25rem_1fr_8rem] md:items-start">
+                      <Checkbox
+                        checked={selected.has(row.key)}
+                        onCheckedChange={(value) => onToggle(row, value === true)}
+                        aria-label={`Select ${row.label}`}
+                      />
+                      <button type="button" className="text-left" onClick={() => onOpen(episode)}>
+                        <p className="font-medium">
+                          {episodeCode(episode.season, episode.episode)} {episode.title}
+                        </p>
+                        {episode.versions.length > 1 ? (
+                          <div className="mt-1">
+                            <VersionLines versions={episode.versions} />
+                          </div>
+                        ) : (
+                          <p className="mt-1 flex flex-wrap items-center gap-1 text-muted-foreground">
+                            <MediaPills container={episode.container} resolution={episode.resolution} frameRate={episode.detail?.frameRate} />
+                            {episode.qualityName}
+                            {episode.versions[0]?.missing.length ? <span className="text-amber-800 dark:text-amber-200">Missing {episode.versions[0].missing.join(", ")}</span> : null}
+                          </p>
+                        )}
+                      </button>
+                      <div className="text-muted-foreground">
+                        {status ? <p className={status.className}>{status.label}</p> : null}
+                        {episode.versions.length > 1 ? (
+                          <>
+                            <VersionAudio versions={episode.versions} />
+                            <VersionSubtitles versions={episode.versions} />
+                          </>
+                        ) : (
+                          <>
+                            <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} />
+                            <LineScroll>
+                            {subtitleLines(episode.subtitleTracks, episode.subtitleLanguages).map((line, index) => (
+                              <p key={`${line}-${index}`}><MarkedText text={line} /></p>
+                            ))}
+                            </LineScroll>
+                          </>
+                        )}
+                        {episode.subtitleWanted.length ? <p>Bazarr missing: {episode.subtitleWanted.join(", ")}</p> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
         );
       })}
     </div>

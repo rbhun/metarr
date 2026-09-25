@@ -5,16 +5,21 @@ import {
   bestHdr,
   detect3d,
   isAired,
+  mergeAudioTracks,
   mergeLanguages,
+  mergeSubtitleTracks,
+  normalizeContentRating,
   normalizeImdb,
   normalizeNumericId,
   normalizeTitle,
   resolutionRank,
+  buildDetail,
   summarizeFiles,
   uniqueLanguages,
+  versionsFrom,
 } from "@/lib/media";
 import { enrichmentKey } from "@/lib/online";
-import type { HdrLabel, MediaFile, SourceDraft, TitleKind } from "@/lib/types";
+import type { AudioTrack, HdrLabel, MediaFile, SourceDraft, SubtitleTrack, TitleKind } from "@/lib/types";
 
 type SeriesBucket = {
   records: SourceDraft[];
@@ -62,12 +67,37 @@ function firstText(values: Array<string | null | undefined>): string | null {
   return null;
 }
 
+function typicalMinutes(values: Array<number | null | undefined>): number | null {
+  const counts = new Map<number, number>();
+  for (const value of values) {
+    if (value == null || value <= 0) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  let best: number | null = null;
+  let bestCount = 0;
+  for (const [value, count] of counts) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 function firstRating(records: SourceDraft[]): number | null {
   for (const connector of ["plex", "radarr", "sonarr", "bazarr"] as const) {
     const found = records.find((record) => record.connector === connector && record.rating);
     if (found?.rating) return found.rating;
   }
   return records.find((record) => record.rating)?.rating ?? null;
+}
+
+function firstContentRating(records: SourceDraft[]): string | null {
+  for (const record of records) {
+    const rating = normalizeContentRating(record.contentRating);
+    if (rating) return rating;
+  }
+  return null;
 }
 
 function unionGenres(records: SourceDraft[]): string[] {
@@ -90,6 +120,10 @@ function preferRecord(records: SourceDraft[], order: Array<SourceDraft["connecto
     if (found) return found;
   }
   return records[0];
+}
+
+function notesFrom(records: SourceDraft[]) {
+  return records.find((record) => record.connector === "plex" && record.notes)?.notes ?? records.find((record) => record.notes)?.notes ?? null;
 }
 
 function filesFrom(records: SourceDraft[]): MediaFile[] {
@@ -149,6 +183,11 @@ type EpisodeInsert = {
   audioLanguages: string[];
   subtitleLanguages: string[];
   subtitleWanted: string[];
+  audioTracks: AudioTrack[];
+  subtitleTracks: SubtitleTrack[];
+  runtimeMinutes: number | null;
+  detail: ReturnType<typeof buildDetail>;
+  versions: ReturnType<typeof versionsFrom>;
   inPlex: boolean;
   inSonarr: boolean;
   inBazarr: boolean;
@@ -165,6 +204,11 @@ function buildEpisode(records: SourceDraft[]): EpisodeInsert {
     records.flatMap((record) => record.subtitleLanguages),
   );
   const subtitleWanted = uniqueLanguages(records.flatMap((record) => record.subtitleWanted));
+  const audioTracks = mergeAudioTracks([summary.audioTracks, records.map((record) => record.audioTracks).flat()]);
+  const subtitleTracks = mergeSubtitleTracks([
+    summary.subtitleTracks,
+    records.flatMap((record) => record.subtitleTracks),
+  ]);
   const title = preferRecord(records, ["sonarr", "plex", "bazarr"])?.title || "Episode";
   const season = records.find((record) => record.season != null)?.season ?? null;
   const episode = records.find((record) => record.episode != null)?.episode ?? null;
@@ -186,10 +230,35 @@ function buildEpisode(records: SourceDraft[]): EpisodeInsert {
     audioLanguages: audio,
     subtitleLanguages: subtitles,
     subtitleWanted,
+    audioTracks,
+    subtitleTracks,
+    runtimeMinutes: typicalMinutes(records.map((record) => record.runtimeMinutes)),
+    detail: buildDetail(notesFrom(records), files),
+    versions: versionColumns(files).versions,
     inPlex: records.some((record) => record.connector === "plex"),
     inSonarr: records.some((record) => record.connector === "sonarr"),
     inBazarr: records.some((record) => record.connector === "bazarr"),
     airDate,
+  };
+}
+
+function withTitleFlag(title: string, flags: string): string {
+  const set = new Set(flags.split(",").filter(Boolean));
+  if (/(?:^|[^a-z0-9])sample(?:[^a-z0-9]|$)/i.test(title)) set.add("sample");
+  return [...set].join(",");
+}
+
+function versionColumns(files: MediaFile[]) {
+  const versions = versionsFrom(files);
+  return {
+    versions,
+    versionsJson: JSON.stringify(versions),
+    versionResolutions: versions
+      .map((version) => version.resolution)
+      .filter((resolution): resolution is string => Boolean(resolution))
+      .join(","),
+    versionHdrs: versions.map((version) => version.hdr).join(","),
+    versionFlags: [...new Set(versions.flatMap((version) => version.flags))].join(","),
   };
 }
 
@@ -241,13 +310,15 @@ export function rebuildCatalog(db: Database.Database) {
       kind, title, sort_title, year, imdb_id, tmdb_id, tvdb_id,
       in_plex, in_radarr, in_sonarr, in_bazarr, has_file, container, path,
       playable_label, playable_note, quality_name, resolution, hdr, is_3d,
-      audio_languages, subtitle_languages, subtitle_wanted, rating, genres,
+      audio_languages, subtitle_languages, subtitle_wanted, audio_tracks, subtitle_tracks, poster_path, runtime_minutes, detail_json, versions_json, version_resolutions, version_hdrs, version_flags,
+      rating, content_rating, bitrate_kbps, genres,
       missing_reason, episode_count, episode_file_count, missing_episode_count, match_key
     ) VALUES (
       @kind, @title, @sortTitle, @year, @imdbId, @tmdbId, @tvdbId,
       @inPlex, @inRadarr, @inSonarr, @inBazarr, @hasFile, @container, @path,
       @playableLabel, @playableNote, @qualityName, @resolution, @hdr, @is3d,
-      @audioLanguages, @subtitleLanguages, @subtitleWanted, @rating, @genres,
+      @audioLanguages, @subtitleLanguages, @subtitleWanted, @audioTracks, @subtitleTracks, @posterPath, @runtimeMinutes, @detailJson, @versionsJson, @versionResolutions, @versionHdrs, @versionFlags,
+      @rating, @contentRating, @bitrateKbps, @genres,
       @missingReason, @episodeCount, @episodeFileCount, @missingEpisodeCount, @matchKey
     )
   `);
@@ -255,11 +326,11 @@ export function rebuildCatalog(db: Database.Database) {
     INSERT INTO catalog_episodes (
       catalog_id, season, episode, title, has_file, wanted, container, path,
       playable_label, quality_name, resolution, hdr, is_3d, audio_languages,
-      subtitle_languages, subtitle_wanted, in_plex, in_sonarr, in_bazarr, air_date
+      subtitle_languages, subtitle_wanted, audio_tracks, subtitle_tracks, runtime_minutes, detail_json, versions_json, in_plex, in_sonarr, in_bazarr, air_date
     ) VALUES (
       @catalogId, @season, @episode, @title, @hasFile, @wanted, @container, @path,
       @playableLabel, @qualityName, @resolution, @hdr, @is3d, @audioLanguages,
-      @subtitleLanguages, @subtitleWanted, @inPlex, @inSonarr, @inBazarr, @airDate
+      @subtitleLanguages, @subtitleWanted, @audioTracks, @subtitleTracks, @runtimeMinutes, @detailJson, @versionsJson, @inPlex, @inSonarr, @inBazarr, @airDate
     )
   `);
 
@@ -268,15 +339,19 @@ export function rebuildCatalog(db: Database.Database) {
 
     for (const group of movieGroups) {
       const files = filesFrom(group);
+      const versions = versionColumns(files);
       const summary = summarizeFiles(
         files,
         group.flatMap((record) => [record.title, record.path]),
       );
       const inRadarr = group.some((record) => record.connector === "radarr");
+      const inPlex = group.some((record) => record.connector === "plex");
       const hasFile = summary.hasFile;
       const title = preferRecord(group, ["radarr", "plex", "bazarr"])?.title || "Untitled";
       const year = group.find((record) => record.year)?.year ?? null;
       const missingReason = hasFile ? null : inRadarr ? "No file in Radarr" : "No file";
+      const hiddenFromPlex = hasFile && !inPlex ? "Not listed in Plex" : null;
+      const playableNote = [hasFile ? summary.playableNote : null, hiddenFromPlex].filter(Boolean).join(". ") || null;
       insertTitle.run({
         kind: "movie",
         title,
@@ -285,7 +360,7 @@ export function rebuildCatalog(db: Database.Database) {
         imdbId: firstText(group.map((record) => record.imdbId)),
         tmdbId: firstText(group.map((record) => record.tmdbId)),
         tvdbId: firstText(group.map((record) => record.tvdbId)),
-        inPlex: group.some((record) => record.connector === "plex") ? 1 : 0,
+        inPlex: inPlex ? 1 : 0,
         inRadarr: inRadarr ? 1 : 0,
         inSonarr: 0,
         inBazarr: group.some((record) => record.connector === "bazarr") ? 1 : 0,
@@ -293,7 +368,7 @@ export function rebuildCatalog(db: Database.Database) {
         container: summary.container ?? firstText(group.map((record) => record.container)),
         path: summary.path,
         playableLabel: hasFile ? summary.playableLabel : "missing",
-        playableNote: hasFile ? summary.playableNote : null,
+        playableNote,
         qualityName: summary.qualityName ?? firstText(group.map((record) => record.qualityName)),
         resolution: summary.resolution ?? bestResolution(group.map((record) => record.resolution)),
         hdr: summary.hdr === "none" ? bestHdr(group.map((record) => record.hdr)) : summary.hdr,
@@ -305,7 +380,20 @@ export function rebuildCatalog(db: Database.Database) {
           mergeLanguages(summary.subtitleLanguages, group.flatMap((record) => record.subtitleLanguages)),
         ),
         subtitleWanted: JSON.stringify(uniqueLanguages(group.flatMap((record) => record.subtitleWanted))),
+        audioTracks: JSON.stringify(mergeAudioTracks([summary.audioTracks, ...group.map((record) => record.audioTracks)])),
+        subtitleTracks: JSON.stringify(
+          mergeSubtitleTracks([summary.subtitleTracks, ...group.map((record) => record.subtitleTracks)]),
+        ),
+        posterPath: firstText(group.map((record) => record.posterPath)),
+        runtimeMinutes: typicalMinutes(group.map((record) => record.runtimeMinutes)),
+        detailJson: JSON.stringify(buildDetail(notesFrom(group), files)),
+        versionsJson: versions.versionsJson,
+        versionResolutions: versions.versionResolutions,
+        versionHdrs: versions.versionHdrs,
+        versionFlags: withTitleFlag(title, versions.versionFlags),
         rating: firstRating(group),
+        contentRating: firstContentRating(group),
+        bitrateKbps: summary.bitrateKbps,
         genres: JSON.stringify(unionGenres(group)),
         missingReason,
         episodeCount: 0,
@@ -387,7 +475,27 @@ export function rebuildCatalog(db: Database.Database) {
           ),
         ),
         subtitleWanted: JSON.stringify(uniqueLanguages(episodes.flatMap((episode) => episode.subtitleWanted))),
+        audioTracks: JSON.stringify(
+          mergeAudioTracks([summary.audioTracks, ...episodes.map((episode) => episode.audioTracks)]),
+        ),
+        subtitleTracks: JSON.stringify(
+          mergeSubtitleTracks([summary.subtitleTracks, ...episodes.map((episode) => episode.subtitleTracks)]),
+        ),
+        posterPath: firstText(group.records.map((record) => record.posterPath)),
+        detailJson: JSON.stringify(buildDetail(notesFrom(group.records), episodeFiles)),
+        versionsJson: "[]",
+        versionResolutions: "",
+        versionHdrs: "",
+        versionFlags: withTitleFlag(
+          title,
+          [...new Set(episodes.flatMap((episode) => episode.versions.flatMap((version) => version.flags)))].join(","),
+        ),
+        runtimeMinutes:
+          typicalMinutes(group.records.map((record) => record.runtimeMinutes)) ??
+          typicalMinutes(episodes.map((episode) => episode.runtimeMinutes)),
         rating: firstRating(group.records),
+        contentRating: firstContentRating(group.records),
+        bitrateKbps: summary.bitrateKbps,
         genres: JSON.stringify(unionGenres(group.records)),
         missingReason,
         episodeCount: episodes.length,
@@ -421,6 +529,11 @@ export function rebuildCatalog(db: Database.Database) {
           audioLanguages: JSON.stringify(episode.audioLanguages),
           subtitleLanguages: JSON.stringify(episode.subtitleLanguages),
           subtitleWanted: JSON.stringify(episode.subtitleWanted),
+          audioTracks: JSON.stringify(episode.audioTracks),
+          subtitleTracks: JSON.stringify(episode.subtitleTracks),
+          runtimeMinutes: episode.runtimeMinutes,
+          detailJson: episode.detail ? JSON.stringify(episode.detail) : null,
+          versionsJson: JSON.stringify(episode.versions),
           inPlex: episode.inPlex ? 1 : 0,
           inSonarr: episode.inSonarr ? 1 : 0,
           inBazarr: episode.inBazarr ? 1 : 0,

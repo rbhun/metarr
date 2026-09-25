@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
-import { insertSourceRecords, migrate, queryLibrary, saveEnrichment } from "@/lib/db";
+import { insertSourceRecords, migrate, queryLibrary, saveEnrichment, setMeta } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { lookupOnline } from "@/lib/online-lookup";
-import { displayGenres, displayRating, enrichmentKey, mergeHits, type SourceHit } from "@/lib/online";
+import { displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
 
 const godfather = {
   kind: "movie" as const,
@@ -21,8 +21,10 @@ function hit(partial: Partial<SourceHit> & Pick<SourceHit, "source">): SourceHit
     overview: null,
     posterUrl: null,
     originalTitle: null,
+    localTitles: {},
     runtimeMinutes: null,
     rating: null,
+    contentRating: null,
     genres: [],
     imdbId: null,
     tmdbId: null,
@@ -66,6 +68,17 @@ test("merged lookup keeps the OMDb rating and the TMDB overview", () => {
   assert.deepEqual(merged.sources, ["tmdb", "omdb"]);
 });
 
+test("a selected language keeps a different local title", () => {
+  const titles = localTitlesFromTranslations({
+    translations: [{ iso_639_1: "hu", data: { title: "A keresztapa" } }, { iso_639_1: "en", data: { title: "The Godfather" } }],
+  });
+  assert.equal(titles.hu, "A keresztapa");
+  const online = mergeHits([hit({ source: "tmdb", localTitles: titles, overview: "Family saga." })]);
+  assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "hu"), "A keresztapa");
+  assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "en"), null);
+  assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, ""), null);
+});
+
 test("display helpers fill only blank library fields", () => {
   const online = mergeHits([hit({ source: "omdb", rating: 8.1, genres: ["Drama"] })]);
   assert.equal(displayRating(9.2, { ...online, fetchedAt: "" }).value, 9.2);
@@ -89,6 +102,7 @@ test("lookup uses TMDB details and then OMDb for the rating", async () => {
         genres: [{ name: "Drama" }, { name: "Crime" }],
         imdb_id: "tt0068646",
         external_ids: { imdb_id: "tt0068646", tvdb_id: null },
+        translations: { translations: [{ iso_639_1: "hu", data: { title: "A keresztapa" } }] },
       });
     }
     if (url.includes("omdbapi.com")) {
@@ -110,6 +124,7 @@ test("lookup uses TMDB details and then OMDb for the rating", async () => {
   assert.equal(result.status, "found");
   assert.equal(result.rating, 9.2);
   assert.equal(result.overview, "Family saga.");
+  assert.equal(result.localTitles.hu, "A keresztapa");
   assert.match(result.posterUrl ?? "", /poster\.jpg/);
 });
 
@@ -128,8 +143,10 @@ test("library rows attach saved online metadata", () => {
       overview: "Family saga.",
       posterUrl: "https://image.tmdb.org/poster.jpg",
       originalTitle: "The Godfather",
+      localTitles: { hu: "A keresztapa" },
       runtimeMinutes: 175,
       rating: 8.7,
+      contentRating: null,
       genres: ["Drama"],
       imdbId: "tt0068646",
       tmdbId: "238",
@@ -139,15 +156,11 @@ test("library rows attach saved online metadata", () => {
     },
     db,
   );
+  setMeta(db, "title_language", "hu");
   const library = queryLibrary(
     {
       kind: "all",
-      missing: false,
-      notInPlex: false,
-      notPlayable: false,
-      missingEnglish: false,
-      only3d: false,
-      hungarian: false,
+      rules: [],
       q: "Godfather",
       offset: 0,
       limit: 20,
@@ -155,6 +168,9 @@ test("library rows attach saved online metadata", () => {
     db,
   );
   const row = library.titles.find((title) => title.title === "The Godfather");
+  assert.equal(row?.localTitle, "A keresztapa");
+  const byLocal = queryLibrary({ kind: "all", rules: [], q: "keresztapa", offset: 0, limit: 20 }, db);
+  assert.equal(byLocal.titles.some((title) => title.title === "The Godfather"), true);
   assert.equal(row?.online?.overview, "Family saga.");
   assert.equal(row?.online?.runtimeMinutes, 175);
   const partTwo = library.titles.find((title) => title.title === "The Godfather Part II");

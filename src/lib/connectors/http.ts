@@ -1,23 +1,44 @@
+import type { ConnectorId } from "@/lib/types";
+
 export type ProgressUpdate = {
   message: string;
   fetched: number;
   total: number | null;
 };
 
-export function normalizeBaseUrl(input: string): string {
-  const trimmed = input.trim();
+export const DEFAULT_PORT: Record<ConnectorId, number> = {
+  plex: 32400,
+  radarr: 7878,
+  sonarr: 8989,
+  bazarr: 6767,
+};
+
+export function normalizeBaseUrl(input: string, defaultPort?: number): string {
+  let trimmed = input.trim();
   if (!trimmed) throw new Error("Enter a base URL.");
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) trimmed = `http://${trimmed}`;
   let url: URL;
   try {
     url = new URL(trimmed);
   } catch {
-    throw new Error("Enter a full URL, including http:// or https://.");
+    throw new Error("Enter an IP address or a full URL.");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Only http and https URLs are supported.");
   }
+  const authority = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0] ?? "";
+  if (defaultPort && !/:\d+$/.test(authority)) url.port = String(defaultPort);
   const path = url.pathname.replace(/\/+$/, "").replace(/\/api\/v3$/i, "").replace(/\/api$/i, "");
   return `${url.origin}${path}`;
+}
+
+export function rejectUrlAsKey(apiKey: string, baseUrl: string): string | null {
+  const key = apiKey.trim();
+  if (!key) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(key) || key === baseUrl.trim()) {
+    return "The API key field contains the server address. Paste the key from the app’s Settings → General → API Key, then Save.";
+  }
+  return null;
 }
 
 export async function fetchJson(url: string, headers: Record<string, string>, timeoutMs = 25000): Promise<unknown> {

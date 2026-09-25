@@ -15,8 +15,10 @@ export type SourceHit = {
   overview: string | null;
   posterUrl: string | null;
   originalTitle: string | null;
+  localTitles: Record<string, string>;
   runtimeMinutes: number | null;
   rating: number | null;
+  contentRating: string | null;
   genres: string[];
   imdbId: string | null;
   tmdbId: string | null;
@@ -68,8 +70,10 @@ export function blankHit(source: ProviderId): SourceHit {
     overview: null,
     posterUrl: null,
     originalTitle: null,
+    localTitles: {},
     runtimeMinutes: null,
     rating: null,
+    contentRating: null,
     genres: [],
     imdbId: null,
     tmdbId: null,
@@ -86,8 +90,10 @@ export function mergeHits(hits: SourceHit[], message: string | null = null): Omi
       overview: null,
       posterUrl: null,
       originalTitle: null,
+      localTitles: {},
       runtimeMinutes: null,
       rating: null,
+      contentRating: null,
       genres: [],
       imdbId: null,
       tmdbId: null,
@@ -113,8 +119,10 @@ export function mergeHits(hits: SourceHit[], message: string | null = null): Omi
     overview: cleanText(tmdb?.overview) ?? cleanText(omdb?.overview),
     posterUrl: cleanText(tmdb?.posterUrl) ?? cleanText(omdb?.posterUrl),
     originalTitle: cleanText(tmdb?.originalTitle) ?? cleanText(omdb?.originalTitle),
+    localTitles: tmdb?.localTitles ?? {},
     runtimeMinutes: tmdb?.runtimeMinutes ?? omdb?.runtimeMinutes ?? null,
     rating: parseRating(omdb?.rating) ?? parseRating(tmdb?.rating),
+    contentRating: omdb?.contentRating ?? tmdb?.contentRating ?? null,
     genres,
     imdbId: normalizeImdb(tmdb?.imdbId) ?? normalizeImdb(omdb?.imdbId),
     tmdbId: normalizeNumericId(tmdb?.tmdbId),
@@ -129,6 +137,31 @@ export function displayRating(local: number | null, online: OnlineMeta | null): 
     return { value: online.rating, source: online.sources.includes("omdb") ? "OMDb" : "TMDB" };
   }
   return { value: null, source: null };
+}
+
+export function localTitlesFromTranslations(value: unknown): Record<string, string> {
+  const container = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const list = container && Array.isArray(container.translations) ? container.translations : [];
+  const titles: Record<string, string> = {};
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const code = typeof row.iso_639_1 === "string" ? row.iso_639_1.trim().toLowerCase() : "";
+    const data = row.data && typeof row.data === "object" ? (row.data as Record<string, unknown>) : null;
+    const name = [data?.title, data?.name].find((entry) => typeof entry === "string" && entry.trim());
+    if (!code || typeof name !== "string") continue;
+    titles[code] = name.trim();
+  }
+  return titles;
+}
+
+export function displayLocalTitle(title: string, online: OnlineMeta | null, language: string | null): string | null {
+  const code = language?.trim().toLowerCase();
+  if (!code) return null;
+  const local = online?.localTitles?.[code]?.trim();
+  if (!local) return null;
+  if (normalizeTitle(local) === normalizeTitle(title)) return null;
+  return local;
 }
 
 export function displayGenres(local: string[], online: OnlineMeta | null): { genres: string[]; filled: boolean } {

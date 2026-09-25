@@ -1,4 +1,4 @@
-import { normalizeBaseUrl } from "@/lib/connectors/http";
+import { DEFAULT_PORT, normalizeBaseUrl, rejectUrlAsKey } from "@/lib/connectors/http";
 import { listConnectors, saveConnector } from "@/lib/db";
 import { CONNECTORS, type ConnectorId } from "@/lib/types";
 import { NextResponse } from "next/server";
@@ -27,7 +27,7 @@ export async function PUT(request: Request) {
   let baseUrl = typeof record.baseUrl === "string" ? record.baseUrl.trim() : "";
   if (baseUrl) {
     try {
-      baseUrl = normalizeBaseUrl(baseUrl);
+      baseUrl = normalizeBaseUrl(baseUrl, DEFAULT_PORT[id as ConnectorId]);
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Invalid URL." },
@@ -35,6 +35,8 @@ export async function PUT(request: Request) {
       );
     }
   }
+  const keyProblem = rejectUrlAsKey(apiKey, baseUrl);
+  if (keyProblem) return NextResponse.json({ error: keyProblem }, { status: 400 });
   if (enabled && (!baseUrl || !apiKey)) {
     return NextResponse.json(
       { error: "Add a base URL and key before enabling this connector." },

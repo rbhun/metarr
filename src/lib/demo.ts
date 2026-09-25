@@ -1,5 +1,5 @@
 import { rebuildCatalog } from "@/lib/catalog";
-import { clearCatalog, clearEnrichment, deleteAllSourceRecords, getDb, insertSourceRecords, saveEnrichment, setMeta } from "@/lib/db";
+import { clearLibrary, deleteAllSourceRecords, getDb, insertSourceRecords, saveEnrichment, setMeta } from "@/lib/db";
 import { enrichmentKey } from "@/lib/online";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { MediaFile, SourceDraft } from "@/lib/types";
@@ -14,6 +14,7 @@ function video(partial: Partial<MediaFile> & Pick<MediaFile, "path">): MediaFile
     is3d: partial.is3d ?? false,
     audioLanguages: partial.audioLanguages ?? ["English"],
     subtitleLanguages: partial.subtitleLanguages ?? ["English"],
+    bitrateKbps: partial.bitrateKbps ?? 8000,
   };
 }
 
@@ -39,10 +40,11 @@ export function demoRecords(): SourceDraft[] {
       tmdbId: "238",
       guid: "plex://movie/godfather",
       rating: 9.2,
+      contentRating: "R",
       genres: ["Crime", "Drama"],
       monitored: true,
     }),
-    godfatherFile,
+    { ...godfatherFile, bitrateKbps: 18000 },
   );
   const godfatherRadarr = movieFile(
     sourceDraft({
@@ -82,7 +84,8 @@ export function demoRecords(): SourceDraft[] {
     imdbId: "tt0071562",
     tmdbId: "240",
     rating: 9.0,
-    genres: ["Crime", "Drama"],
+    contentRating: "PG",
+    genres: [],
     monitored: true,
     wanted: true,
     hasFile: false,
@@ -675,8 +678,10 @@ function seedDemoOnline(db: ReturnType<typeof getDb>, fetchedAt: string) {
         overview: sample.overview,
         posterUrl: sample.posterUrl,
         originalTitle: sample.title,
+        localTitles: {},
         runtimeMinutes: sample.runtimeMinutes,
         rating: null,
+        contentRating: null,
         genres: [],
         imdbId: sample.imdbId,
         tmdbId: null,
@@ -690,15 +695,5 @@ function seedDemoOnline(db: ReturnType<typeof getDb>, fetchedAt: string) {
 }
 
 export function clearDemoLibrary() {
-  const db = getDb();
-  const write = db.transaction(() => {
-    deleteAllSourceRecords(db);
-    clearCatalog(db);
-    clearEnrichment(db);
-    setMeta(db, "demo", "0");
-    setMeta(db, "last_sync_status", "idle");
-    setMeta(db, "last_sync_notes", "[]");
-    setMeta(db, "last_sync_at", "");
-  });
-  write();
+  clearLibrary();
 }

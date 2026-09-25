@@ -1,4 +1,6 @@
-import { queryLibrary } from "@/lib/db";
+import { clearLibrary, queryLibrary } from "@/lib/db";
+import { parseRules } from "@/lib/filters";
+import { getSyncStatus } from "@/lib/sync";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -12,15 +14,18 @@ export async function GET(request: Request) {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? "50") || 50));
   const library = queryLibrary({
     kind,
-    missing: url.searchParams.get("missing") === "1",
-    notInPlex: url.searchParams.get("notInPlex") === "1",
-    notPlayable: url.searchParams.get("notPlayable") === "1",
-    missingEnglish: url.searchParams.get("missingEnglish") === "1",
-    only3d: url.searchParams.get("only3d") === "1",
-    hungarian: url.searchParams.get("hungarian") === "1",
+    rules: parseRules(url.searchParams.get("rules")),
     q: url.searchParams.get("q") ?? "",
     offset,
     limit,
   });
   return NextResponse.json(library);
+}
+
+export async function DELETE() {
+  if (getSyncStatus().running) {
+    return NextResponse.json({ error: "Wait for the sync to finish before clearing the library." }, { status: 409 });
+  }
+  clearLibrary();
+  return NextResponse.json({ ok: true });
 }

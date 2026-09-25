@@ -1,6 +1,6 @@
 import { collectLanguages, normalizeImdb, normalizeNumericId, parseYear } from "@/lib/media";
-import { sourceDraft } from "@/lib/source";
-import type { SourceDraft } from "@/lib/types";
+import { sourceDraft, withMedia } from "@/lib/source";
+import type { MediaFile, SourceDraft } from "@/lib/types";
 import { asRecord, fetchJson, normalizeBaseUrl, pagePayload, type ProgressUpdate } from "@/lib/connectors/http";
 
 function headers(apiKey: string): Record<string, string> {
@@ -18,7 +18,9 @@ export function parseBazarrMovie(value: unknown): SourceDraft | null {
   const radarrId = movie.radarrId ?? movie.radarrid;
   const imdbId = normalizeImdb(movie.imdbId ?? movie.imdbid);
   const externalKey = radarrId != null ? `radarr:${radarrId}` : imdbId ? `imdb:${imdbId}` : title;
-  return sourceDraft({
+  const audioLanguages = languageList(movie.audio_language ?? movie.audio_languages);
+  const subtitleLanguages = languageList(movie.subtitles);
+  const draft = sourceDraft({
     connector: "bazarr",
     kind: "movie",
     externalKey,
@@ -26,11 +28,26 @@ export function parseBazarrMovie(value: unknown): SourceDraft | null {
     year: parseYear(movie.year),
     imdbId,
     tmdbId: normalizeNumericId(movie.tmdbId ?? movie.tmdbid),
-    audioLanguages: languageList(movie.audio_language ?? movie.audio_languages),
-    subtitleLanguages: languageList(movie.subtitles),
+    audioLanguages,
+    subtitleLanguages,
     subtitleWanted: languageList(movie.missing_subtitles),
     monitored: true,
   });
+  const filePath = typeof movie.path === "string" ? movie.path.trim() : "";
+  if (!filePath) return draft;
+  const file: MediaFile = {
+    container: null,
+    path: filePath,
+    qualityName: null,
+    resolution: null,
+    hdr: "none",
+    is3d: false,
+    audioLanguages,
+    subtitleLanguages,
+    audioTracks: [],
+    subtitleTracks: [],
+  };
+  return withMedia(draft, [file], [title]);
 }
 
 export function parseBazarrEpisode(value: unknown): SourceDraft | null {
@@ -78,10 +95,11 @@ function numberOrNull(value: unknown): number | null {
 async function fetchPaged(
   baseUrl: string,
   apiKey: string,
-  resource: "movies" | "episodes",
+  resource: "movies" | "series",
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<unknown[]> {
   const collected: unknown[] = [];
+  const seen = new Set<string>();
   const pageSize = 100;
   let start = 0;
   let total: number | null = null;
@@ -93,7 +111,16 @@ async function fetchPaged(
     const batch = pagePayload(payload);
     if (total == null) total = batch.total;
     if (batch.items.length === 0) break;
-    collected.push(...batch.items);
+    let added = 0;
+    for (const item of batch.items) {
+      const record = asRecord(item);
+      const key = String(record?.radarrId ?? record?.sonarrSeriesId ?? record?.title ?? added);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(item);
+      added += 1;
+    }
+    if (added === 0) break;
     start += batch.items.length;
     onProgress({
       message: `Bazarr · ${resource} ${collected.length}${total != null ? `/${total}` : ""}`,
@@ -106,8 +133,16 @@ async function fetchPaged(
   return collected;
 }
 
+async function fetchSeriesEpisodes(baseUrl: string, apiKey: string, seriesId: string): Promise<unknown[]> {
+  const payload = await fetchJson(
+    `${baseUrl}/api/episodes?seriesid[]=${encodeURIComponent(seriesId)}`,
+    headers(apiKey),
+  );
+  return pagePayload(payload).items;
+}
+
 export async function testBazarr(baseUrl: string, apiKey: string): Promise<string> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 6767);
   const key = apiKey.trim();
   let payload: unknown;
   try {
@@ -134,14 +169,35 @@ export async function pullBazarr(
   apiKey: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<SourceDraft[]> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 6767);
   const key = apiKey.trim();
   const movies = (await fetchPaged(base, key, "movies", onProgress))
     .map(parseBazarrMovie)
     .filter((movie): movie is SourceDraft => Boolean(movie));
-  const episodes = (await fetchPaged(base, key, "episodes", onProgress))
-    .map(parseBazarrEpisode)
-    .filter((episode): episode is SourceDraft => Boolean(episode));
+  const series = (await fetchPaged(base, key, "series", onProgress)).map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => Boolean(item));
+  const episodes: SourceDraft[] = [];
+  for (const [index, show] of series.entries()) {
+    const seriesId = show.sonarrSeriesId ?? show.seriesId;
+    if (seriesId == null) continue;
+    onProgress({
+      message: `Bazarr · episodes ${index + 1}/${series.length}`,
+      fetched: index,
+      total: series.length,
+    });
+    const rows = await fetchSeriesEpisodes(base, key, String(seriesId));
+    for (const row of rows) {
+      const episode = asRecord(row);
+      if (!episode) continue;
+      const parsed = parseBazarrEpisode({
+        ...episode,
+        seriesTitle: typeof show.title === "string" ? show.title : episode.seriesTitle,
+        year: episode.year ?? show.year,
+        imdbId: episode.imdbId ?? show.imdbId,
+        tvdbId: episode.tvdbId ?? show.tvdbId,
+      });
+      if (parsed) episodes.push(parsed);
+    }
+  }
   const records = [...movies, ...episodes];
   onProgress({
     message: `Bazarr · ${movies.length} movies, ${episodes.length} episodes`,

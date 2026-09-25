@@ -1,14 +1,19 @@
 "use client";
 
 import { useShell } from "@/components/app-shell";
+import { DetectSettingsCard } from "@/components/detect-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { DEFAULT_PORT, normalizeBaseUrl } from "@/lib/connectors/http";
 import { formatWhen } from "@/lib/format";
+import { TITLE_LANGUAGES } from "@/lib/title-language";
 import { CONNECTOR_LABEL, PROVIDER_LABEL, type ConnectorId, type ConnectorSettings, type ProviderId, type ProviderSettings } from "@/lib/types";
+import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
@@ -48,7 +53,7 @@ const PROVIDER_HELP: Record<ProviderId, { secret: string; body: string }> = {
   },
   omdb: {
     secret: "OMDb API key",
-    body: "Key from omdbapi.com. Used for the IMDb rating and as a fallback plot and poster when TMDB has no match.",
+    body: "Key from omdbapi.com. Used for the IMDb rating and as a fallback plot and poster when TMDB has no match. The free key allows 1,000 lookups per UTC day; Metarr stops there.",
   },
 };
 
@@ -67,6 +72,53 @@ export function SettingsView() {
   const [reveal, setReveal] = useState<Partial<Record<ConnectorId, boolean>>>({});
   const [providers, setProviders] = useState<Partial<Record<ProviderId, { apiKey: string; enabled: boolean }>>>({});
   const [providerReveal, setProviderReveal] = useState<Partial<Record<ProviderId, boolean>>>({});
+  const [omdbUsed, setOmdbUsed] = useState<number | null>(null);
+  const [plexLibraries, setPlexLibraries] = useState<Array<{ key: string; title: string; type: "movie" | "show"; included: boolean }> | null>(null);
+  const [plexLibrariesOpen, setPlexLibrariesOpen] = useState(false);
+  const [plexLibraryError, setPlexLibraryError] = useState<string | null>(null);
+  const [titleLanguage, setTitleLanguage] = useState("");
+  const [fileBrowserUrl, setFileBrowserUrl] = useState("");
+  const [fileBrowserRoot, setFileBrowserRoot] = useState("");
+
+  async function refreshSaved() {
+    const response = await fetch("/api/connectors", { cache: "no-store" });
+    if (!response.ok) return;
+    const body = (await response.json()) as { connectors: ConnectorSettings[] };
+    setSaved(body.connectors);
+  }
+
+  async function loadPlexLibraries() {
+    setPlexLibraryError(null);
+    const response = await fetch("/api/plex/libraries", { cache: "no-store" });
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      libraries?: Array<{ key: string; title: string; type: "movie" | "show"; included: boolean }>;
+    } | null;
+    if (!response.ok) {
+      setPlexLibraries(null);
+      setPlexLibraryError(body?.error || "Plex libraries could not be loaded.");
+      return;
+    }
+    setPlexLibraries(body?.libraries ?? []);
+  }
+
+  async function savePlexLibraries() {
+    if (!plexLibraries) return;
+    setBusy("plex-libraries");
+    try {
+      const response = await fetch("/api/plex/libraries", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excluded: plexLibraries.filter((library) => !library.included).map((library) => library.key) }),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      toast.success("Plex library selection saved. The next sync skips the ones you turned off.");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not save the library selection.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function load() {
     setError(null);
@@ -85,11 +137,28 @@ export function SettingsView() {
       );
       const providerResponse = await fetch("/api/providers", { cache: "no-store" });
       if (providerResponse.ok) {
-        const providerBody = (await providerResponse.json()) as { providers: ProviderSettings[] };
+        const providerBody = (await providerResponse.json()) as {
+          providers: ProviderSettings[];
+          omdb?: { count: number };
+        };
         setProviders(
           Object.fromEntries(providerBody.providers.map((provider) => [provider.id, { apiKey: provider.apiKey, enabled: provider.enabled }])),
         );
+        if (typeof providerBody.omdb?.count === "number") setOmdbUsed(providerBody.omdb.count);
       }
+      const preferenceResponse = await fetch("/api/preferences", { cache: "no-store" });
+      if (preferenceResponse.ok) {
+        const preferenceBody = (await preferenceResponse.json()) as {
+          titleLanguage?: string;
+          fileBrowserUrl?: string;
+          fileBrowserRoot?: string;
+        };
+        setTitleLanguage(preferenceBody.titleLanguage ?? "");
+        setFileBrowserUrl(preferenceBody.fileBrowserUrl ?? "");
+        setFileBrowserRoot(preferenceBody.fileBrowserRoot ?? "");
+      }
+      const plex = body.connectors.find((connector) => connector.id === "plex");
+      if (plex?.baseUrl && plex.apiKey) await loadPlexLibraries();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load settings.");
     } finally {
@@ -121,6 +190,8 @@ export function SettingsView() {
       if (!response.ok) throw new Error(await readError(response));
       const body = (await response.json()) as { connectors: ConnectorSettings[] };
       setSaved(body.connectors);
+      const stored = body.connectors.find((connector) => connector.id === id);
+      if (stored) update(id, { baseUrl: stored.baseUrl });
       toast.success(`${CONNECTOR_LABEL[id]} saved on this machine.`);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not save.");
@@ -142,10 +213,10 @@ export function SettingsView() {
       const body = (await response.json().catch(() => null)) as { message?: string; error?: string } | null;
       if (!response.ok) throw new Error(body?.message || body?.error || "Connection failed.");
       toast.success(body?.message || "Connected.");
-      await load();
+      await refreshSaved();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Connection failed.");
-      await load();
+      await refreshSaved();
     } finally {
       setBusy(null);
     }
@@ -181,6 +252,21 @@ export function SettingsView() {
       toast.success("Demo library loaded. No server was contacted.");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not load the demo.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function clearStoredLibrary() {
+    if (!window.confirm("Remove every title stored in Metarr? Addresses and keys stay. Nothing is deleted on Plex or the *arr apps.")) return;
+    setBusy("clear-library");
+    try {
+      const response = await fetch("/api/library", { method: "DELETE" });
+      if (!response.ok) throw new Error(await readError(response));
+      bump();
+      toast.success("Library cleared. Server settings were kept.");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The library could not be cleared.");
     } finally {
       setBusy(null);
     }
@@ -249,6 +335,15 @@ export function SettingsView() {
                       placeholder={help.url}
                       autoComplete="off"
                       onChange={(event) => update(id, { baseUrl: event.target.value })}
+                      onBlur={() => {
+                        const current = forms[id]?.baseUrl ?? "";
+                        if (!current.trim()) return;
+                        try {
+                          update(id, { baseUrl: normalizeBaseUrl(current, DEFAULT_PORT[id]) });
+                        } catch {
+                          // Save and Test report the same validation error.
+                        }
+                      }}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -279,14 +374,58 @@ export function SettingsView() {
                       onCheckedChange={(checked) => update(id, { enabled: checked })}
                     />
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button size="sm" onClick={() => void save(id)} disabled={!form || busy === `save:${id}`}>
                       Save
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => void test(id)} disabled={!form || busy === `test:${id}`}>
                       Test connection
                     </Button>
+                    {id === "plex" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="ml-auto"
+                        aria-expanded={plexLibrariesOpen}
+                        onClick={() => setPlexLibrariesOpen((open) => !open)}
+                      >
+                        <ChevronRight className={`transition-transform ${plexLibrariesOpen ? "rotate-90" : ""}`} />
+                        Libraries
+                      </Button>
+                    ) : null}
                   </div>
+                  {id === "plex" && plexLibrariesOpen ? (
+                    <div className="space-y-2 rounded-lg border px-3 py-2">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        Choose which movie and TV libraries to read. Music and photo libraries are never synced.
+                      </p>
+                      {plexLibraryError ? <p className="text-xs text-rose-700 dark:text-rose-300">{plexLibraryError}</p> : null}
+                      {plexLibraries?.map((library) => (
+                        <label key={library.key} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={library.included}
+                            onCheckedChange={(value) =>
+                              setPlexLibraries((current) =>
+                                current?.map((item) => (item.key === library.key ? { ...item, included: value === true } : item)) ?? null,
+                              )
+                            }
+                            aria-label={`Include ${library.title}`}
+                          />
+                          <span>{library.title}</span>
+                          <span className="text-xs text-muted-foreground">{library.type === "movie" ? "Movies" : "Series"}</span>
+                        </label>
+                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => void loadPlexLibraries()} disabled={busy === "plex-libraries"}>
+                          Refresh libraries
+                        </Button>
+                        <Button size="sm" onClick={() => void savePlexLibraries()} disabled={!plexLibraries || busy === "plex-libraries"}>
+                          Save library selection
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                   {stored?.lastTestMessage ? (
                     <p className="text-xs leading-5 text-muted-foreground">
                       Last test {formatWhen(stored.lastTestAt)}: {stored.lastTestMessage}
@@ -304,6 +443,115 @@ export function SettingsView() {
             );
           })}
         </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>File Browser</CardTitle>
+              <CardDescription>
+                Opens the folder that contains a file. Paste the File Browser address, such as http://192.168.30.4:8080. If that app’s root is a folder rather than the whole disk, set the same path here so /mnt/media/Movies becomes /files/Movies.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="file-browser-url">Address</Label>
+                <Input
+                  id="file-browser-url"
+                  value={fileBrowserUrl}
+                  placeholder="http://192.168.30.4:8080"
+                  onChange={(event) => setFileBrowserUrl(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="file-browser-root">Files start at</Label>
+                <Input
+                  id="file-browser-root"
+                  value={fileBrowserRoot}
+                  placeholder="/mnt/media"
+                  onChange={(event) => setFileBrowserRoot(event.target.value)}
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled={busy === "file-browser"}
+                onClick={() => {
+                  setBusy("file-browser");
+                  void fetch("/api/preferences", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ fileBrowserUrl, fileBrowserRoot }),
+                  })
+                    .then(async (response) => {
+                      if (!response.ok) throw new Error(await readError(response));
+                      const saved = (await response.json()) as { fileBrowserUrl?: string; fileBrowserRoot?: string };
+                      setFileBrowserUrl(saved.fileBrowserUrl ?? "");
+                      setFileBrowserRoot(saved.fileBrowserRoot ?? "");
+                      bump();
+                      toast.success(saved.fileBrowserUrl ? "File Browser links are on." : "File Browser links are off.");
+                    })
+                    .catch((caught: unknown) => {
+                      toast.error(caught instanceof Error ? caught.message : "Could not save File Browser.");
+                    })
+                    .finally(() => setBusy(null));
+                }}
+              >
+                Save
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Secondary title</CardTitle>
+              <CardDescription>
+                Shows a title in the chosen language under the Plex title. The names come from TMDB during lookup and stay in the local database.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="title-language">Language</Label>
+                <select
+                  id="title-language"
+                  value={titleLanguage}
+                  className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  onChange={(event) => setTitleLanguage(event.target.value)}
+                >
+                  <option value="">Off</option>
+                  {TITLE_LANGUAGES.map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                size="sm"
+                disabled={busy === "title-language"}
+                onClick={() => {
+                  setBusy("title-language");
+                  void fetch("/api/preferences", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ titleLanguage }),
+                  })
+                    .then(async (response) => {
+                      if (!response.ok) throw new Error(await readError(response));
+                      bump();
+                      toast.success(titleLanguage ? "Secondary titles will show after a lookup." : "Secondary titles are off.");
+                    })
+                    .catch((caught: unknown) => {
+                      toast.error(caught instanceof Error ? caught.message : "Could not save the language.");
+                    })
+                    .finally(() => setBusy(null));
+                }}
+              >
+                Save
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <DetectSettingsCard />
 
         <div>
           <h2 className="text-base font-semibold tracking-tight">Online sources</h2>
@@ -326,6 +574,9 @@ export function SettingsView() {
                   <CardDescription>{help.body}</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
+                  {id === "omdb" && form?.enabled ? (
+                    <p className="text-xs text-muted-foreground">{omdbUsed ?? 0} of 1,000 lookups used today (UTC).</p>
+                  ) : null}
                   <div className="space-y-1.5">
                     <Label htmlFor={`${id}-key`}>{help.secret}</Label>
                     <div className="flex gap-2">
@@ -362,6 +613,21 @@ export function SettingsView() {
             );
           })}
         </div>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Stored library</CardTitle>
+            <CardDescription>
+              Clear removes the titles, episode rows, and online notes kept in the local database. Saved server addresses and keys stay.
+              Plex and the *arr apps are not changed. Sync again to refill the table.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button size="sm" variant="outline" onClick={() => void clearStoredLibrary()} disabled={busy === "clear-library"}>
+              Clear library
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card size="sm">
           <CardHeader>

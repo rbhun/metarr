@@ -13,6 +13,7 @@ import {
   insertSourceRecords,
   isDemo,
   listConnectors,
+  plexExcludedLibraries,
   recordConnectorSync,
   setMeta,
 } from "@/lib/db";
@@ -107,7 +108,7 @@ async function pullConnector(
   apiKey: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<SourceDraft[]> {
-  if (id === "plex") return pullPlex(baseUrl, apiKey, onProgress);
+  if (id === "plex") return pullPlex(baseUrl, apiKey, onProgress, plexExcludedLibraries());
   if (id === "radarr") return pullRadarr(baseUrl, apiKey, onProgress);
   if (id === "sonarr") return pullSonarr(baseUrl, apiKey, onProgress);
   return pullBazarr(baseUrl, apiKey, onProgress);

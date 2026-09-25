@@ -6,12 +6,7 @@ export const dynamic = "force-dynamic";
 export default function HomePage() {
   const initial = queryLibrary({
     kind: "all",
-    missing: false,
-    notInPlex: false,
-    notPlayable: false,
-    missingEnglish: false,
-    only3d: false,
-    hungarian: false,
+    rules: [],
     q: "",
     offset: 0,
     limit: 50,

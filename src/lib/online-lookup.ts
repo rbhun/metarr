@@ -1,5 +1,5 @@
-import { normalizeImdb, normalizeNumericId, parseRating, parseYear } from "@/lib/media";
-import { acceptSearchScore, blankHit, mergeHits, titleScore, type Identity, type SourceHit } from "@/lib/online";
+import { normalizeContentRating, normalizeImdb, normalizeNumericId, parseRating, parseYear } from "@/lib/media";
+import { acceptSearchScore, blankHit, localTitlesFromTranslations, mergeHits, titleScore, type Identity, type SourceHit } from "@/lib/online";
 import type { OnlineMeta, ProviderId, TitleKind } from "@/lib/types";
 
 type FetchLike = typeof fetch;
@@ -78,6 +78,7 @@ function hitFromTmdb(kind: TitleKind, body: Record<string, unknown>): SourceHit 
     overview: text(body.overview),
     posterUrl: posterFromPath(text(body.poster_path)),
     originalTitle: original && original !== title ? original : original,
+    localTitles: localTitlesFromTranslations(body.translations),
     runtimeMinutes: runtimeMinutes(kind === "movie" ? body.runtime : body.episode_run_time),
     rating: parseRating(body.vote_average),
     genres: genreNames(body.genres),
@@ -141,7 +142,7 @@ export async function lookupTmdb(identity: Identity, apiKey: string, fetchImpl: 
     if (!picked) return null;
     id = String(picked);
   }
-  const details = await tmdbGet(apiKey, `/${kindPath}/${id}?append_to_response=external_ids`, fetchImpl);
+  const details = await tmdbGet(apiKey, `/${kindPath}/${id}?append_to_response=external_ids,translations`, fetchImpl);
   const record = asRecord(details);
   if (!record) return null;
   return hitFromTmdb(identity.kind, record);
@@ -162,6 +163,7 @@ function omdbHit(body: Record<string, unknown>): SourceHit | null {
     originalTitle: title,
     runtimeMinutes: runtimeMinutes(body.Runtime),
     rating: parseRating(body.imdbRating),
+    contentRating: normalizeContentRating(body.Rated),
     genres,
     imdbId: normalizeImdb(body.imdbID),
   };
@@ -183,6 +185,9 @@ export async function lookupOmdb(identity: Identity, apiKey: string, fetchImpl: 
   const body = asRecord(await readJson(response));
   if (!body) return null;
   if (body.Error === "Invalid API key!") throw new ProviderError("omdb", "OMDb rejected the API key.");
+  if (typeof body.Error === "string" && /limit/i.test(body.Error)) {
+    throw new ProviderError("omdb", "OMDb daily request limit reached.");
+  }
   const hit = omdbHit(body);
   if (!hit) return null;
   if (!imdb && !acceptSearchScore(titleScore(text(body.Title) ?? "", parseYear(body.Year), identity))) return null;
@@ -221,6 +226,16 @@ export async function lookupOnline(
       problems.push(error instanceof Error ? error.message : "OMDb lookup failed.");
     }
   }
-  if (hits.length === 0 && problems.length) return mergeHits([], problems.join(" "));
-  return mergeHits(hits);
+  if (hits.length === 0 && problems.length) {
+    const merged = mergeHits([], problems.join(" "));
+    if (problems.includes("OMDb daily request limit reached.")) {
+      return { ...merged, message: "OMDb daily request limit reached." };
+    }
+    return merged;
+  }
+  const merged = mergeHits(hits);
+  if (problems.includes("OMDb daily request limit reached.")) {
+    return { ...merged, message: "OMDb daily request limit reached." };
+  }
+  return merged;
 }

@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Library, Menu, RefreshCw, Settings } from "lucide-react";
+import { Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -37,7 +37,7 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinks({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const pathname = usePathname();
   return (
     <nav className="flex flex-col gap-1">
@@ -49,13 +49,16 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             key={item.href}
             href={item.href}
             onClick={onNavigate}
+            title={collapsed ? item.label : undefined}
+            aria-label={item.label}
             className={cn(
               "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm",
+              collapsed && "justify-center px-2",
               active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
             )}
           >
             <Icon />
-            {item.label}
+            {collapsed ? <span className="sr-only">{item.label}</span> : item.label}
           </Link>
         );
       })}
@@ -68,6 +71,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [epoch, setEpoch] = useState(0);
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem("metarr-sidebar") === "collapsed");
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((value) => {
+      const next = !value;
+      window.localStorage.setItem("metarr-sidebar", next ? "collapsed" : "open");
+      return next;
+    });
+  }
   const bump = useCallback(() => setEpoch((value) => value + 1), []);
 
   const refresh = useCallback(async () => {
@@ -104,22 +120,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ShellContext.Provider value={{ status, epoch, startSync, bump }}>
       <div className="flex h-dvh bg-background text-foreground">
-        <aside className="hidden w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
-          <div className="px-4 py-4">
-            <p className="text-sm font-semibold tracking-tight">Metarr</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
-          </div>
-          <div className="px-3">
-            <NavLinks />
-          </div>
-          <div className="mt-auto space-y-3 p-3">
-            <Button className="w-full" onClick={() => void startSync()} disabled={status?.running}>
-              <RefreshCw className={status?.running ? "animate-spin" : undefined} />
-              {status?.running ? "Syncing" : "Sync metadata"}
+        <aside
+          className={cn(
+            "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex",
+            collapsed ? "w-14" : "w-60",
+          )}
+        >
+          <div className={cn("flex items-start gap-2 py-4", collapsed ? "justify-center px-2" : "px-4")}>
+            {collapsed ? null : (
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold tracking-tight">Metarr</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
+              onClick={toggleCollapsed}
+            >
+              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </Button>
-            <p className="px-1 text-[11px] leading-4 text-muted-foreground">
-              Metadata only. Video files stay on your servers.
-            </p>
+          </div>
+          <div className={cn(collapsed ? "px-2" : "px-3")}>
+            <NavLinks collapsed={collapsed} />
+          </div>
+          <div className={cn("mt-auto space-y-3", collapsed ? "p-2" : "p-3")}>
+            <Button
+              className={cn(collapsed ? "w-full px-0" : "w-full")}
+              aria-label={status?.running ? "Syncing" : "Sync metadata"}
+              onClick={() => void startSync()}
+              disabled={status?.running}
+            >
+              <RefreshCw className={status?.running ? "animate-spin" : undefined} />
+              {collapsed ? <span className="sr-only">{status?.running ? "Syncing" : "Sync metadata"}</span> : status?.running ? "Syncing" : "Sync metadata"}
+            </Button>
+            {collapsed ? null : (
+              <p className="px-1 text-[11px] leading-4 text-muted-foreground">
+                Metadata only. Video files stay on your servers.
+              </p>
+            )}
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">

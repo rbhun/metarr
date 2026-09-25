@@ -4,6 +4,8 @@ import {
   detect3d,
   detectHdr,
   normalizeContainer,
+  normalizeContentRating,
+  parseBitrateKbps,
   normalizeImdb,
   normalizeNumericId,
   normalizeResolution,
@@ -61,6 +63,7 @@ export function parseRadarrMovie(value: unknown): SourceDraft | null {
     rating: parseRating(
       asRecord(movie.ratings)?.value ?? asRecord(asRecord(movie.ratings)?.imdb)?.value ?? asRecord(asRecord(movie.ratings)?.tmdb)?.value,
     ),
+    contentRating: normalizeContentRating(movie.certification),
     genres: collectGenres(movie.genres),
     qualityName: quality,
     hdr,
@@ -79,6 +82,7 @@ export function parseRadarrMovie(value: unknown): SourceDraft | null {
         is3d,
         audioLanguages: audio,
         subtitleLanguages: subtitles,
+        bitrateKbps: parseBitrateKbps(media?.videoBitrate ?? media?.videoBitRate, "bps"),
       },
     ],
     [title, filePath, quality],
@@ -86,7 +90,7 @@ export function parseRadarrMovie(value: unknown): SourceDraft | null {
 }
 
 export async function testRadarr(baseUrl: string, apiKey: string): Promise<string> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 7878);
   const payload = asRecord(await fetchJson(`${base}/api/v3/system/status`, headers(apiKey.trim())));
   const appName = typeof payload?.appName === "string" ? payload.appName : "";
   if (appName && appName.toLowerCase() !== "radarr") {
@@ -101,7 +105,7 @@ export async function pullRadarr(
   apiKey: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<SourceDraft[]> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 7878);
   const key = apiKey.trim();
   onProgress({ message: "Radarr · requesting movies", fetched: 0, total: null });
   const payload = await fetchJson(`${base}/api/v3/movie`, headers(key));

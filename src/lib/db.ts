@@ -1,22 +1,33 @@
 import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
-import { enrichmentKey } from "@/lib/online";
+import { detectionMap } from "@/lib/detect/store";
+import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
+import { rulesWhere, type FilterRule } from "@/lib/filters";
+import { mergeAudioTracks, mergeSubtitleTracks } from "@/lib/media";
+import { displayLocalTitle, enrichmentKey } from "@/lib/online";
+import { titleLanguage } from "@/lib/title-language";
+import type { StoredDetection } from "@/lib/detect/store";
 import type {
+  AudioTrack,
   ConnectorId,
   ConnectorSettings,
   HdrLabel,
   LibraryEpisode,
+  MediaVersion,
   LibraryResponse,
   LibraryTitle,
+  MediaDetail,
   MediaFile,
   OnlineMeta,
   PlayableLabel,
   ProviderId,
   ProviderSettings,
   SourceDraft,
+  SubtitleTrack,
   SyncNote,
   TitleKind,
+  TitleNotes,
 } from "@/lib/types";
 import { CONNECTORS, PROVIDERS } from "@/lib/types";
 
@@ -33,9 +44,9 @@ export function getDb(): Database.Database {
     const db = new Database(file);
     db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");
-    migrate(db);
     globalForDb.__metarrDb = db;
   }
+  migrate(globalForDb.__metarrDb);
   return globalForDb.__metarrDb;
 }
 
@@ -177,15 +188,67 @@ export function migrate(db: Database.Database) {
       fetched_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS detect_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      priority TEXT NOT NULL,
+      status TEXT NOT NULL,
+      label TEXT NOT NULL,
+      format TEXT,
+      placement TEXT,
+      stream_label TEXT,
+      message TEXT,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS detect_results (
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      language TEXT,
+      role TEXT,
+      confidence REAL,
+      message TEXT,
+      scanned_at TEXT NOT NULL,
+      PRIMARY KEY (path, kind, ordinal)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_catalog_kind_sort ON catalog_titles(kind, sort_title);
     CREATE INDEX IF NOT EXISTS idx_episodes_catalog ON catalog_episodes(catalog_id, season, episode);
     CREATE INDEX IF NOT EXISTS idx_source_connector ON source_records(connector, kind);
+    CREATE INDEX IF NOT EXISTS idx_detect_jobs_status ON detect_jobs(status, priority, id);
   `);
 
   const titleColumns = db.prepare(`PRAGMA table_info(catalog_titles)`).all() as Array<{ name: string }>;
   if (!titleColumns.some((column) => column.name === "match_key")) {
     db.exec(`ALTER TABLE catalog_titles ADD COLUMN match_key TEXT`);
   }
+  ensureColumn(db, "catalog_titles", "content_rating", "TEXT");
+  ensureColumn(db, "catalog_titles", "bitrate_kbps", "INTEGER");
+  ensureColumn(db, "catalog_titles", "audio_tracks", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "catalog_titles", "subtitle_tracks", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "catalog_titles", "poster_path", "TEXT");
+  ensureColumn(db, "catalog_titles", "runtime_minutes", "INTEGER");
+  ensureColumn(db, "catalog_episodes", "audio_tracks", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "catalog_episodes", "subtitle_tracks", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "catalog_episodes", "runtime_minutes", "INTEGER");
+  ensureColumn(db, "catalog_episodes", "detail_json", "TEXT");
+  ensureColumn(db, "source_records", "content_rating", "TEXT");
+  ensureColumn(db, "source_records", "poster_path", "TEXT");
+  ensureColumn(db, "source_records", "runtime_minutes", "INTEGER");
+  ensureColumn(db, "source_records", "notes_json", "TEXT");
+  ensureColumn(db, "catalog_titles", "detail_json", "TEXT");
+  ensureColumn(db, "catalog_titles", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "catalog_titles", "version_resolutions", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_hdrs", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "enrichment", "content_rating", "TEXT");
+  ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);
 
   const now = new Date().toISOString();
@@ -211,6 +274,13 @@ type ConnectorRow = {
   last_sync_ok: number | null;
   last_sync_message: string | null;
 };
+
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
 
 function mapConnector(row: ConnectorRow): ConnectorSettings {
   return {
@@ -270,11 +340,11 @@ export function saveEnrichment(
 ) {
   db.prepare(
     `INSERT INTO enrichment (
-      match_key, kind, status, sources, overview, poster_url, original_title, runtime_minutes,
-      rating, genres, imdb_id, tmdb_id, tvdb_id, message, fetched_at
+      match_key, kind, status, sources, overview, poster_url, original_title, local_titles, runtime_minutes,
+      rating, content_rating, genres, imdb_id, tmdb_id, tvdb_id, message, fetched_at
     ) VALUES (
-      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @runtimeMinutes,
-      @rating, @genres, @imdbId, @tmdbId, @tvdbId, @message, @fetchedAt
+      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @localTitles, @runtimeMinutes,
+      @rating, @contentRating, @genres, @imdbId, @tmdbId, @tvdbId, @message, @fetchedAt
     )
     ON CONFLICT(match_key) DO UPDATE SET
       kind = excluded.kind,
@@ -283,8 +353,10 @@ export function saveEnrichment(
       overview = excluded.overview,
       poster_url = excluded.poster_url,
       original_title = excluded.original_title,
+      local_titles = excluded.local_titles,
       runtime_minutes = excluded.runtime_minutes,
       rating = excluded.rating,
+      content_rating = excluded.content_rating,
       genres = excluded.genres,
       imdb_id = excluded.imdb_id,
       tmdb_id = excluded.tmdb_id,
@@ -299,8 +371,10 @@ export function saveEnrichment(
     overview: meta.overview,
     posterUrl: meta.posterUrl,
     originalTitle: meta.originalTitle,
+    localTitles: JSON.stringify(meta.localTitles ?? {}),
     runtimeMinutes: meta.runtimeMinutes,
     rating: meta.rating,
+    contentRating: meta.contentRating,
     genres: JSON.stringify(meta.genres),
     imdbId: meta.imdbId,
     tmdbId: meta.tmdbId,
@@ -321,8 +395,10 @@ type EnrichmentRow = {
   overview: string | null;
   poster_url: string | null;
   original_title: string | null;
+  local_titles: string | null;
   runtime_minutes: number | null;
   rating: number | null;
+  content_rating: string | null;
   genres: string;
   imdb_id: string | null;
   tmdb_id: string | null;
@@ -330,6 +406,21 @@ type EnrichmentRow = {
   message: string | null;
   fetched_at: string;
 };
+
+function parseLocalTitles(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const titles: Record<string, string> = {};
+    for (const [code, name] of Object.entries(value)) {
+      if (typeof name === "string" && name.trim()) titles[code] = name.trim();
+    }
+    return titles;
+  } catch {
+    return {};
+  }
+}
 
 function mapEnrichment(row: EnrichmentRow): OnlineMeta {
   const sources = parseStringArray(row.sources).filter((source): source is ProviderId => source === "tmdb" || source === "omdb");
@@ -339,8 +430,10 @@ function mapEnrichment(row: EnrichmentRow): OnlineMeta {
     overview: row.overview,
     posterUrl: row.poster_url,
     originalTitle: row.original_title,
+    localTitles: parseLocalTitles(row.local_titles),
     runtimeMinutes: row.runtime_minutes,
     rating: row.rating,
+    contentRating: row.content_rating,
     genres: parseStringArray(row.genres),
     imdbId: row.imdb_id,
     tmdbId: row.tmdb_id,
@@ -467,6 +560,25 @@ export function setMeta(db: Database.Database, key: string, value: string) {
   ).run(key, value);
 }
 
+const PLEX_EXCLUDED_KEY = "plex_excluded_libraries";
+
+export function plexExcludedLibraries(db = getDb()): string[] {
+  const raw = getMeta(db, PLEX_EXCLUDED_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+export function savePlexExcludedLibraries(keys: string[], db = getDb()) {
+  const unique = [...new Set(keys.map((key) => key.trim()).filter(Boolean))];
+  setMeta(db, PLEX_EXCLUDED_KEY, JSON.stringify(unique));
+}
+
 export function isDemo(db = getDb()): boolean {
   return getMeta(db, "demo") === "1";
 }
@@ -505,9 +617,13 @@ type SourceRow = {
   subtitle_languages: string;
   subtitle_wanted: string;
   rating: number | null;
+  content_rating: string | null;
   genres: string;
   files_json: string;
   air_date: string | null;
+  poster_path: string | null;
+  runtime_minutes: number | null;
+  notes_json: string | null;
 };
 
 function asHdr(value: string | null | undefined): HdrLabel {
@@ -516,8 +632,19 @@ function asHdr(value: string | null | undefined): HdrLabel {
 }
 
 function asPlayable(value: string | null | undefined): PlayableLabel {
-  if (value === "video" || value === "disc" || value === "missing") return value;
+  if (value === "video" || value === "dvd" || value === "bluray" || value === "iso" || value === "dvd-iso" || value === "bluray-iso" || value === "disc" || value === "missing") {
+    return value;
+  }
   return "missing";
+}
+
+function parseJson(value: string | null | undefined): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function parseStringArray(value: string | null | undefined): string[] {
@@ -528,6 +655,90 @@ function parseStringArray(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+export function parseVersions(value: string | null | undefined): MediaVersion[] {
+  const parsed = parseJson(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item) => {
+    const version = asRecordTrack(item);
+    if (!version) return [];
+    const name = typeof version.name === "string" ? version.name : "File";
+    return [
+      {
+        name,
+        path: typeof version.path === "string" ? version.path : null,
+        container: typeof version.container === "string" ? version.container : null,
+        resolution: typeof version.resolution === "string" ? version.resolution : null,
+        hdr: asHdr(typeof version.hdr === "string" ? version.hdr : null),
+        is3d: version.is3d === true,
+        qualityName: typeof version.qualityName === "string" ? version.qualityName : null,
+        bitrateKbps: typeof version.bitrateKbps === "number" ? version.bitrateKbps : null,
+        playableLabel: asPlayable(typeof version.playableLabel === "string" ? version.playableLabel : null),
+        edition: typeof version.edition === "string" ? version.edition : null,
+        audioLanguages: Array.isArray(version.audioLanguages)
+          ? version.audioLanguages.filter((language): language is string => typeof language === "string")
+          : [],
+        subtitleLanguages: Array.isArray(version.subtitleLanguages)
+          ? version.subtitleLanguages.filter((language): language is string => typeof language === "string")
+          : [],
+        audioTracks: parseAudioTracks(version.audioTracks),
+        subtitleTracks: parseSubtitleTracks(version.subtitleTracks),
+        missing: Array.isArray(version.missing) ? version.missing.filter((gap): gap is string => typeof gap === "string") : [],
+        flags: Array.isArray(version.flags) ? version.flags.filter((flag): flag is string => flag === "sample" || flag === "short") : [],
+        fileBytes: typeof version.fileBytes === "number" ? version.fileBytes : null,
+        durationMinutes: typeof version.durationMinutes === "number" ? version.durationMinutes : null,
+      },
+    ];
+  });
+}
+
+function optionalIndex(value: unknown): number | null {
+  const index = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+export function parseAudioTracks(value: unknown): AudioTrack[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const track = asRecordTrack(item);
+    if (!track) return [];
+    const language = typeof track.language === "string" ? track.language : null;
+    const layout = typeof track.layout === "string" ? track.layout : null;
+    const codec = typeof track.codec === "string" ? track.codec : null;
+    if (!language && !layout && !codec) return [];
+    const streamIndex = optionalIndex(track.streamIndex);
+    const label = typeof track.label === "string" ? track.label : null;
+    return [{ language, layout, codec, ...(streamIndex != null ? { streamIndex } : {}), ...(label ? { label } : {}) }];
+  });
+}
+
+export function parseSubtitleTracks(value: unknown): SubtitleTrack[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const track = asRecordTrack(item);
+    if (!track) return [];
+    const placement = track.placement === "burn-in" || track.placement === "external" || track.placement === "internal" ? track.placement : "internal";
+    const streamIndex = optionalIndex(track.streamIndex);
+    const file = typeof track.file === "string" ? track.file : null;
+    return [{
+      language: typeof track.language === "string" ? track.language : null,
+      placement,
+      format: typeof track.format === "string" ? track.format : null,
+      forced: track.forced === true,
+      ...(streamIndex != null ? { streamIndex } : {}),
+      ...(file ? { file } : {}),
+    }];
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function asRecordTrack(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
 function parseFiles(value: string | null | undefined): MediaFile[] {
@@ -550,10 +761,93 @@ function parseFiles(value: string | null | undefined): MediaFile[] {
         subtitleLanguages: Array.isArray(file.subtitleLanguages)
           ? file.subtitleLanguages.filter((lang): lang is string => typeof lang === "string")
           : [],
+        audioTracks: parseAudioTracks(file.audioTracks),
+        subtitleTracks: parseSubtitleTracks(file.subtitleTracks),
+        bitrateKbps: typeof file.bitrateKbps === "number" && Number.isFinite(file.bitrateKbps) ? file.bitrateKbps : null,
+        videoCodec: typeof file.videoCodec === "string" ? file.videoCodec : null,
+        videoProfile: typeof file.videoProfile === "string" ? file.videoProfile : null,
+        frameRate: typeof file.frameRate === "string" ? file.frameRate : null,
+        width: typeof file.width === "number" ? file.width : null,
+        height: typeof file.height === "number" ? file.height : null,
+        bitDepth: typeof file.bitDepth === "number" ? file.bitDepth : null,
+        aspectRatio: typeof file.aspectRatio === "string" ? file.aspectRatio : null,
+        fileBytes: typeof file.fileBytes === "number" ? file.fileBytes : null,
+        durationMinutes: typeof file.durationMinutes === "number" ? file.durationMinutes : null,
       };
     });
   } catch {
     return [];
+  }
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+function parseNotes(raw: string | null): TitleNotes | null {
+  if (!raw) return null;
+  try {
+    const value = asRecord(JSON.parse(raw));
+    if (!value) return null;
+    return {
+      summary: typeof value.summary === "string" ? value.summary : null,
+      studio: typeof value.studio === "string" ? value.studio : null,
+      tagline: typeof value.tagline === "string" ? value.tagline : null,
+      released: typeof value.released === "string" ? value.released : null,
+      addedAt: typeof value.addedAt === "string" ? value.addedAt : null,
+      directors: stringList(value.directors),
+      writers: stringList(value.writers),
+      countries: stringList(value.countries),
+      collections: stringList(value.collections),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseDetail(raw: string | null): MediaDetail | null {
+  if (!raw) return null;
+  try {
+    const value = asRecord(JSON.parse(raw));
+    if (!value) return null;
+    const notes = parseNotes(JSON.stringify(value));
+    const files = Array.isArray(value.files)
+      ? value.files.flatMap((entry) => {
+          const file = asRecord(entry);
+          if (!file || typeof file.name !== "string") return [];
+          return [
+            {
+              name: file.name,
+              container: typeof file.container === "string" ? file.container : null,
+              resolution: typeof file.resolution === "string" ? file.resolution : null,
+              frameRate: typeof file.frameRate === "string" ? file.frameRate : null,
+              videoCodec: typeof file.videoCodec === "string" ? file.videoCodec : null,
+            },
+          ];
+        })
+      : [];
+    return {
+      summary: notes?.summary ?? null,
+      studio: notes?.studio ?? null,
+      tagline: notes?.tagline ?? null,
+      released: notes?.released ?? null,
+      addedAt: notes?.addedAt ?? null,
+      directors: notes?.directors ?? [],
+      writers: notes?.writers ?? [],
+      countries: notes?.countries ?? [],
+      collections: notes?.collections ?? [],
+      videoCodec: typeof value.videoCodec === "string" ? value.videoCodec : null,
+      videoProfile: typeof value.videoProfile === "string" ? value.videoProfile : null,
+      frameRate: typeof value.frameRate === "string" ? value.frameRate : null,
+      width: typeof value.width === "number" ? value.width : null,
+      height: typeof value.height === "number" ? value.height : null,
+      bitDepth: typeof value.bitDepth === "number" ? value.bitDepth : null,
+      aspectRatio: typeof value.aspectRatio === "string" ? value.aspectRatio : null,
+      fileBytes: typeof value.fileBytes === "number" ? value.fileBytes : null,
+      files,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -586,10 +880,16 @@ export function mapSourceRow(row: SourceRow): SourceDraft {
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
+    audioTracks: [],
+    subtitleTracks: [],
     rating: row.rating,
+    contentRating: row.content_rating,
     genres: parseStringArray(row.genres),
     files: parseFiles(row.files_json),
     airDate: row.air_date,
+    posterPath: row.poster_path,
+    runtimeMinutes: row.runtime_minutes,
+    notes: parseNotes(row.notes_json),
   };
 }
 
@@ -619,12 +919,12 @@ export function insertSourceRecords(db: Database.Database, records: SourceDraft[
       connector, kind, external_key, title, series_title, year, season, episode,
       imdb_id, tmdb_id, tvdb_id, guid, parent_key, has_file, wanted, monitored,
       container, path, quality_name, resolution, hdr, is_3d, audio_languages,
-      subtitle_languages, subtitle_wanted, rating, genres, files_json, air_date
+      subtitle_languages, subtitle_wanted, rating, content_rating, genres, files_json, air_date, poster_path, runtime_minutes, notes_json
     ) VALUES (
       @connector, @kind, @externalKey, @title, @seriesTitle, @year, @season, @episode,
       @imdbId, @tmdbId, @tvdbId, @guid, @parentKey, @hasFile, @wanted, @monitored,
       @container, @path, @qualityName, @resolution, @hdr, @is3d, @audioLanguages,
-      @subtitleLanguages, @subtitleWanted, @rating, @genres, @filesJson, @airDate
+      @subtitleLanguages, @subtitleWanted, @rating, @contentRating, @genres, @filesJson, @airDate, @posterPath, @runtimeMinutes, @notesJson
     )
     ON CONFLICT(connector, kind, external_key) DO UPDATE SET
       title = excluded.title,
@@ -650,9 +950,13 @@ export function insertSourceRecords(db: Database.Database, records: SourceDraft[
       subtitle_languages = excluded.subtitle_languages,
       subtitle_wanted = excluded.subtitle_wanted,
       rating = excluded.rating,
+      content_rating = excluded.content_rating,
       genres = excluded.genres,
       files_json = excluded.files_json,
-      air_date = excluded.air_date
+      air_date = excluded.air_date,
+      poster_path = excluded.poster_path,
+      runtime_minutes = excluded.runtime_minutes,
+      notes_json = excluded.notes_json
   `);
   for (const record of records) {
     stmt.run({
@@ -682,9 +986,13 @@ export function insertSourceRecords(db: Database.Database, records: SourceDraft[
       subtitleLanguages: JSON.stringify(record.subtitleLanguages),
       subtitleWanted: JSON.stringify(record.subtitleWanted),
       rating: record.rating,
+      contentRating: record.contentRating,
       genres: JSON.stringify(record.genres),
       filesJson: JSON.stringify(record.files),
       airDate: record.airDate,
+      posterPath: record.posterPath,
+      runtimeMinutes: record.runtimeMinutes,
+      notesJson: record.notes ? JSON.stringify(record.notes) : null,
     });
   }
 }
@@ -714,15 +1022,29 @@ type TitleRow = {
   subtitle_languages: string;
   subtitle_wanted: string;
   rating: number | null;
+  content_rating: string | null;
+  bitrate_kbps: number | null;
   genres: string;
   missing_reason: string | null;
   episode_count: number;
   episode_file_count: number;
   missing_episode_count: number;
   match_key: string | null;
+  audio_tracks: string | null;
+  subtitle_tracks: string | null;
+  poster_path: string | null;
+  runtime_minutes: number | null;
+  detail_json: string | null;
+  versions_json: string | null;
 };
 
-function mapTitle(row: TitleRow, online: OnlineMeta | null): LibraryTitle {
+function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, detections: Map<string, StoredDetection>): LibraryTitle {
+  const path = row.path;
+  const versions = parseVersions(row.versions_json).map((version) => ({
+    ...version,
+    audioTracks: overlayAudio(version.path, version.audioTracks, detections),
+    subtitleTracks: overlaySubtitles(version.path, version.subtitleTracks, detections),
+  }));
   return {
     id: row.id,
     kind: row.kind === "series" ? "series" : "movie",
@@ -747,8 +1069,17 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null): LibraryTitle {
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
+    audioTracks: overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
+    subtitleTracks: overlaySubtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    posterPath: row.poster_path,
+    runtimeMinutes: row.runtime_minutes,
+    detail: parseDetail(row.detail_json),
+    versions,
     rating: row.rating,
+    contentRating: row.content_rating,
+    bitrateKbps: row.bitrate_kbps,
     genres: parseStringArray(row.genres),
+    localTitle: displayLocalTitle(row.title, online, language),
     missingReason: row.missing_reason,
     episodeCount: row.episode_count,
     episodeFileCount: row.episode_file_count,
@@ -759,12 +1090,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null): LibraryTitle {
 
 export type LibraryQuery = {
   kind: "all" | TitleKind;
-  missing: boolean;
-  notInPlex: boolean;
-  notPlayable: boolean;
-  missingEnglish: boolean;
-  only3d: boolean;
-  hungarian: boolean;
+  rules: FilterRule[];
   q: string;
   offset: number;
   limit: number;
@@ -774,63 +1100,28 @@ function likePattern(value: string): string {
   return `%${value.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
-function jsonLanguage(column: string, language: string): string {
-  return `${column} LIKE '%"${language}"%'`;
-}
-
-function languageSql(language: string): string {
-  return `(
-    ${jsonLanguage("audio_languages", language)}
-    OR ${jsonLanguage("subtitle_languages", language)}
-    OR ${jsonLanguage("subtitle_wanted", language)}
-    OR EXISTS (
-      SELECT 1 FROM catalog_episodes e
-      WHERE e.catalog_id = catalog_titles.id
-        AND (
-          ${jsonLanguage("e.audio_languages", language)}
-          OR ${jsonLanguage("e.subtitle_languages", language)}
-          OR ${jsonLanguage("e.subtitle_wanted", language)}
-        )
-    )
-  )`;
-}
-
-function missingEnglishSql(): string {
-  return `(
-    ${jsonLanguage("subtitle_wanted", "English")}
-    OR (kind = 'movie' AND has_file = 1 AND NOT ${jsonLanguage("subtitle_languages", "English")})
-    OR EXISTS (
-      SELECT 1 FROM catalog_episodes e
-      WHERE e.catalog_id = catalog_titles.id
-        AND (
-          (e.has_file = 1 AND NOT ${jsonLanguage("e.subtitle_languages", "English")})
-          OR ${jsonLanguage("e.subtitle_wanted", "English")}
-        )
-    )
-  )`;
-}
-
-function filterClause(query: LibraryQuery): { where: string; params: Array<string | number> } {
+function filterClause(query: LibraryQuery, language: string): { where: string; params: Array<string | number> } {
   const where: string[] = [];
   const params: Array<string | number> = [];
   if (query.kind === "movie" || query.kind === "series") {
     where.push("kind = ?");
     params.push(query.kind);
   }
-  if (query.missing) {
-    where.push(
-      "((kind = 'movie' AND has_file = 0) OR (kind = 'series' AND (missing_episode_count > 0 OR has_file = 0)))",
-    );
-  }
-  if (query.notInPlex) where.push("in_plex = 0");
-  if (query.notPlayable) where.push("playable_label != 'video'");
-  if (query.missingEnglish) where.push(missingEnglishSql());
-  if (query.only3d) where.push("is_3d = 1");
-  if (query.hungarian) where.push(languageSql("Hungarian"));
+  const rules = rulesWhere(query.rules);
+  where.push(...rules.clauses);
+  params.push(...rules.params);
   const search = query.q.trim();
   if (search) {
-    where.push("title LIKE ? ESCAPE '\\'");
-    params.push(likePattern(search));
+    const pattern = likePattern(search);
+    if (language) {
+      where.push(
+        "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND json_extract(e.local_titles, ?) LIKE ? ESCAPE '\\'))",
+      );
+      params.push(pattern, `$.${language}`, pattern);
+    } else {
+      where.push("title LIKE ? ESCAPE '\\'");
+      params.push(pattern);
+    }
   }
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
@@ -841,7 +1132,8 @@ function countWhere(db: Database.Database, sql: string, params: Array<string | n
 }
 
 export function queryLibrary(query: LibraryQuery, db = getDb()): LibraryResponse {
-  const { where, params } = filterClause(query);
+  const language = titleLanguage(getMeta(db, "title_language"));
+  const { where, params } = filterClause(query, language);
   const filtered = countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles ${where}`, params);
   const rows = db
     .prepare(
@@ -886,6 +1178,8 @@ export function queryLibrary(query: LibraryQuery, db = getDb()): LibraryResponse
         ? lastSyncStatus
         : null,
     syncNotes,
+    fileBrowserUrl: getMeta(db, "file_browser_url") ?? "",
+    fileBrowserRoot: getMeta(db, "file_browser_root") ?? "",
     stats: {
       total: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles`),
       missing: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE ${missingSql}`),
@@ -893,18 +1187,63 @@ export function queryLibrary(query: LibraryQuery, db = getDb()): LibraryResponse
       notPlayable: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE playable_label != 'video'`),
     },
     page: { offset: query.offset, limit: query.limit, filtered },
-    titles: rows.map((row) => {
-      const key = row.match_key || enrichmentKey({
-        kind: row.kind === "series" ? "series" : "movie",
-        title: row.title,
-        year: row.year,
-        imdbId: row.imdb_id,
-        tmdbId: row.tmdb_id,
-        tvdbId: row.tvdb_id,
-      });
-      return mapTitle(row, onlineByKey.get(key) ?? null);
-    }),
+    titles: libraryTitles(rows, onlineByKey, language, db),
   };
+}
+
+function libraryTitles(
+  rows: TitleRow[],
+  onlineByKey: Map<string, OnlineMeta>,
+  language: string,
+  db: Database.Database,
+): LibraryTitle[] {
+  const detections = detectionMap(db);
+  const titles = rows.map((row) => {
+    const key = row.match_key || enrichmentKey({
+      kind: row.kind === "series" ? "series" : "movie",
+      title: row.title,
+      year: row.year,
+      imdbId: row.imdb_id,
+      tmdbId: row.tmdb_id,
+      tvdbId: row.tvdb_id,
+    });
+    return mapTitle(row, onlineByKey.get(key) ?? null, language, detections);
+  });
+  const seriesIds = titles.filter((title) => title.kind === "series").map((title) => title.id);
+  if (seriesIds.length === 0) return titles;
+  const placeholders = seriesIds.map(() => "?").join(", ");
+  const episodes = db
+    .prepare(
+      `SELECT catalog_id, path, audio_tracks, subtitle_tracks, versions_json
+       FROM catalog_episodes WHERE catalog_id IN (${placeholders})`,
+    )
+    .all(...seriesIds) as Array<{
+    catalog_id: number;
+    path: string | null;
+    audio_tracks: string | null;
+    subtitle_tracks: string | null;
+    versions_json: string | null;
+  }>;
+  const grouped = new Map<number, Array<{ audioTracks: AudioTrack[]; subtitleTracks: SubtitleTrack[] }>>();
+  for (const episode of episodes) {
+    const versions = parseVersions(episode.versions_json);
+    const audioTracks = versions.length
+      ? versions.flatMap((version) => overlayAudio(version.path, version.audioTracks, detections))
+      : overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections);
+    const subtitleTracks = versions.length
+      ? versions.flatMap((version) => overlaySubtitles(version.path, version.subtitleTracks, detections))
+      : overlaySubtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections);
+    const list = grouped.get(episode.catalog_id) ?? [];
+    list.push({ audioTracks, subtitleTracks });
+    grouped.set(episode.catalog_id, list);
+  }
+  for (const title of titles) {
+    const files = grouped.get(title.id);
+    if (!files?.length) continue;
+    title.audioTracks = mergeAudioTracks(files.map((file) => file.audioTracks));
+    title.subtitleTracks = mergeSubtitleTracks(files.map((file) => file.subtitleTracks));
+  }
+  return titles;
 }
 
 type EpisodeRow = {
@@ -928,9 +1267,15 @@ type EpisodeRow = {
   in_sonarr: number;
   in_bazarr: number;
   air_date: string | null;
+  audio_tracks: string | null;
+  subtitle_tracks: string | null;
+  runtime_minutes: number | null;
+  detail_json: string | null;
+  versions_json: string | null;
 };
 
 export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[] {
+  const detections = detectionMap(db);
   const rows = db
     .prepare(
       `SELECT * FROM catalog_episodes
@@ -955,11 +1300,33 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
+    audioTracks: overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
+    subtitleTracks: overlaySubtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    runtimeMinutes: row.runtime_minutes,
+    detail: parseDetail(row.detail_json),
+    versions: parseVersions(row.versions_json).map((version) => ({
+      ...version,
+      audioTracks: overlayAudio(version.path, version.audioTracks, detections),
+      subtitleTracks: overlaySubtitles(version.path, version.subtitleTracks, detections),
+    })),
     inPlex: row.in_plex === 1,
     inSonarr: row.in_sonarr === 1,
     inBazarr: row.in_bazarr === 1,
     airDate: row.air_date,
   }));
+}
+
+export function clearLibrary(db = getDb()) {
+  const write = db.transaction(() => {
+    deleteAllSourceRecords(db);
+    clearCatalog(db);
+    clearEnrichment(db);
+    setMeta(db, "demo", "0");
+    setMeta(db, "last_sync_status", "idle");
+    setMeta(db, "last_sync_notes", "[]");
+    setMeta(db, "last_sync_at", "");
+  });
+  write();
 }
 
 export function clearCatalog(db: Database.Database) {

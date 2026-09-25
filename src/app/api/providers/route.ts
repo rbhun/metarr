@@ -1,4 +1,5 @@
 import { listProviders, saveProvider } from "@/lib/db";
+import { omdbUsage } from "@/lib/omdb-quota";
 import { PROVIDERS, type ProviderId } from "@/lib/types";
 import { NextResponse } from "next/server";
 
@@ -6,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ providers: listProviders() });
+  return NextResponse.json({ providers: listProviders(), omdb: omdbUsage() });
 }
 
 export async function PUT(request: Request) {

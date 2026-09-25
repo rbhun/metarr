@@ -1,4 +1,4 @@
-import { mergeLanguages, summarizeFiles } from "@/lib/media";
+import { mergeAudioTracks, mergeLanguages, mergeSubtitleTracks, summarizeFiles } from "@/lib/media";
 import type { MediaFile, SourceDraft } from "@/lib/types";
 
 export function sourceDraft(
@@ -26,7 +26,13 @@ export function sourceDraft(
     audioLanguages: [],
     subtitleLanguages: [],
     subtitleWanted: [],
+    audioTracks: [],
+    subtitleTracks: [],
+    posterPath: null,
+    runtimeMinutes: null,
+    notes: null,
     rating: null,
+    contentRating: null,
     genres: [],
     files: [],
     airDate: null,
@@ -48,5 +54,7 @@ export function withMedia(draft: SourceDraft, files: MediaFile[], hints: Array<s
     is3d: summary.is3d || draft.is3d,
     audioLanguages: mergeLanguages(draft.audioLanguages, summary.audioLanguages),
     subtitleLanguages: mergeLanguages(draft.subtitleLanguages, summary.subtitleLanguages),
+    audioTracks: mergeAudioTracks([draft.audioTracks, summary.audioTracks]),
+    subtitleTracks: mergeSubtitleTracks([draft.subtitleTracks, summary.subtitleTracks]),
   };
 }

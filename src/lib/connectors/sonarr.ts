@@ -4,6 +4,8 @@ import {
   detect3d,
   detectHdr,
   isAired,
+  normalizeContentRating,
+  parseBitrateKbps,
   normalizeContainer,
   normalizeImdb,
   normalizeNumericId,
@@ -49,6 +51,7 @@ function fileMedia(file: Record<string, unknown>, title: string): MediaFile {
     is3d: detect3d([title, filePath, quality]),
     audioLanguages: collectLanguages(media?.audioLanguages ?? media?.audioLanguage ?? file.languages),
     subtitleLanguages: collectLanguages(media?.subtitles),
+    bitrateKbps: parseBitrateKbps(media?.videoBitrate ?? media?.videoBitRate, "bps"),
   };
 }
 
@@ -71,6 +74,7 @@ export function parseSonarrSeries(value: unknown): SourceDraft | null {
     hasFile: fileCount > 0,
     monitored: series.monitored !== false,
     rating: parseRating(asRecord(series.ratings)?.value),
+    contentRating: normalizeContentRating(series.certification),
     genres: collectGenres(series.genres),
   });
 }
@@ -119,7 +123,7 @@ export function parseSonarrEpisode(
 }
 
 export async function testSonarr(baseUrl: string, apiKey: string): Promise<string> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 8989);
   const payload = asRecord(await fetchJson(`${base}/api/v3/system/status`, headers(apiKey.trim())));
   const appName = typeof payload?.appName === "string" ? payload.appName : "";
   if (appName && appName.toLowerCase() !== "sonarr") {
@@ -134,7 +138,7 @@ export async function pullSonarr(
   apiKey: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<SourceDraft[]> {
-  const base = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl, 8989);
   const key = apiKey.trim();
   onProgress({ message: "Sonarr · requesting series", fetched: 0, total: null });
   const seriesPayload = await fetchJson(`${base}/api/v3/series`, headers(key));
