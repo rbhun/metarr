@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.13
+
+- Show the subtitle file next to the video first, under its English language name, even when the file name does not match the video. The picture-subtitle reader typechecks so the image build can finish.
+
 ## 0.0.12
 
 - One click on a series Unknown checks every episode that still has that track, and the episode list updates when a check finishes.

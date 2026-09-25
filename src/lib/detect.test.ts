@@ -17,6 +17,7 @@ import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages } from "@/lib/detect/pgs";
 import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
+import { shownLanguage } from "@/lib/format";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
 
@@ -104,6 +105,21 @@ test("a magyar label takes the hungarian sidecar and the unnamed file stays read
   assert.equal(tracks[2]?.language, "Magyar");
   assert.equal(tracks[0]?.language, null);
   assert.equal(tracks[0]?.file?.endsWith("TroyAtwood.srt"), true);
+});
+
+test("a hungarian subtitle with a different name still belongs to that video", () => {
+  const video = "/mnt/media/Movies/Crank - High Voltage (2009)/Crank 2 High Voltage 2009 (1080p x265 Joy).mkv";
+  const names = ["Crank 2 High Voltage 2009 (1080p x265 Joy).mkv", "Crank.2.High.Voltage.2009.HUN.srt"];
+  const tracks = assignSidecars(video, [
+    { language: "English", placement: "internal", format: "PGS", forced: false, streamIndex: 0 },
+    { language: "Magyar", placement: "external", format: "SRT", forced: false },
+  ], names);
+  assert.equal(tracks[1]?.file?.endsWith("HUN.srt"), true);
+  assert.equal(shownLanguage(tracks[1]!), "Hungarian");
+  const crowded = assignSidecars(video, [
+    { language: "Magyar", placement: "external", format: "SRT", forced: false },
+  ], ["Other Movie.mkv", "Crank.2.High.Voltage.2009.HUN.srt"]);
+  assert.equal(crowded[0]?.file, undefined);
 });
 
 test("a series unknown subtitle queues every episode that still has it", () => {

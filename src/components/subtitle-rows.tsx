@@ -30,9 +30,12 @@ export function SubtitleRows({
   if (tracks.length === 0) {
     return languages.length ? languages.map((language) => <p key={language}>{language}</p>) : <p>—</p>;
   }
+  const ordered = tracks
+    .map((track, index) => ({ track, index }))
+    .sort((left, right) => Number(left.track.placement !== "external") - Number(right.track.placement !== "external"));
   return (
     <>
-      {tracks.map((track, index) => {
+      {ordered.map(({ track, index }) => {
         const language = shownLanguage(track);
         const targets = subtitleTargets(path, track, index, label);
         const rest = subtitleNote(track);

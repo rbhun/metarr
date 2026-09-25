@@ -4,6 +4,7 @@ import { languageName, languageOptions } from "@/lib/media";
 import type { SubtitleTrack } from "@/lib/types";
 
 const SUBTITLE_EXT = /\.(srt|ass|ssa|vtt|sub|idx)$/i;
+const VIDEO_EXT = /\.(mkv|mp4|avi|m4v|ts|wmv|mov|m2ts|mts|mpg|mpeg|webm)$/i;
 const SKIP_TOKEN = /^(forced|sdh|cc|foreign|normal|default|hi)$/i;
 const KNOWN = new Set(languageOptions().map((name) => name.toLowerCase()));
 const listed = new Map<string, string[]>();
@@ -30,12 +31,21 @@ export function languageFromSubtitleName(fileName: string): string | null {
 
 export type Sidecar = { file: string; language: string | null };
 
-export function sidecarsIn(videoPath: string, names: string[]): Sidecar[] {
-  const directory = path.dirname(videoPath);
+function subtitleNames(videoPath: string, names: string[]): string[] {
   const stem = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
   if (!stem) return [];
-  return names
-    .filter((name) => SUBTITLE_EXT.test(name) && name.toLowerCase().startsWith(stem))
+  const matched = names.filter((name) => SUBTITLE_EXT.test(name) && name.toLowerCase().startsWith(stem));
+  if (matched.length > 0) return matched;
+  const subs = names.filter((name) => SUBTITLE_EXT.test(name));
+  if (subs.length !== 1) return [];
+  const base = path.basename(videoPath);
+  const otherVideo = names.some((name) => VIDEO_EXT.test(name) && name !== base);
+  return otherVideo ? [] : subs;
+}
+
+export function sidecarsIn(videoPath: string, names: string[]): Sidecar[] {
+  const directory = path.dirname(videoPath);
+  return subtitleNames(videoPath, names)
     .map((name) => ({ file: path.join(directory, name), language: languageFromSubtitleName(name) }))
     .sort((left, right) => left.file.localeCompare(right.file));
 }
@@ -57,6 +67,17 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
     if (!match) continue;
     track.file = match.file;
     used.add(match.file);
+  }
+  const unfilled = next.filter((track) => track.placement === "external" && !track.file);
+  const leftover = sidecars.filter((sidecar) => !used.has(sidecar.file));
+  if (unfilled.length === 1 && leftover.length === 1) {
+    const track = unfilled[0];
+    const choice = leftover[0];
+    if (track && choice && (!track.language || !choice.language || sameLanguage(track.language, choice.language))) {
+      track.file = choice.file;
+      used.add(choice.file);
+      if (!track.language && choice.language) track.language = choice.language;
+    }
   }
   const unknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
   const remaining = sidecars.filter((sidecar) => !used.has(sidecar.file));

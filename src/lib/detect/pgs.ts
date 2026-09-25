@@ -129,10 +129,10 @@ export function readPgsImages(data: Uint8Array): Bitmap[] {
         if (pending.rle.length >= expected) finishObject();
       } else if (pending) {
         const more = segment.subarray(4);
-        const joined = new Uint8Array(pending.rle.length + more.length);
-        joined.set(pending.rle);
+        const joined: Uint8Array = new Uint8Array(pending.rle.length + more.length);
+        joined.set(pending.rle, 0);
         joined.set(more, pending.rle.length);
-        pending = { ...pending, rle: joined };
+        pending = { width: pending.width, height: pending.height, expected: pending.expected, rle: joined };
         if (pending.rle.length >= pending.expected) finishObject();
       }
     } else if (type === 0x80) {

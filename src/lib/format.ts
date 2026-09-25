@@ -1,4 +1,4 @@
-import { playableName } from "@/lib/media";
+import { languageName, playableName } from "@/lib/media";
 import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack } from "@/lib/types";
 
 export function formatWhen(value: string | null | undefined): string {
@@ -62,7 +62,9 @@ export function formatLayout(layout: string | null | undefined): string | null {
 }
 
 export function shownLanguage(track: { language: string | null; detectedLanguage?: string | null }): string | null {
-  return track.language || track.detectedLanguage || null;
+  const value = track.language || track.detectedLanguage || null;
+  if (!value) return null;
+  return languageName(value) ?? value;
 }
 
 export function audioLines(tracks: AudioTrack[], languages: string[]): string[] {
