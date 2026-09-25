@@ -12,6 +12,7 @@ import { claimNextJob, enqueueTargets, saveDetection } from "@/lib/detect/store"
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
+import { pictureExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -81,6 +82,33 @@ test("an untagged sidecar takes its language from the file name and is not a thi
   assert.equal(tracks[1]?.language, "Hungarian");
   assert.equal(tracks[1]?.file?.endsWith(".hu.srt"), true);
   assert.equal(languageFromSubtitleName("movie.you.srt"), null);
+});
+
+test("a magyar label takes the hungarian sidecar and the unnamed file stays readable", () => {
+  const video = "/mnt/media/Movies/All That Jazz (1979)/All That Jazz[1979]_TroyAtwood.avi";
+  const names = [
+    "All That Jazz[1979]_TroyAtwood.srt",
+    "All That Jazz[1979]_TroyAtwood.en.srt",
+    "All That Jazz[1979]_TroyAtwood.hu.srt",
+  ];
+  const tracks = assignSidecars(video, [
+    { language: null, placement: "external", format: "SRT", forced: false },
+    { language: "English", placement: "external", format: "SRT", forced: false },
+    { language: "Magyar", placement: "external", format: "SRT", forced: false },
+  ], names);
+  assert.equal(tracks[1]?.file?.endsWith(".en.srt"), true);
+  assert.equal(tracks[2]?.file?.endsWith(".hu.srt"), true);
+  assert.equal(tracks[2]?.language, "Magyar");
+  assert.equal(tracks[0]?.language, null);
+  assert.equal(tracks[0]?.file?.endsWith("TroyAtwood.srt"), true);
+});
+
+test("picture subtitles are drawn as images before they are read", () => {
+  const args = pictureExtractArgs("/movies/Aliens.mkv", 2, 600, "/tmp/cue-%02d.png");
+  assert.match(args[args.indexOf("-filter_complex") + 1] ?? "", /\[0:s:2\].*fps=1\/3\[sub\]/);
+  assert.equal(args[args.indexOf("-map") + 1], "[sub]");
+  assert.equal(args[args.indexOf("-c:v") + 1], "png");
+  assert.equal(args.includes("0:s:2"), false);
 });
 
 test("text language detection reads english and hungarian subtitles", () => {

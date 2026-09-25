@@ -40,6 +40,11 @@ export function sidecarsIn(videoPath: string, names: string[]): Sidecar[] {
     .sort((left, right) => left.file.localeCompare(right.file));
 }
 
+function sameLanguage(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false;
+  return (languageName(left) ?? left).toLowerCase() === (languageName(right) ?? right).toLowerCase();
+}
+
 export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
   if (!videoPath || names.length === 0) return tracks;
   const sidecars = sidecarsIn(videoPath, names);
@@ -48,15 +53,15 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   const next = tracks.map((track) => ({ ...track }));
   for (const track of next) {
     if (track.file || track.placement !== "external" || !track.language) continue;
-    const match = sidecars.find((sidecar) => !used.has(sidecar.file) && sidecar.language?.toLowerCase() === track.language?.toLowerCase());
+    const match = sidecars.find((sidecar) => !used.has(sidecar.file) && sameLanguage(sidecar.language, track.language));
     if (!match) continue;
     track.file = match.file;
     used.add(match.file);
   }
   const unknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
   const remaining = sidecars.filter((sidecar) => !used.has(sidecar.file));
-  const claimed = new Set(next.map((track) => track.language?.toLowerCase()).filter((language): language is string => Boolean(language)));
-  const open = remaining.filter((sidecar) => !sidecar.language || !claimed.has(sidecar.language.toLowerCase()));
+  const claimed = next.map((track) => track.language).filter((language): language is string => Boolean(language));
+  const open = remaining.filter((sidecar) => !sidecar.language || !claimed.some((language) => sameLanguage(sidecar.language, language)));
   const choice = unknown.length === 1 ? (open.length === 1 ? open[0] : remaining.length === 1 ? remaining[0] : null) : null;
   if (unknown[0] && choice) {
     unknown[0].file = choice.file;

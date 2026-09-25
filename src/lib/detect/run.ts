@@ -8,6 +8,7 @@ import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
 import type { DetectJob } from "@/lib/detect/store";
+import { pictureExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
@@ -179,29 +180,29 @@ async function ocrLanguages(): Promise<string> {
   return (chosen.length ? chosen : [...installed].slice(0, 1)).join("+") || "eng";
 }
 
+async function pictureFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
+  let empty: Error | null = null;
+  for (const start of [600, 1500]) {
+    for (const name of fs.readdirSync(directory)) fs.rmSync(path.join(directory, name), { force: true });
+    try {
+      await runCommand("ffmpeg", pictureExtractArgs(file, ordinal, start, path.join(directory, "cue-%02d.png")), 180_000);
+    } catch (error) {
+      const failed = error instanceof Error ? error : new Error(String(error));
+      if (!/empty|nothing was written|no filtered frames/i.test(failed.message)) throw failed;
+      empty = failed;
+      continue;
+    }
+    const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
+    if (frames.length > 0) return frames;
+  }
+  if (empty) throw empty;
+  return [];
+}
+
 async function detectPictureSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
   try {
-    await runCommand("ffmpeg", [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-y",
-      "-ss",
-      "300",
-      "-i",
-      file,
-      "-map",
-      `0:s:${job.ordinal}`,
-      "-frames:v",
-      "4",
-      "-vf",
-      "scale=960:-1",
-      "-c:v",
-      "png",
-      path.join(directory, "cue-%02d.png"),
-    ]);
-    const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
+    const frames = await pictureFrames(file, job.ordinal, directory);
     if (frames.length === 0) return { language: null, role: null, confidence: 0, message: "No subtitle images could be read." };
     const languages = await ocrLanguages();
     const pieces: string[] = [];

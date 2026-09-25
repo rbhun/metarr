@@ -4,7 +4,7 @@ import { enqueueTrack } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { UnknownLabel } from "@/components/marked-text";
 import { subtitleTarget } from "@/lib/detect/track";
-import { shownLanguage } from "@/lib/format";
+import { shownLanguage, subtitleNote } from "@/lib/format";
 import type { SubtitleTrack } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -34,9 +34,8 @@ export function SubtitleRows({
     <>
       {tracks.map((track, index) => {
         const language = shownLanguage(track);
-        const place = track.placement === "burn-in" ? "burn-in" : track.placement;
         const target = subtitleTarget(path, track, index, label);
-        const rest = [place, track.format, track.forced ? "forced" : null].filter(Boolean).join(" · ");
+        const rest = subtitleNote(track);
         return (
           <p key={`${track.placement}-${track.format ?? ""}-${track.streamIndex ?? index}`}>
             {language ? language : <UnknownLabel onClick={target ? () => void detectUnknown(target) : undefined} />}

@@ -84,11 +84,16 @@ export function formatAudio(tracks: AudioTrack[], languages: string[]): string {
   return lines.length === 1 && lines[0] === "—" ? "—" : lines.join(", ");
 }
 
+export function subtitleNote(track: { placement: string; format: string | null; forced: boolean }): string {
+  const place = track.placement === "burn-in" ? "burn-in" : track.placement === "external" ? "external" : null;
+  return [track.format, place, track.forced ? "forced" : null].filter(Boolean).join(" · ");
+}
+
 export function subtitleLines(tracks: SubtitleTrack[], languages: string[]): string[] {
   if (tracks.length > 0) {
     const lines = tracks.map((track) => {
-      const place = track.placement === "burn-in" ? "burn-in" : track.placement;
-      return [shownLanguage(track) ?? "Unknown", place, track.format, track.forced ? "forced" : null].filter(Boolean).join(" · ");
+      const note = subtitleNote(track);
+      return [shownLanguage(track) ?? "Unknown", note || null].filter(Boolean).join(" · ");
     });
     return lines.length ? lines : ["—"];
   }

@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.10
+
+- Read PGS and VobSub pictures by drawing each bitmap as an image before guessing the language.
+
+## 0.0.9
+
+- Attach a Hungarian sidecar when Plex calls it Magyar, and show whether a subtitle is SRT, PGS, or VobSub.
+
 ## 0.0.8
 
 - Read a Hungarian subtitle saved in Central European encoding, and accept it when it is clearly ahead of the next guess.

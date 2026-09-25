@@ -12,6 +12,7 @@ type DetectJobView = {
   kind: "audio" | "subtitle";
   priority: "immediate" | "window";
   status: "pending" | "running" | "done" | "failed" | "skipped";
+  format: string | null;
   message: string | null;
 };
 
@@ -154,6 +155,7 @@ export function DetectTasks({
                 </div>
                 <p className="text-xs leading-5 text-muted-foreground">
                   {job.kind === "audio" ? "Audio" : "Subtitle"}
+                  {job.format ? ` · ${job.format}` : ""}
                   {job.message ? ` · ${job.message}` : ""}
                 </p>
               </div>
