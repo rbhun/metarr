@@ -31,5 +31,9 @@ export async function enqueueDetection(mode: "now" | "queue", titles: number[], 
 }
 
 export async function enqueueTrack(track: DetectRequest): Promise<string> {
-  return postDetection({ tracks: [track] }, "now");
+  return enqueueTracks([track]);
+}
+
+export async function enqueueTracks(tracks: DetectRequest[]): Promise<string> {
+  return postDetection({ tracks }, "now");
 }

@@ -299,24 +299,28 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     };
   }, [kind, rules, debounced, offset, epoch]);
 
-  async function toggleEpisodes(title: LibraryTitle) {
+  function toggleEpisodes(title: LibraryTitle) {
     if (title.kind !== "series") return;
-    if (openId === title.id) {
-      setOpenId(null);
-      return;
-    }
-    setOpenId(title.id);
-    if (episodes[title.id] && episodes[title.id] !== "error") return;
-    setEpisodes((current) => ({ ...current, [title.id]: "loading" }));
-    try {
-      const response = await fetch(`/api/library/${title.id}/episodes`, { cache: "no-store" });
-      if (!response.ok) throw new Error("episodes");
-      const body = (await response.json()) as { episodes: LibraryEpisode[] };
-      setEpisodes((current) => ({ ...current, [title.id]: body.episodes }));
-    } catch {
-      setEpisodes((current) => ({ ...current, [title.id]: "error" }));
-    }
+    setOpenId((current) => (current === title.id ? null : title.id));
   }
+
+  useEffect(() => {
+    if (openId == null) return;
+    const controller = new AbortController();
+    setEpisodes((current) => ({ ...current, [openId]: current[openId] && current[openId] !== "error" ? current[openId] : "loading" }));
+    void (async () => {
+      try {
+        const response = await fetch(`/api/library/${openId}/episodes`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("episodes");
+        const body = (await response.json()) as { episodes: LibraryEpisode[] };
+        setEpisodes((current) => ({ ...current, [openId]: body.episodes }));
+      } catch {
+        if (controller.signal.aborted) return;
+        setEpisodes((current) => ({ ...current, [openId]: "error" }));
+      }
+    })();
+    return () => controller.abort();
+  }, [epoch, openId]);
 
   async function clearLibrary() {
     if (!window.confirm("Remove every title stored in Metarr? Addresses and keys stay. Nothing is deleted on Plex or the *arr apps.")) return;

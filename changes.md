@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.12
+
+- One click on a series Unknown checks every episode that still has that track, and the episode list updates when a check finishes.
+
+## 0.0.11
+
+- Copy a PGS track out of the video instead of decoding the movie, and crop a VobSub picture down to the text.
+
 ## 0.0.10
 
 - Read PGS and VobSub pictures by drawing each bitmap as an image before guessing the language.

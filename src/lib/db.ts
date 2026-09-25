@@ -5,7 +5,7 @@ import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
-import { mergeAudioTracks, mergeSubtitleTracks } from "@/lib/media";
+import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
 import { displayLocalTitle, enrichmentKey } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -1244,24 +1244,31 @@ function libraryTitles(
     subtitle_tracks: string | null;
     versions_json: string | null;
   }>;
-  const grouped = new Map<number, Array<{ audioTracks: AudioTrack[]; subtitleTracks: SubtitleTrack[] }>>();
+  const grouped = new Map<number, Array<{ path: string | null; audioTracks: AudioTrack[]; subtitleTracks: SubtitleTrack[] }>>();
   for (const episode of episodes) {
     const versions = parseVersions(episode.versions_json);
-    const audioTracks = versions.length
-      ? versions.flatMap((version) => overlayAudio(version.path, version.audioTracks, detections))
-      : overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections);
-    const subtitleTracks = versions.length
-      ? versions.flatMap((version) => subtitles(version.path, version.subtitleTracks, detections))
-      : subtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections);
+    const files = versions.length
+      ? versions.map((version) => ({
+          path: version.path,
+          audioTracks: overlayAudio(version.path, version.audioTracks, detections),
+          subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
+        }))
+      : [
+          {
+            path: episode.path,
+            audioTracks: overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections),
+            subtitleTracks: subtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections),
+          },
+        ];
     const list = grouped.get(episode.catalog_id) ?? [];
-    list.push({ audioTracks, subtitleTracks });
+    list.push(...files);
     grouped.set(episode.catalog_id, list);
   }
   for (const title of titles) {
     const files = grouped.get(title.id);
     if (!files?.length) continue;
-    title.audioTracks = mergeAudioTracks(files.map((file) => file.audioTracks));
-    title.subtitleTracks = mergeSubtitleTracks(files.map((file) => file.subtitleTracks));
+    title.audioTracks = rollupAudio(files);
+    title.subtitleTracks = rollupSubtitles(files);
   }
   return titles;
 }

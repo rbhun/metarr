@@ -11,8 +11,11 @@ import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, enqueueTargets, saveDetection } from "@/lib/detect/store";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
+import { rollupSubtitles } from "@/lib/detect/rollup";
+import { subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
-import { pictureExtractArgs } from "@/lib/detect/picture";
+import { readPgsImages } from "@/lib/detect/pgs";
+import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -103,12 +106,75 @@ test("a magyar label takes the hungarian sidecar and the unnamed file stays read
   assert.equal(tracks[0]?.file?.endsWith("TroyAtwood.srt"), true);
 });
 
-test("picture subtitles are drawn as images before they are read", () => {
-  const args = pictureExtractArgs("/movies/Aliens.mkv", 2, 600, "/tmp/cue-%02d.png");
-  assert.match(args[args.indexOf("-filter_complex") + 1] ?? "", /\[0:s:2\].*fps=1\/3\[sub\]/);
+test("a series unknown subtitle queues every episode that still has it", () => {
+  const tracks = rollupSubtitles([
+    {
+      path: "/tv/Show/S01E01.mkv",
+      subtitleTracks: [{ language: null, placement: "internal", format: "SRT", forced: false, streamIndex: 0, detectedLanguage: "Hungarian" }],
+    },
+    {
+      path: "/tv/Show/S01E02.mkv",
+      subtitleTracks: [{ language: null, placement: "internal", format: "SRT", forced: false, streamIndex: 0 }],
+    },
+    {
+      path: "/tv/Show/S01E03.mkv",
+      subtitleTracks: [{ language: null, placement: "internal", format: "SRT", forced: false, streamIndex: 0 }],
+    },
+  ]);
+  const unknown = tracks.find((track) => !track.language && !track.detectedLanguage);
+  const known = tracks.find((track) => track.detectedLanguage === "Hungarian");
+  assert.deepEqual(unknown?.copies?.map((copy) => copy.path), ["/tv/Show/S01E02.mkv", "/tv/Show/S01E03.mkv"]);
+  assert.equal(known?.copies, undefined);
+  const queued = subtitleTargets(null, unknown ?? tracks[0]!, 0, "Show");
+  assert.deepEqual(queued.map((target) => target.path), ["/tv/Show/S01E02.mkv", "/tv/Show/S01E03.mkv"]);
+});
+
+test("a pgs subtitle is copied out of the video instead of decoding the picture", () => {
+  const args = pgsCopyArgs("/movies/Adjustment.m2ts", 4, 300, "/tmp/track.sup");
+  assert.equal(args[args.indexOf("-map") + 1], "0:s:4");
+  assert.equal(args[args.indexOf("-c") + 1], "copy");
+  assert.equal(args.includes("-filter_complex"), false);
+  assert.equal(args.at(-2), "sup");
+});
+
+test("a vobsub picture is drawn as an image and cropped to the text", () => {
+  const args = vobsubExtractArgs("/movies/Aliens.mkv", 2, 600, "/tmp/cue-%02d.png");
+  assert.match(args[args.indexOf("-filter_complex") + 1] ?? "", /\[0:s:2\].*\[sub\]/);
   assert.equal(args[args.indexOf("-map") + 1], "[sub]");
   assert.equal(args[args.indexOf("-c:v") + 1], "png");
-  assert.equal(args.includes("0:s:2"), false);
+});
+
+test("pgs bitmap text is read back from the subtitle stream", () => {
+  const palette = Buffer.from([
+    0, 0,
+    0, 16, 128, 128, 0,
+    1, 235, 128, 128, 255,
+  ]);
+  const rows: number[] = [];
+  for (let line = 0; line < 16; line += 1) {
+    const ink = line >= 3 && line < 13;
+    if (!ink) rows.push(0x00, 0x10, 0x00, 0x00);
+    else rows.push(0x00, 0x03, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00, 0x00);
+  }
+  const rle = Buffer.from(rows);
+  const object = Buffer.alloc(11 + rle.length);
+  object[3] = 0xc0;
+  object.writeUIntBE(4 + rle.length, 4, 3);
+  object.writeUInt16BE(16, 7);
+  object.writeUInt16BE(16, 9);
+  rle.copy(object, 11);
+  const packet = (type: number, body: Buffer) => {
+    const header = Buffer.alloc(13);
+    header[0] = 0x50;
+    header[1] = 0x47;
+    header[10] = type;
+    header.writeUInt16BE(body.length, 11);
+    return Buffer.concat([header, body]);
+  };
+  const images = readPgsImages(Buffer.concat([packet(0x14, palette), packet(0x15, object), packet(0x80, Buffer.alloc(0))]));
+  assert.equal(images.length, 1);
+  assert.ok((images[0]?.width ?? 0) >= 8);
+  assert.ok(images[0]?.rgba.includes(255));
 });
 
 test("text language detection reads english and hungarian subtitles", () => {

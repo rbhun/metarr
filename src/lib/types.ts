@@ -48,6 +48,7 @@ export type AudioTrack = {
   label?: string | null;
   detectedLanguage?: string | null;
   detectedRole?: "commentary" | null;
+  copies?: Array<{ path: string; ordinal: number }>;
 };
 
 export type SubtitlePlacement = "burn-in" | "internal" | "external";
@@ -60,6 +61,7 @@ export type SubtitleTrack = {
   streamIndex?: number | null;
   file?: string | null;
   detectedLanguage?: string | null;
+  copies?: Array<{ path: string; ordinal: number }>;
 };
 
 export type MediaFile = {

@@ -8,7 +8,8 @@ import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
 import type { DetectJob } from "@/lib/detect/store";
-import { pictureExtractArgs } from "@/lib/detect/picture";
+import { readPgsImages, writePng } from "@/lib/detect/pgs";
+import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
@@ -173,49 +174,88 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
   }
 }
 
-async function ocrLanguages(): Promise<string> {
+async function ocrLanguages(): Promise<string[]> {
   const { stdout, stderr } = await runCommand("tesseract", ["--list-langs"], 20_000);
   const installed = new Set(`${stdout}\n${stderr}`.split("\n").map((line) => line.trim()).filter((line) => /^[a-z0-9_]+$/i.test(line) && line !== "osd"));
   const chosen = ["eng", "hun"].filter((language) => installed.has(language));
-  return (chosen.length ? chosen : [...installed].slice(0, 1)).join("+") || "eng";
+  return chosen.length ? chosen : [...installed].slice(0, 1);
 }
 
-async function pictureFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
-  let empty: Error | null = null;
-  for (const start of [600, 1500]) {
-    for (const name of fs.readdirSync(directory)) fs.rmSync(path.join(directory, name), { force: true });
+function clearDirectory(directory: string) {
+  for (const name of fs.readdirSync(directory)) fs.rmSync(path.join(directory, name), { force: true });
+}
+
+async function pgsFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
+  const sup = path.join(directory, "track.sup");
+  for (const start of [300, 900]) {
+    clearDirectory(directory);
     try {
-      await runCommand("ffmpeg", pictureExtractArgs(file, ordinal, start, path.join(directory, "cue-%02d.png")), 180_000);
+      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup), 60_000);
     } catch (error) {
       const failed = error instanceof Error ? error : new Error(String(error));
-      if (!/empty|nothing was written|no filtered frames/i.test(failed.message)) throw failed;
-      empty = failed;
+      if (!/empty|nothing was written/i.test(failed.message)) throw failed;
       continue;
     }
+    if (!fs.existsSync(sup) || fs.statSync(sup).size < 32) continue;
+    const images = readPgsImages(fs.readFileSync(sup)).slice(0, 4);
+    images.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
+    fs.rmSync(sup, { force: true });
     const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
     if (frames.length > 0) return frames;
   }
-  if (empty) throw empty;
   return [];
+}
+
+async function tightenFrame(file: string) {
+  const probed = await runCommand("ffmpeg", ["-hide_banner", "-i", file, "-vf", "cropdetect=limit=24:round=2:reset=0", "-f", "null", "-"], 20_000);
+  const crop = `${probed.stdout}\n${probed.stderr}`.match(/crop=(\d+:\d+:\d+:\d+)/g)?.at(-1)?.slice("crop=".length);
+  if (!crop) return;
+  const [width, height] = crop.split(":").map((part) => Number(part));
+  if (!width || !height || width < 8 || height < 8 || height > 400) return;
+  const tight = file.replace(/\.png$/, ".tight.png");
+  await runCommand(
+    "ffmpeg",
+    ["-hide_banner", "-loglevel", "error", "-y", "-i", file, "-vf", `crop=${crop},scale=iw*3:ih*3:flags=neighbor,pad=24:24:12:12:black`, tight],
+    20_000,
+  );
+  fs.renameSync(tight, file);
+}
+
+async function vobsubFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
+  await runCommand("ffmpeg", vobsubExtractArgs(file, ordinal, 600, path.join(directory, "cue-%02d.png")), 60_000);
+  const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
+  for (const name of frames) {
+    try {
+      await tightenFrame(path.join(directory, name));
+    } catch {
+      // Keep the original frame when the crop cannot be measured.
+    }
+  }
+  return frames;
 }
 
 async function detectPictureSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
   try {
-    const frames = await pictureFrames(file, job.ordinal, directory);
+    const frames = job.format === "PGS" ? await pgsFrames(file, job.ordinal, directory) : await vobsubFrames(file, job.ordinal, directory);
     if (frames.length === 0) return { language: null, role: null, confidence: 0, message: "No subtitle images could be read." };
     const languages = await ocrLanguages();
-    const pieces: string[] = [];
-    for (const frame of frames) {
-      const { stdout } = await runCommand("tesseract", [path.join(directory, frame), "stdout", "-l", languages], 60_000);
-      pieces.push(stdout);
+    let best = { language: null as string | null, confidence: 0 };
+    for (const language of languages.length ? languages : ["eng"]) {
+      const pieces: string[] = [];
+      for (const frame of frames) {
+        const { stdout } = await runCommand("tesseract", [path.join(directory, frame), "stdout", "-l", language, "--psm", "6"], 60_000);
+        const letters = stdout.match(/\p{L}/gu)?.length ?? 0;
+        if (letters >= 8) pieces.push(stdout);
+      }
+      const detected = detectTextLanguage(pieces.join(" "));
+      if (detected.language && detected.confidence > best.confidence) best = detected;
     }
-    const detected = detectTextLanguage(pieces.join(" "));
     return {
-      language: detected.language,
+      language: best.language,
       role: null,
-      confidence: detected.confidence,
-      message: detected.language ? null : "This language cannot be reliably recognized.",
+      confidence: best.confidence,
+      message: best.language ? null : "This language cannot be reliably recognized.",
     };
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

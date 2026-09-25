@@ -1,10 +1,10 @@
 "use client";
 
-import { enqueueTrack } from "@/components/detect-actions";
+import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { UnknownLabel } from "@/components/marked-text";
-import { audioTarget } from "@/lib/detect/track";
+import { audioTargets } from "@/lib/detect/track";
 import { formatLayout } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
 import { toast } from "sonner";
@@ -61,9 +61,9 @@ function Dts({ hd }: { hd?: boolean }) {
   );
 }
 
-async function detectUnknown(track: NonNullable<ReturnType<typeof audioTarget>>) {
+async function detectUnknown(tracks: ReturnType<typeof audioTargets>) {
   try {
-    toastDetection(await enqueueTrack(track));
+    toastDetection(await enqueueTracks(tracks));
   } catch (caught) {
     toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
   }
@@ -101,10 +101,10 @@ export function AudioTracks({
           commentary: track.detectedRole === "commentary",
           layout: formatLayout(track.layout),
           codec: track.codec,
-          target: audioTarget(path, track, index, label),
+          targets: audioTargets(path, track, index, label),
         }))
         .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, layout: null, codec: null, target: null }));
+    : languages.map((language) => ({ language, commentary: false, layout: null, codec: null, targets: [] }));
 
   if (rows.length === 0) return <p>—</p>;
 
@@ -116,7 +116,7 @@ export function AudioTracks({
               {row.commentary ? " commentary" : ""}
             </span>
           ) : (
-            <UnknownLabel onClick={row.target ? () => void detectUnknown(row.target!) : undefined} />
+            <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
           )}
           {row.layout ? <span className="font-mono text-[0.92em] tabular-nums">{row.layout}</span> : null}
           <CodecMark codec={row.codec} />
