@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { audioClipArgs, sampleOffsets } from "@/lib/detect/audio";
+import { audioClipArgs, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
@@ -54,6 +54,23 @@ async function durationSeconds(file: string): Promise<number | null> {
     return Number.isFinite(duration) && duration > 0 ? duration : null;
   } catch {
     return null;
+  }
+}
+
+async function streamLayout(file: string, ordinal: number): Promise<{ layout: string | null; channels: number | null }> {
+  try {
+    const { stdout } = await runCommand(
+      "ffprobe",
+      ["-v", "error", "-select_streams", `a:${ordinal}`, "-show_entries", "stream=channel_layout,channels", "-of", "json", file],
+      30_000,
+    );
+    const body = JSON.parse(stdout) as { streams?: Array<{ channel_layout?: unknown; channels?: unknown }> };
+    const stream = body.streams?.[0];
+    const layout = typeof stream?.channel_layout === "string" ? stream.channel_layout : null;
+    const channels = typeof stream?.channels === "number" ? stream.channels : null;
+    return { layout, channels };
+  } catch {
+    return { layout: null, channels: null };
   }
 }
 
@@ -143,15 +160,23 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
   try {
     const offsets = sampleOffsets(await durationSeconds(file));
+    const heard = await streamLayout(file, job.ordinal);
+    const mix = dialogueMix(heard.layout, heard.channels);
     const samples: Array<{ language: string; probability: number }> = [];
     const transcript: string[] = [];
     for (const [index, offset] of offsets.entries()) {
       const wav = path.join(directory, `clip-${index}.wav`);
-      try {
-        await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav), 60_000);
-      } catch {
-        continue;
+      let extracted = false;
+      for (const filter of mix ? [mix, null] : [null]) {
+        try {
+          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav, filter), 60_000);
+          extracted = true;
+          break;
+        } catch {
+          // A surround track with no center channel keeps the plain downmix.
+        }
       }
+      if (!extracted) continue;
       if (!fs.existsSync(wav) || fs.statSync(wav).size < 8_000) continue;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
@@ -256,7 +281,7 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
       for (const frame of frames) {
         const { stdout } = await runCommand("tesseract", [path.join(directory, frame), "stdout", "-l", language, "--psm", "6"], 60_000);
         const letters = stdout.match(/\p{L}/gu)?.length ?? 0;
-        if (letters >= 8) pieces.push(stdout);
+        if (letters >= 3) pieces.push(stdout);
       }
       const detected = detectTextLanguage(pieces.join(" "));
       if (detected.language && detected.confidence > best.confidence) best = detected;

@@ -1,5 +1,10 @@
 # Changes
 
+## 0.0.16
+
+- On a surround track, listen to the center and the front left and right, about 70% from the center, and leave the surrounds out.
+- Read the letters on a picture subtitle instead of the gray box behind them, and keep short lines such as the ones in 1917.
+
 ## 0.0.15
 
 - Take an unknown audio sample from the first minutes of the file, and keep the Dolby Digital packets in that window, so a seek does not come back empty.

@@ -15,7 +15,7 @@ import { rollupSubtitles } from "@/lib/detect/rollup";
 import { subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
-import { audioClipArgs, sampleOffsets } from "@/lib/detect/audio";
+import { audioClipArgs, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
 import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { shownLanguage } from "@/lib/format";
@@ -153,6 +153,10 @@ test("an audio sample is taken from the first minutes and keeps the decoded pack
   assert.ok(args.indexOf("-t") < args.indexOf("-i"));
   assert.equal(args[args.indexOf("-map") + 1], "0:a:0");
   assert.equal(args[args.indexOf("-c:a") + 1], "pcm_s16le");
+  const surround = audioClipArgs("/movies/Adjustment.m2ts", 0, 90, "/tmp/clip.wav", dialogueMix("5.1", 6));
+  assert.equal(surround[surround.indexOf("-af") + 1], "pan=mono|c0=0.7*FC+0.15*FL+0.15*FR");
+  assert.equal(dialogueMix("stereo", 2), null);
+  assert.equal(dialogueMix("5.1(side)", 6), "pan=mono|c0=0.7*FC+0.15*FL+0.15*FR");
 });
 
 test("a pgs subtitle is copied out of the video instead of decoding the picture", () => {
@@ -205,6 +209,41 @@ test("pgs bitmap text is read back from the subtitle stream", () => {
   const scaled = scaleBitmap(images[0]!, 3);
   assert.equal(scaled.width, (images[0]?.width ?? 0) * 3);
   assert.ok(scaled.rgba.includes(255));
+});
+
+test("pgs keeps the letters and drops the box behind them", () => {
+  const packet = (type: number, body: Buffer) => {
+    const header = Buffer.alloc(13);
+    header[0] = 0x50;
+    header[1] = 0x47;
+    header[10] = type;
+    header.writeUInt16BE(body.length, 11);
+    return Buffer.concat([header, body]);
+  };
+  const frame = (palette: Buffer, text: number) => {
+    const pixels: number[] = [];
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 0; x < 16; x += 1) pixels.push(y === 8 && x >= 4 && x < 12 ? text : 1);
+    }
+    const rle = Buffer.from(pixels);
+    const object = Buffer.alloc(11 + rle.length);
+    object[3] = 0xc0;
+    object.writeUIntBE(4 + rle.length, 4, 3);
+    object.writeUInt16BE(16, 7);
+    object.writeUInt16BE(16, 9);
+    rle.copy(object, 11);
+    const images = readPgsImages(Buffer.concat([packet(0x14, palette), packet(0x15, object), packet(0x80, Buffer.alloc(0))]));
+    const bitmap = images[0];
+    let white = 0;
+    if (bitmap) {
+      for (let index = 0; index < bitmap.rgba.length; index += 4) if (bitmap.rgba[index] === 255) white += 1;
+    }
+    return white;
+  };
+  const brightOnGray = Buffer.from([0, 0, 1, 128, 128, 128, 255, 2, 235, 128, 128, 255]);
+  const darkOnWhite = Buffer.from([0, 0, 1, 235, 128, 128, 255, 2, 16, 128, 128, 255]);
+  assert.equal(frame(brightOnGray, 2), 8);
+  assert.equal(frame(darkOnWhite, 2), 8);
 });
 
 test("text language detection reads english and hungarian subtitles", () => {

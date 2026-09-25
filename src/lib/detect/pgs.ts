@@ -40,17 +40,40 @@ function decodeRle(data: Uint8Array, width: number, height: number): Uint8Array 
   return pixels;
 }
 
+function glyphIndex(indexes: Uint8Array, palette: Map<number, PaletteEntry>): number | null {
+  const counts = new Map<number, number>();
+  for (const index of indexes) {
+    const entry = palette.get(index);
+    const alpha = entry?.a ?? (index === 0 ? 0 : 255);
+    if (alpha <= 16) continue;
+    counts.set(index, (counts.get(index) ?? 0) + 1);
+  }
+  const colors = [...counts.entries()].map(([id, count]) => ({
+    id,
+    count,
+    y: palette.get(id)?.y ?? (id === 0 ? 0 : 235),
+  }));
+  if (colors.length === 0) return null;
+  const largest = colors.reduce((best, color) => (color.count > best.count ? color : best));
+  const brightest = colors.reduce((best, color) => (color.y > best.y ? color : best));
+  if (brightest.id !== largest.id && largest.count > brightest.count * 2) return brightest.id;
+  if (brightest.count <= indexes.length * 0.45) return brightest.id;
+  const darker = colors
+    .filter((color) => color.id !== largest.id && color.y + 40 < largest.y)
+    .sort((left, right) => right.count - left.count);
+  return darker[0]?.id ?? brightest.id;
+}
+
 function toBitmap(indexes: Uint8Array, width: number, height: number, palette: Map<number, PaletteEntry>): Bitmap | null {
+  const glyph = glyphIndex(indexes, palette);
+  if (glyph == null) return null;
   let left = width;
   let top = height;
   let right = 0;
   let bottom = 0;
   const ink = new Uint8Array(indexes.length);
   for (let index = 0; index < indexes.length; index += 1) {
-    const entry = palette.get(indexes[index] ?? 0);
-    const alpha = entry?.a ?? ((indexes[index] ?? 0) === 0 ? 0 : 255);
-    const luma = entry?.y ?? ((indexes[index] ?? 0) === 0 ? 0 : 235);
-    if (alpha <= 16 || luma <= 40) continue;
+    if ((indexes[index] ?? 0) !== glyph) continue;
     ink[index] = 1;
     const x = index % width;
     const y = Math.floor(index / width);
