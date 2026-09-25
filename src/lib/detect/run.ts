@@ -9,6 +9,7 @@ import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
 import type { DetectJob } from "@/lib/detect/store";
 import { isPictureSubtitle } from "@/lib/detect/targets";
+import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { languageName } from "@/lib/media";
@@ -243,7 +244,7 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
       if (bytes === 0 || noisy / bytes > 0.02) {
         return { language: null, role: null, confidence: 0, message: "The subtitle file is not readable text." };
       }
-      raw = sample.toString("utf8");
+      raw = decodeSubtitleBytes(sample);
     } finally {
       fs.closeSync(handle);
     }

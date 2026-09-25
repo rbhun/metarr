@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.8
+
+- Read a Hungarian subtitle saved in Central European encoding, and accept it when it is clearly ahead of the next guess.
+
 ## 0.0.7
 
 - Leave a subtitle Unknown when the language match is too weak to trust.

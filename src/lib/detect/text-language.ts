@@ -39,7 +39,7 @@ const MEDIA_LANGUAGES = [
 ];
 
 const MAX_DIFFERENCE = 300;
-const MIN_SCORE = 0.16;
+const MIN_GAP = 0.02;
 
 const models = new Map<string, Record<string, number>>();
 for (const languages of Object.values(data)) {
@@ -65,6 +65,7 @@ export function detectTextLanguage(text: string): { language: string | null; con
   if (tuples.length === 0) return { language: null, confidence: 0 };
   let bestCode = "";
   let bestScore = 0;
+  let secondScore = 0;
   for (const [code, model] of models) {
     let distance = 0;
     for (const [trigram, count] of tuples) {
@@ -74,11 +75,14 @@ export function detectTextLanguage(text: string): { language: string | null; con
     }
     const score = 1 - distance / (tuples.length * MAX_DIFFERENCE);
     if (score > bestScore) {
+      secondScore = bestScore;
       bestScore = score;
       bestCode = code;
+    } else if (score > secondScore) {
+      secondScore = score;
     }
   }
-  if (!bestCode || bestScore < MIN_SCORE) return { language: null, confidence: bestScore };
+  if (!bestCode || bestScore - secondScore < MIN_GAP) return { language: null, confidence: bestScore };
   const language = languageName(bestCode);
   return language ? { language, confidence: bestScore } : { language: null, confidence: bestScore };
 }

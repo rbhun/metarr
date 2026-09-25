@@ -11,6 +11,7 @@ import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, enqueueTargets, saveDetection } from "@/lib/detect/store";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
+import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -87,8 +88,20 @@ test("text language detection reads english and hungarian subtitles", () => {
   const hungarian = Array(6).fill("Becsukta az ajtót, és kiment a konyhába, miközben az eső újra eleredt az üres utcán.").join(" ");
   assert.equal(detectTextLanguage(english).language, "English");
   assert.equal(detectTextLanguage(hungarian).language, "Hungarian");
+  assert.equal(detectTextLanguage("Szia, hogy vagy? Nem tudom, hol hagytam a kulcsot. Gyere be, esik az eső. Kat, ezt nem hiszem el. Patrick azt mondta, hogy holnap találkozunk. Nincs időm erre a hülyeségre.").language, "Hungarian");
   assert.equal(detectTextLanguage("Hi").language, null);
   assert.equal(detectTextLanguage("AVI LIST hdrl avih strl movi idx1 JUNK RIFF WAVE fmt data LIST INFO ISFT Lavf BPS DURATION NUMBER OF FRAMES".repeat(4)).language, null);
+});
+
+test("a central european subtitle is decoded before the language is guessed", () => {
+  const stored = Buffer.from(
+    "Szia, hogy vagy? Nem tudom, hol hagytam a kulcsot. Gyere be, esik az es\u00f5. \u00d5 azt hitte, hogy szerelmes bel\u00e9d. Nincs id\u00f5m erre a h\u00fclyes\u00e9gre.",
+    "latin1",
+  );
+  const text = decodeSubtitleBytes(stored);
+  assert.match(text, /eső/);
+  assert.equal(stored.toString("utf8").includes("eső"), false);
+  assert.equal(detectTextLanguage(text).language, "Hungarian");
 });
 
 test("unknown audio and subtitles are scanned, labeled tracks and discs are not", () => {
