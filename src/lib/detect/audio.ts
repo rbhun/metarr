@@ -1,10 +1,7 @@
-/** Early windows, so a transport stream is not read halfway through for an empty clip. */
+/** One window just after the opening. A closer one is only used when that clip is empty. */
 export function sampleOffsets(duration: number | null): number[] {
-  if (duration == null || duration < 90) return [15];
-  const latest = Math.max(20, Math.floor(duration - 30));
-  return [90, 300, 600]
-    .map((offset) => Math.min(offset, latest))
-    .filter((offset, index, all) => all.indexOf(offset) === index);
+  if (duration != null && duration < 60) return [Math.max(1, Math.floor(duration / 3))];
+  return [45, 12];
 }
 
 const CENTERED = /^(?:3\.0|4\.0|5\.0|5\.1|6\.0|6\.1|7\.0|7\.1)(?:\(|$)/;

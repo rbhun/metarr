@@ -147,8 +147,8 @@ test("a series unknown subtitle queues every episode that still has it", () => {
 });
 
 test("an audio sample is taken from the first minutes and keeps the decoded packets", () => {
-  assert.deepEqual(sampleOffsets(6360), [90, 300, 600]);
-  assert.deepEqual(sampleOffsets(200), [90, 170]);
+  assert.deepEqual(sampleOffsets(6360), [45, 12]);
+  assert.deepEqual(sampleOffsets(40), [13]);
   const args = audioClipArgs("/movies/Adjustment.m2ts", 0, 90, "/tmp/clip.wav");
   assert.ok(args.indexOf("-t") < args.indexOf("-i"));
   assert.equal(args[args.indexOf("-map") + 1], "0:a:0");

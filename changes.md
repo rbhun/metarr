@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.17
+
+- Listen to one short clip just after the opening, so a Dolby Digital file is not read for minutes before Whisper starts.
+
 ## 0.0.16
 
 - On a surround track, listen to the center and the front left and right, about 70% from the center, and leave the surrounds out.

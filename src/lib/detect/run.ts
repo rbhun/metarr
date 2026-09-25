@@ -33,13 +33,14 @@ function runCommand(command: string, args: string[], timeout = 120_000): Promise
       const err = stderr?.toString() ?? "";
       if (error) {
         const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+        const timedOut = "killed" in error && error.killed;
         const detail = err
           .split("\n")
           .map((line) => line.trim())
           .filter((line) => line && !line.startsWith("_STATISTICS_"))
           .slice(-4)
           .join(" ");
-        reject(new Error(missing ? `${command} is not installed.` : detail || error.message));
+        reject(new Error(missing ? `${command} is not installed.` : timedOut ? `${command} timed out.` : detail || error.message));
         return;
       }
       resolve({ stdout: out, stderr: err });
@@ -159,31 +160,32 @@ function transcribe(wav: string): Promise<Speech> {
 async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
   try {
-    const offsets = sampleOffsets(await durationSeconds(file));
     const heard = await streamLayout(file, job.ordinal);
     const mix = dialogueMix(heard.layout, heard.channels);
     const samples: Array<{ language: string; probability: number }> = [];
     const transcript: string[] = [];
-    for (const [index, offset] of offsets.entries()) {
+    let agreed = { language: null as string | null, confidence: 0 };
+    for (const [index, offset] of sampleOffsets(null).entries()) {
       const wav = path.join(directory, `clip-${index}.wav`);
       let extracted = false;
       for (const filter of mix ? [mix, null] : [null]) {
         try {
-          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav, filter), 60_000);
+          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav, filter), 30_000);
           extracted = true;
           break;
-        } catch {
-          // A surround track with no center channel keeps the plain downmix.
+        } catch (caught) {
+          const timedOut = caught instanceof Error && /timed out/.test(caught.message);
+          if (timedOut) break;
         }
       }
-      if (!extracted) continue;
-      if (!fs.existsSync(wav) || fs.statSync(wav).size < 8_000) continue;
+      if (!extracted || !fs.existsSync(wav) || fs.statSync(wav).size < 8_000) continue;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
       if (speech.text) transcript.push(speech.text);
+      agreed = agreeLanguage(samples);
+      if (agreed.language) break;
     }
     if (samples.length === 0) return { language: null, role: null, confidence: 0, message: "No speech found in the sample." };
-    const agreed = agreeLanguage(samples);
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));
     return {
