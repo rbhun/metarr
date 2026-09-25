@@ -1,0 +1,23 @@
+---
+description: Bump the patch version and record every change
+alwaysApply: true
+---
+
+# Changelog and version
+
+The app version is the latest `##` heading in `changes.md`. The same number is in `src/lib/version.ts` and `package.json`. The sidebar shows `src/lib/version.ts`.
+
+On every change that ships:
+
+1. Read the latest version in `changes.md`.
+2. Increase the last number by 1. `0.0.9` becomes `0.0.10`. Numbers may pass 100. Leave the major and minor numbers alone unless the user asks to raise them.
+3. Add a new `## x.y.z` section at the top of `changes.md`, under the title, with one short note of what changed and why.
+4. Set that same version in `src/lib/version.ts` and `package.json`.
+
+Do this in the same change as the work. A change with no version bump is incomplete.
+
+```markdown
+## 0.0.10
+
+- Put the season list on the title row so episodes are visible without a second page.
+```

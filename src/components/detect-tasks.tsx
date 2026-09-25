@@ -28,7 +28,7 @@ function taskState(job: DetectJobView): string {
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 
-export function DetectTasks({ collapsed = false, bump }: { collapsed?: boolean; bump: () => void }) {
+export function DetectTasks({ collapsed = false, compact = false, bump }: { collapsed?: boolean; compact?: boolean; bump: () => void }) {
   const [open, setOpen] = useState(false);
   const [jobs, setJobs] = useState<DetectJobView[]>([]);
   const [active, setActive] = useState(0);
@@ -65,7 +65,7 @@ export function DetectTasks({ collapsed = false, bump }: { collapsed?: boolean; 
 
   return (
     <>
-      <Button variant="outline" className={collapsed ? "w-full px-0" : "w-full"} aria-label="Tasks" onClick={() => setOpen(true)}>
+      <Button variant="outline" size={compact ? "sm" : "default"} title="Tasks" className={collapsed ? "w-full px-0" : compact ? "" : "w-full"} aria-label="Tasks" onClick={() => setOpen(true)}>
         <ListTodo />
         {collapsed ? <span className="sr-only">Tasks</span> : "Tasks"}
         {!collapsed && active > 0 ? <span className="text-xs text-muted-foreground">{active}</span> : null}

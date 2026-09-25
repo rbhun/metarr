@@ -4,6 +4,12 @@ Local metadata overview for Plex, Radarr, Sonarr, and Bazarr. Metarr downloads l
 
 There is no login on Metarr itself. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
 
+## Version
+
+The sidebar shows the current version. That number is the latest heading in `changes.md`, and it matches `src/lib/version.ts` and `package.json`.
+
+Each change adds a section at the top of `changes.md` and increases the last number: `0.0.1`, `0.0.2`, and on past 100. The major and minor numbers change only when asked. Agents follow `.cursor/rules/changelog.mdc`.
+
 ## Run with npm
 
 ```bash
@@ -24,6 +30,14 @@ docker compose up --build
 ```
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume.
+
+On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
+
+```bash
+sudo /opt/metarr/deploy.sh
+```
+
+From another computer: `ssh <plex-vm> sudo /opt/metarr/deploy.sh`.
 
 ## Settings
 

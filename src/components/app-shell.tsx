@@ -1,6 +1,7 @@
 "use client";
 
 import { DetectTasks } from "@/components/detect-tasks";
+import { VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -135,6 +136,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {collapsed ? null : (
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold tracking-tight">Metarr</p>
+                <p className="text-xs text-muted-foreground">{VERSION}</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
               </div>
             )}
@@ -148,11 +150,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </Button>
           </div>
-          <div className={cn(collapsed ? "px-2" : "px-3")}>
+          <div className={cn("space-y-1", collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} />
+            <DetectTasks collapsed={collapsed} bump={bump} />
           </div>
           <div className={cn("mt-auto space-y-3", collapsed ? "p-2" : "p-3")}>
-            <DetectTasks collapsed={collapsed} bump={bump} />
             <Button
               className={cn(collapsed ? "w-full px-0" : "w-full")}
               aria-label={status?.running ? "Syncing" : "Sync metadata"}
@@ -180,6 +182,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <SheetContent side="left" className="bg-sidebar">
                 <SheetHeader>
                   <SheetTitle>Metarr</SheetTitle>
+                  <p className="text-xs text-muted-foreground">{VERSION}</p>
                 </SheetHeader>
                 <div className="px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} />
@@ -194,6 +197,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </SheetContent>
             </Sheet>
             <p className="text-sm font-semibold">Metarr</p>
+            <span className="text-xs text-muted-foreground">{VERSION}</span>
+            <DetectTasks bump={bump} compact />
             <Button className="ml-auto" size="sm" onClick={() => void startSync()} disabled={status?.running}>
               <RefreshCw className={status?.running ? "animate-spin" : undefined} />
               Sync
