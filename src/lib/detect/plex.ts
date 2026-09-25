@@ -32,6 +32,14 @@ export function plexTranscodeBusy(value: unknown): boolean {
   });
 }
 
+/** Any current playback, including a direct play that is not transcoding. */
+export function plexSessionBusy(value: unknown): boolean {
+  const media = container(value);
+  if (!media) return false;
+  if (typeof media.size === "number" && media.size > 0) return true;
+  return listOf(media.Metadata).length > 0;
+}
+
 export async function plexIsBusy(db: Database.Database): Promise<boolean> {
   const plex = listConnectors(db).find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
   if (!plex) return false;
@@ -45,4 +53,23 @@ export async function plexIsBusy(db: Database.Database): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Scanning, or anyone watching. A failed request does not count as busy. */
+export async function plexLibraryBusy(db: Database.Database): Promise<boolean> {
+  const plex = listConnectors(db).find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
+  if (!plex) return false;
+  const headers = { Accept: "application/json", "X-Plex-Token": plex.apiKey };
+  let busy = false;
+  try {
+    busy = plexActivitiesBusy(await fetchJson(`${plex.baseUrl}/activities`, headers, 4_000));
+  } catch {
+    busy = false;
+  }
+  try {
+    busy = busy || plexSessionBusy(await fetchJson(`${plex.baseUrl}/status/sessions`, headers, 4_000));
+  } catch {
+    return busy;
+  }
+  return busy;
 }

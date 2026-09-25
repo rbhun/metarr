@@ -1,6 +1,6 @@
 # Metarr
 
-Local metadata overview for Plex, Radarr, Sonarr, and Bazarr. Metarr downloads library records only — titles, files, quality, languages, ratings, and what is missing — and stores them in SQLite on this machine. It never copies video or subtitle files.
+Local metadata overview for Plex, Radarr, Sonarr, and Bazarr. Metarr downloads library records only — titles, files, quality, languages, ratings, and what is missing — and stores them in SQLite on this machine. Sync does not copy video or subtitle files. The disc remux queue is separate: it writes new MKV files beside a disc and leaves the disc in place.
 
 There is no login on Metarr itself. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
 
@@ -48,7 +48,17 @@ Filters: movies, series, missing, not in Plex, disc / not playable, missing Engl
 
 Missing English subtitles matches a movie file whose subtitle list does not include English, a series episode file in the same state, or any row where Bazarr wants English. Titles with no file stay out of that filter unless Bazarr lists English as wanted. Hungarian matches audio, existing subtitles, or a Bazarr wanted language on the title or an episode. 3D only uses the 3D flag already stored from media info or the title.
 
-Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Metarr only reads metadata: sync, test, and the library page do not rename, delete, move, or update files on Plex or the *arr apps.
+Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Sync, test, and the library page do not rename, delete, move, or update files on Plex or the *arr apps. **Queue disc remux** is the exception: it asks MakeMKV, on this machine, to write an MKV next to the selected disc.
+
+## Disc remux
+
+Select disc images (ISO, `VIDEO_TS`, or `BDMV`) and choose **Queue disc remux**. Optional **Keep extras** saves every other title as well. The original disc stays where it is.
+
+The queue runs one disc at a time. The next starts when the previous one finishes, and only between the start and end hour in Settings (01:00–07:00 by default). A disc that has already started is left to finish. The next one waits if the window has closed, if Plex is scanning or someone is playing, or if language detection is reading a file. On Linux the remux runs at idle disk priority.
+
+MakeMKV copies every audio language, commentary track, and subtitle into the MKV. It does not re-encode them. The 3D MVC video track is left out. The longest title is saved as `Title (Year).mkv` in the disc’s folder. With extras on, the other titles are `Title (Year)-other.mkv`, `Title (Year)-other2.mkv`, and so on, in that same folder, which Plex lists as extras. Disc menus are not included.
+
+Install MakeMKV on this machine, put `makemkvcon` on `PATH` or set its path in Settings, and paste the MakeMKV key there. The key stays in the local database. Path mapping from language detection is used when a Plex path is not a file on this machine.
 
 ## Online sources
 

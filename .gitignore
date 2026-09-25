@@ -28,3 +28,4 @@ next-env.d.ts
 # local library database (may contain server keys and library rows)
 /data/*.db
 /data/*.db-*
+/data/makemkv-home/

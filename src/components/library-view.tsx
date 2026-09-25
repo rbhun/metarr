@@ -3,6 +3,8 @@
 import { AudioTracks } from "@/components/audio-tracks";
 import { enqueueDetection } from "@/components/detect-actions";
 import { DetectStatus } from "@/components/detect-status";
+import { enqueueRemux } from "@/components/remux-actions";
+import { RemuxStatus } from "@/components/remux-status";
 import { CellScroll, LineScroll } from "@/components/line-scroll";
 import { MarkedText } from "@/components/marked-text";
 import { MediaPills } from "@/components/media-pills";
@@ -252,6 +254,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [detail, setDetail] = useState<LibraryTitle | null>(null);
   const [detailEpisode, setDetailEpisode] = useState<LibraryEpisode | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
   function openIn(titleId: number, app: ServiceApp) {
@@ -441,6 +444,22 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function remuxSelected() {
+    const titles: number[] = [];
+    const episodeIds: number[] = [];
+    for (const row of selected.values()) {
+      const title = row.key.match(/^title:(\d+)$/);
+      const episode = row.key.match(/^episode:(\d+)$/);
+      if (title) titles.push(Number(title[1]));
+      if (episode) episodeIds.push(Number(episode[1]));
+    }
+    try {
+      toast.success(await enqueueRemux(titles, episodeIds, remuxExtras));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not queue the disc remux.");
+    }
+  }
+
   async function copySelected() {
     const rows = [...selected.values()];
     const text = rows.map((row) => `${row.label}\t${row.path ?? "no file"}`).join("\n");
@@ -468,6 +487,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               {status?.running ? " · sync in progress" : ""}
             </p>
             <DetectStatus />
+            <RemuxStatus />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -547,9 +567,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
         {selected.size > 0 ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
             <span className="font-medium">{selected.size} selected</span>
-            <span className="text-muted-foreground">
-              Marks rows in this browser only. Metarr does not rename, delete, move, or update files.
-            </span>
+            <span className="text-muted-foreground">Marks rows in this browser only.</span>
             <Button size="sm" variant="outline" onClick={() => void copySelected()}>
               Copy titles and paths
             </Button>
@@ -569,6 +587,13 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             </Button>
             <Button size="sm" variant="outline" onClick={() => void detectSelected("queue")}>
               Queue language detection
+            </Button>
+            <label htmlFor="remux-extras" className="flex items-center gap-2">
+              <Checkbox id="remux-extras" checked={remuxExtras} onCheckedChange={(value) => setRemuxExtras(value === true)} />
+              Keep extras
+            </label>
+            <Button size="sm" variant="outline" onClick={() => void remuxSelected()}>
+              Queue disc remux
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear
@@ -598,7 +623,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <p className="font-medium">Nothing synced yet</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Connect Plex or an *arr app in Settings and run a sync. Metarr stores titles, quality, languages, and what is missing.
-              It never copies video files. You can also load a demo library to click through the table first.
+              Sync does not copy video files. You can also load a demo library to click through the table first.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button size="sm" asChild>
@@ -622,13 +647,13 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               <Table className="table-fixed">
                 <colgroup>
                   <col className="w-10" />
-                  <col className="w-[137px]" />
+                  <col />
                   <col className="w-28" />
                   <col className="w-16" />
                   <col className="w-32" />
                   <col className="w-[176px]" />
                   <col className="w-[229px]" />
-                  <col />
+                  <col className="w-[232px]" />
                 </colgroup>
                 <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
@@ -639,13 +664,13 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                         aria-label="Select all titles on this page"
                       />
                     </TableHead>
-                    <TableHead className="w-[137px]">Title</TableHead>
+                    <TableHead>Title</TableHead>
                     <TableHead>Where</TableHead>
                     <TableHead>Rating</TableHead>
                     <TableHead>Genres</TableHead>
                     <TableHead className="w-[176px]">Video</TableHead>
                     <TableHead className="w-[229px]">Audio</TableHead>
-                    <TableHead>Subtitles</TableHead>
+                    <TableHead className="w-[232px]">Subtitles</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -666,7 +691,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                               aria-label={`Select ${title.title}`}
                             />
                           </TableCell>
-                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined} className="w-[137px] max-w-[137px] whitespace-normal">
+                          <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined} className="whitespace-normal">
                             <TitleCell
                               title={title}
                               onOpen={() => { setDetailEpisode(null); setDetail(title); }}

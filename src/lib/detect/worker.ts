@@ -17,6 +17,7 @@ import {
   writeWindowId,
 } from "@/lib/detect/store";
 import { targetsFromFiles } from "@/lib/detect/targets";
+import { remuxIsRunning } from "@/lib/remux/store";
 import { getDb } from "@/lib/db";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
@@ -43,6 +44,7 @@ async function step() {
   const waiting = counts.immediate > 0 || (open && counts.window > 0);
   if (!waiting) return;
   if (await plexIsBusy(db)) return;
+  if (remuxIsRunning(db)) return;
   const job = claimNextJob(db, open);
   if (!job) return;
   try {

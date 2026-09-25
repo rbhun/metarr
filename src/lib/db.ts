@@ -221,6 +221,21 @@ export function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_episodes_catalog ON catalog_episodes(catalog_id, season, episode);
     CREATE INDEX IF NOT EXISTS idx_source_connector ON source_records(connector, kind);
     CREATE INDEX IF NOT EXISTS idx_detect_jobs_status ON detect_jobs(status, priority, id);
+
+    CREATE TABLE IF NOT EXISTS remux_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL,
+      label TEXT NOT NULL,
+      extras INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      message TEXT,
+      progress INTEGER,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_remux_jobs_status ON remux_jobs(status, id);
   `);
 
   const titleColumns = db.prepare(`PRAGMA table_info(catalog_titles)`).all() as Array<{ name: string }>;

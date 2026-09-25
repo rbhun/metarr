@@ -2,6 +2,7 @@
 
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
+import { RemuxSettingsCard } from "@/components/remux-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -552,6 +553,7 @@ export function SettingsView() {
         </div>
 
         <DetectSettingsCard />
+        <RemuxSettingsCard />
 
         <div>
           <h2 className="text-base font-semibold tracking-tight">Online sources</h2>
