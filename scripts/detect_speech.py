@@ -6,7 +6,7 @@ import sys
 
 from faster_whisper import WhisperModel
 
-model = WhisperModel("tiny", device="cpu", compute_type="int8")
+model = WhisperModel("tiny", device="cpu", compute_type="int8", cpu_threads=1, num_workers=1)
 
 
 def transcribe(wav: str) -> dict:

@@ -19,11 +19,11 @@ export type DetectionOutcome = {
   message: string | null;
 };
 
-const PREFERRED_OCR = ["eng", "hun", "deu", "fra", "spa", "ita", "por", "pol", "ces", "nld", "rus", "swe", "nor", "dan", "fin"];
+const limitedEnv = { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", MKL_NUM_THREADS: "1" };
 
 function runCommand(command: string, args: string[], timeout = 120_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile("nice", ["-n", "15", command, ...args], { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile("nice", ["-n", "15", command, ...args], { timeout, maxBuffer: 2 * 1024 * 1024, env: limitedEnv }, (error, stdout, stderr) => {
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       if (error) {
@@ -81,7 +81,7 @@ function ensureWhisper(): ChildProcessWithoutNullStreams {
   const script = whisperScript();
   if (!fs.existsSync(script)) throw new Error("Whisper script is missing.");
   const command = process.env.WHISPER_PYTHON || "python3";
-  const child = spawn("nice", ["-n", "15", command, script], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("nice", ["-n", "15", command, script], { stdio: ["pipe", "pipe", "pipe"], env: limitedEnv });
   child.on("error", (error) => {
     resetWhisper(error);
   });
@@ -168,14 +168,14 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
 async function ocrLanguages(): Promise<string> {
   const { stdout, stderr } = await runCommand("tesseract", ["--list-langs"], 20_000);
   const installed = new Set(`${stdout}\n${stderr}`.split("\n").map((line) => line.trim()).filter((line) => /^[a-z0-9_]+$/i.test(line) && line !== "osd"));
-  const chosen = PREFERRED_OCR.filter((language) => installed.has(language));
-  return (chosen.length ? chosen : [...installed]).slice(0, 12).join("+") || "eng";
+  const chosen = ["eng", "hun"].filter((language) => installed.has(language));
+  return (chosen.length ? chosen : [...installed].slice(0, 1)).join("+") || "eng";
 }
 
 async function detectPictureSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
   try {
-    await runCommand("ffmpeg", ["-y", "-ss", "300", "-i", file, "-map", `0:s:${job.ordinal}`, "-frames:v", "8", path.join(directory, "cue-%02d.png")]);
+    await runCommand("ffmpeg", ["-y", "-ss", "300", "-i", file, "-map", `0:s:${job.ordinal}`, "-frames:v", "4", "-vf", "scale=960:-1", path.join(directory, "cue-%02d.png")]);
     const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
     if (frames.length === 0) return { language: null, role: null, confidence: 0, message: "No subtitle images could be read." };
     const languages = await ocrLanguages();

@@ -7,6 +7,9 @@ services:
       PORT: "4317"
       HOSTNAME: "0.0.0.0"
       DATABASE_PATH: /app/data/library.db
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
     volumes:
       - metarr-data:/app/data
     restart: unless-stopped

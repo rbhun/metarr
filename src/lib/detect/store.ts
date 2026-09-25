@@ -168,7 +168,10 @@ export function saveDetection(
 }
 
 export function releaseRunningJobs(db: Database.Database) {
-  db.prepare(`UPDATE detect_jobs SET status = 'pending', started_at = NULL WHERE status = 'running'`).run();
+  db.prepare(`UPDATE detect_jobs SET status = 'failed', message = ?, finished_at = ? WHERE status = 'running'`).run(
+    "Stopped because Metarr restarted. On a small machine this usually means it ran out of memory.",
+    new Date().toISOString(),
+  );
 }
 
 export function detectCounts(db: Database.Database): { immediate: number; window: number; running: number } {
