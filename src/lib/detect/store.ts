@@ -86,7 +86,7 @@ export function scannedKeys(db: Database.Database): Set<string> {
   return new Set(rows.map((row) => `${row.path}\0${row.kind}\0${row.ordinal}`));
 }
 
-export function enqueueTargets(db: Database.Database, targets: DetectTarget[], priority: DetectPriority): number {
+export function enqueueTargets(db: Database.Database, targets: DetectTarget[], priority: DetectPriority): { added: number; already: number } {
   const existing = db.prepare(
     `SELECT 1 AS ok FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running')`,
   );
@@ -97,15 +97,19 @@ export function enqueueTargets(db: Database.Database, targets: DetectTarget[], p
   );
   const now = new Date().toISOString();
   let added = 0;
+  let already = 0;
   const write = db.transaction(() => {
     for (const target of targets) {
-      if (existing.get(target.path, target.kind, target.ordinal)) continue;
+      if (existing.get(target.path, target.kind, target.ordinal)) {
+        already += 1;
+        continue;
+      }
       insert.run(target.path, target.kind, target.ordinal, priority, target.label, target.format, target.placement, target.streamLabel, now);
       added += 1;
     }
   });
   write();
-  return added;
+  return { added, already };
 }
 
 function mapJob(row: JobRow): DetectJob {
@@ -180,6 +184,20 @@ export function detectCounts(db: Database.Database): { immediate: number; window
     else counts.immediate += row.count;
   }
   return counts;
+}
+
+export function listJobs(db: Database.Database): DetectJob[] {
+  const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT * FROM detect_jobs
+       WHERE status IN ('pending', 'running') OR finished_at >= ?
+       ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+         COALESCE(finished_at, created_at) DESC
+       LIMIT 40`,
+    )
+    .all(since) as JobRow[];
+  return rows.map(mapJob);
 }
 
 export function activeJob(db: Database.Database): { label: string; kind: "audio" | "subtitle" } | null {

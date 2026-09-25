@@ -23,7 +23,7 @@ const PREFERRED_OCR = ["eng", "hun", "deu", "fra", "spa", "ita", "por", "pol", "
 
 function runCommand(command: string, args: string[], timeout = 120_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile("nice", ["-n", "15", command, ...args], { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       if (error) {
@@ -81,9 +81,16 @@ function ensureWhisper(): ChildProcessWithoutNullStreams {
   const script = whisperScript();
   if (!fs.existsSync(script)) throw new Error("Whisper script is missing.");
   const command = process.env.WHISPER_PYTHON || "python3";
-  const child = spawn(command, [script], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("nice", ["-n", "15", command, script], { stdio: ["pipe", "pipe", "pipe"] });
+  child.on("error", (error) => {
+    resetWhisper(error);
+  });
+  child.stdin.on("error", () => undefined);
+  child.stdout.on("error", () => undefined);
+  child.stderr.on("error", () => undefined);
   whisper = child;
   whisperLines = readline.createInterface({ input: child.stdout });
+  whisperLines.on("error", () => undefined);
   let startup = "";
   child.stderr.on("data", (chunk: Buffer) => {
     startup = `${startup}${chunk.toString()}`.slice(-2000);
@@ -192,9 +199,16 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
 async function detectTextSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   let raw = "";
   if (job.placement === "external" || /\.(srt|ass|ssa|vtt)$/i.test(file)) {
-    raw = fs.readFileSync(file, "utf8");
+    const handle = fs.openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(256_000);
+      const bytes = fs.readSync(handle, buffer, 0, buffer.length, 0);
+      raw = buffer.subarray(0, bytes).toString("utf8");
+    } finally {
+      fs.closeSync(handle);
+    }
   } else {
-    const extracted = await runCommand("ffmpeg", ["-i", file, "-map", `0:s:${job.ordinal}`, "-f", "srt", "pipe:1"]);
+    const extracted = await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", file, "-map", `0:s:${job.ordinal}`, "-f", "srt", "pipe:1"], 45_000);
     raw = extracted.stdout;
   }
   const detected = detectTextLanguage(cueText(raw));

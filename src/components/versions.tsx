@@ -1,9 +1,12 @@
+"use client";
+
 import { AudioTracks } from "@/components/audio-tracks";
 import { FileBrowserButton } from "@/components/file-browser-button";
 import { LineScroll } from "@/components/line-scroll";
 import { MarkedText } from "@/components/marked-text";
 import { MediaPills } from "@/components/media-pills";
-import { formatBitrate, hdrText, subtitleLines } from "@/lib/format";
+import { SubtitleRows } from "@/components/subtitle-rows";
+import { formatBitrate, hdrText } from "@/lib/format";
 import type { MediaVersion } from "@/lib/types";
 
 function versionKey(version: MediaVersion, index: number): string {
@@ -43,7 +46,7 @@ export function VersionAudio({ versions }: { versions: MediaVersion[] }) {
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
           <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr), version.edition].filter(Boolean).join(" · ")}</p>
-          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} scroll={false} />
+          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} scroll={false} />
         </div>
       ))}
     </LineScroll>
@@ -56,9 +59,7 @@ export function VersionSubtitles({ versions }: { versions: MediaVersion[] }) {
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
           <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr), version.edition].filter(Boolean).join(" · ")}</p>
-          {subtitleLines(version.subtitleTracks, version.subtitleLanguages).map((line) => (
-            <p key={line}><MarkedText text={line} /></p>
-          ))}
+          <SubtitleRows tracks={version.subtitleTracks} languages={version.subtitleLanguages} path={version.path} label={version.name} />
         </div>
       ))}
     </LineScroll>
@@ -93,10 +94,8 @@ export function VersionDetail({
           ) : null}
           <p className="break-all text-muted-foreground">{version.path ?? "No path"}</p>
           <FileBrowserButton filePath={version.path} baseUrl={fileBrowserUrl} root={fileBrowserRoot} />
-          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} />
-          {subtitleLines(version.subtitleTracks, version.subtitleLanguages).map((line) => (
-            <p key={line}><MarkedText text={line} /></p>
-          ))}
+          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
+          <SubtitleRows tracks={version.subtitleTracks} languages={version.subtitleLanguages} path={version.path} label={version.name} />
         </div>
       ))}
     </div>

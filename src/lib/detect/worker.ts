@@ -61,7 +61,8 @@ async function step() {
     }
     const outcome = await detectTrack(job, local);
     saveDetection(db, job, outcome);
-    finishJob(db, job.id, "done", outcome.message);
+    const note = outcome.language ? [outcome.language, outcome.role].filter(Boolean).join(" ") : outcome.message;
+    finishJob(db, job.id, "done", note);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Detection failed.";
     finishJob(db, job.id, "failed", message.slice(0, 500));

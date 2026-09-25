@@ -1,7 +1,12 @@
+"use client";
+
+import { enqueueTrack } from "@/components/detect-actions";
 import { LineScroll } from "@/components/line-scroll";
 import { UnknownLabel } from "@/components/marked-text";
+import { audioTarget } from "@/lib/detect/track";
 import { formatLayout } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
+import { toast } from "sonner";
 
 function Mark({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -55,6 +60,14 @@ function Dts({ hd }: { hd?: boolean }) {
   );
 }
 
+async function detectUnknown(track: NonNullable<ReturnType<typeof audioTarget>>) {
+  try {
+    toast.success(await enqueueTrack(track));
+  } catch (caught) {
+    toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
+  }
+}
+
 function CodecMark({ codec }: { codec: string | null }) {
   if (codec === "Dolby Digital") return <DolbyDigital />;
   if (codec === "Dolby Digital Plus") return <DolbyDigital plus />;
@@ -68,24 +81,29 @@ function CodecMark({ codec }: { codec: string | null }) {
 export function AudioTracks({
   tracks,
   languages,
+  path = null,
+  label = "Audio",
   className,
   scroll = true,
 }: {
   tracks: AudioTrack[];
   languages: string[];
+  path?: string | null;
+  label?: string;
   className?: string;
   scroll?: boolean;
 }) {
   const rows = tracks.length
     ? tracks
-        .map((track) => ({
+        .map((track, index) => ({
           language: track.language || track.detectedLanguage || null,
           commentary: track.detectedRole === "commentary",
           layout: formatLayout(track.layout),
           codec: track.codec,
+          target: audioTarget(path, track, index, label),
         }))
         .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, layout: null, codec: null }));
+    : languages.map((language) => ({ language, commentary: false, layout: null, codec: null, target: null }));
 
   if (rows.length === 0) return <p>—</p>;
 
@@ -97,7 +115,7 @@ export function AudioTracks({
               {row.commentary ? " commentary" : ""}
             </span>
           ) : (
-            <UnknownLabel />
+            <UnknownLabel onClick={row.target ? () => void detectUnknown(row.target!) : undefined} />
           )}
           {row.layout ? <span className="font-mono text-[0.92em] tabular-nums">{row.layout}</span> : null}
           <CodecMark codec={row.codec} />

@@ -3,14 +3,14 @@
 import { AudioTracks } from "@/components/audio-tracks";
 import { enqueueDetection } from "@/components/detect-actions";
 import { LineScroll } from "@/components/line-scroll";
-import { MarkedText } from "@/components/marked-text";
+import { SubtitleRows } from "@/components/subtitle-rows";
 import { FileBrowserButton } from "@/components/file-browser-button";
 import { VersionDetail } from "@/components/versions";
 import { MediaPills } from "@/components/media-pills";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { arrPresence, episodeCode, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText, subtitleLines } from "@/lib/format";
+import { arrPresence, episodeCode, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText } from "@/lib/format";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
@@ -323,16 +323,19 @@ export function TitleDetail({
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Audio</dt>
                   <dd>
-                    <AudioTracks tracks={file?.audioTracks ?? []} languages={file?.audioLanguages ?? []} />
+                    <AudioTracks tracks={file?.audioTracks ?? []} languages={file?.audioLanguages ?? []} path={file?.path ?? null} label={episode ? `${episodeCode(episode.season, episode.episode)} ${episode.title}` : (title?.title ?? "Title")} />
                   </dd>
                 </div>
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Subtitles</dt>
                   <dd>
                     <LineScroll>
-                    {subtitleLines(file?.subtitleTracks ?? [], file?.subtitleLanguages ?? []).map((line, index) => (
-                      <p key={`${line}-${index}`}><MarkedText text={line} /></p>
-                    ))}
+                    <SubtitleRows
+                      tracks={file?.subtitleTracks ?? []}
+                      languages={file?.subtitleLanguages ?? []}
+                      path={file?.path ?? null}
+                      label={episode ? `${episodeCode(episode.season, episode.episode)} ${episode.title}` : (title?.title ?? "Title")}
+                    />
                     {file?.subtitleWanted.length ? (
                       <p className="text-amber-800 dark:text-amber-300">Bazarr missing: {file.subtitleWanted.join(", ")}</p>
                     ) : null}

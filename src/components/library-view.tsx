@@ -1,12 +1,12 @@
 "use client";
 
 import { AudioTracks } from "@/components/audio-tracks";
+import { SubtitleRows } from "@/components/subtitle-rows";
 import { enqueueDetection } from "@/components/detect-actions";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { RemuxStatus } from "@/components/remux-status";
-import { CellScroll, LineScroll } from "@/components/line-scroll";
-import { MarkedText } from "@/components/marked-text";
+import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
 import { useShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText, subtitleLines } from "@/lib/format";
+import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
 import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
 import { CONNECTOR_LABEL, type ConnectorId, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
@@ -92,17 +92,18 @@ function SubtitleCell({
   tracks,
   present,
   wanted,
+  path,
+  label,
 }: {
   tracks: LibraryTitle["subtitleTracks"];
   present: string[];
   wanted: string[];
+  path: string | null;
+  label: string;
 }) {
-  const lines = subtitleLines(tracks, present);
   return (
     <CellScroll>
-      {lines.map((line, index) => (
-        <p key={`${line}-${index}`}><MarkedText text={line} /></p>
-      ))}
+      <SubtitleRows tracks={tracks} languages={present} path={path} label={label} />
       {wanted.length ? <p className="text-xs text-amber-800 dark:text-amber-300">Bazarr missing: {wanted.join(", ")}</p> : null}
     </CellScroll>
   );
@@ -215,13 +216,9 @@ function VersionBands({ versions, wanted }: { versions: MediaVersion[]; wanted: 
             flags={version.flags}
             length={lengthText(version, length)}
           />
-          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} />
+          <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
           <div>
-            <LineScroll>
-              {subtitleLines(version.subtitleTracks, version.subtitleLanguages).map((line, lineIndex) => (
-                <p key={`${line}-${lineIndex}`}><MarkedText text={line} /></p>
-              ))}
-            </LineScroll>
+            <SubtitleRows tracks={version.subtitleTracks} languages={version.subtitleLanguages} path={version.path} label={version.name} />
             {index === 0 && wanted.length ? <p className="text-xs text-amber-800 dark:text-amber-300">Bazarr missing: {wanted.join(", ")}</p> : null}
           </div>
         </div>
@@ -748,11 +745,11 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                               </TableCell>
                               <TableCell className="whitespace-normal">
                                 <CellScroll>
-                                  <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} scroll={false} />
+                                  <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={`${title.title} · ${version.name}`} scroll={false} />
                                 </CellScroll>
                               </TableCell>
                               <TableCell className="whitespace-normal">
-                                <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? title.subtitleWanted : []} />
+                                <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? title.subtitleWanted : []} path={version.path} label={`${title.title} · ${version.name}`} />
                               </TableCell>
                             </>
                           ) : (
@@ -774,11 +771,11 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                               </TableCell>
                               <TableCell className="whitespace-normal">
                                 <CellScroll>
-                                  <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} scroll={false} />
+                                  <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} path={title.path} label={title.title} scroll={false} />
                                 </CellScroll>
                               </TableCell>
                               <TableCell className="whitespace-normal">
-                                <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} />
+                                <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} path={title.path} label={title.title} />
                               </TableCell>
                             </>
                           )}
@@ -877,13 +874,13 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                           <div className="col-span-2">
                             <dt className="text-muted-foreground">Audio</dt>
                             <dd>
-                              <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} />
+                              <AudioTracks tracks={title.audioTracks} languages={title.audioLanguages} path={title.path} label={title.title} />
                             </dd>
                           </div>
                           <div className="col-span-2">
                             <dt className="text-muted-foreground">Subtitles</dt>
                             <dd>
-                              <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} />
+                              <SubtitleCell tracks={title.subtitleTracks} present={title.subtitleLanguages} wanted={title.subtitleWanted} path={title.path} label={title.title} />
                             </dd>
                           </div>
                         </>
@@ -1071,11 +1068,11 @@ function EpisodeRows({
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <CellScroll>
-                              <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} scroll={false} />
+                              <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title} · ${version.name}`} scroll={false} />
                             </CellScroll>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? episode.subtitleWanted : []} />
+                            <SubtitleCell tracks={version.subtitleTracks} present={version.subtitleLanguages} wanted={index === 0 ? episode.subtitleWanted : []} path={version.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title} · ${version.name}`} />
                           </TableCell>
                         </>
                       ) : (
@@ -1096,11 +1093,11 @@ function EpisodeRows({
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <CellScroll>
-                              <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} scroll={false} />
+                              <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} path={episode.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title}`} scroll={false} />
                             </CellScroll>
                           </TableCell>
                           <TableCell className="whitespace-normal">
-                            <SubtitleCell tracks={episode.subtitleTracks} present={episode.subtitleLanguages} wanted={episode.subtitleWanted} />
+                            <SubtitleCell tracks={episode.subtitleTracks} present={episode.subtitleLanguages} wanted={episode.subtitleWanted} path={episode.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title}`} />
                           </TableCell>
                         </>
                       )}
@@ -1198,12 +1195,8 @@ function EpisodeList({
                           </>
                         ) : (
                           <>
-                            <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} />
-                            <LineScroll>
-                            {subtitleLines(episode.subtitleTracks, episode.subtitleLanguages).map((line, index) => (
-                              <p key={`${line}-${index}`}><MarkedText text={line} /></p>
-                            ))}
-                            </LineScroll>
+                            <AudioTracks tracks={episode.audioTracks} languages={episode.audioLanguages} path={episode.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title}`} />
+                            <SubtitleRows tracks={episode.subtitleTracks} languages={episode.subtitleLanguages} path={episode.path} label={`${episodeCode(episode.season, episode.episode)} ${episode.title}`} />
                           </>
                         )}
                         {episode.subtitleWanted.length ? <p>Bazarr missing: {episode.subtitleWanted.join(", ")}</p> : null}

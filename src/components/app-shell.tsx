@@ -1,5 +1,6 @@
 "use client";
 
+import { DetectTasks } from "@/components/detect-tasks";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -151,6 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <NavLinks collapsed={collapsed} />
           </div>
           <div className={cn("mt-auto space-y-3", collapsed ? "p-2" : "p-3")}>
+            <DetectTasks collapsed={collapsed} bump={bump} />
             <Button
               className={cn(collapsed ? "w-full px-0" : "w-full")}
               aria-label={status?.running ? "Syncing" : "Sync metadata"}
@@ -182,7 +184,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} />
                 </div>
-                <div className="mt-auto p-4">
+                <div className="mt-auto space-y-2 p-4">
+                  <DetectTasks bump={bump} />
                   <Button className="w-full" onClick={() => void startSync()} disabled={status?.running}>
                     <RefreshCw className={status?.running ? "animate-spin" : undefined} />
                     {status?.running ? "Syncing" : "Sync metadata"}
