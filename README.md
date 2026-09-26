@@ -62,11 +62,13 @@ Filters: movies, series, missing, not in Plex, disc / not playable, missing Engl
 
 Missing English subtitles matches a movie file whose subtitle list does not include English, a series episode file in the same state, or any row where Bazarr wants English. Titles with no file stay out of that filter unless Bazarr lists English as wanted. Hungarian matches audio, existing subtitles, or a Bazarr wanted language on the title or an episode. 3D only uses the 3D flag already stored from media info or the title.
 
-Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Sync, test, and the library page do not rename, delete, move, or update files on Plex or the *arr apps. **Queue disc remux** is the exception: it asks MakeMKV, on this machine, to write an MKV next to the selected disc.
+Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Sync, test, and the library page do not rename, delete, move, or update files on Plex or the *arr apps. **Queue disc remux** (and the **Rips** page) is the exception: it asks MakeMKV, on this machine, to write an MKV next to the selected disc.
 
 ## Disc remux
 
-Select disc images (ISO, `VIDEO_TS`, or `BDMV`) and choose **Queue disc remux**. Optional **Keep extras** saves every other title as well. The original disc stays where it is.
+Open **Rips** from the sidebar (or go to `/rips`). Disc images already in the library (ISO, `VIDEO_TS`, or `BDMV`) are listed there. Select them and choose **Send for remux**, or paste a path on this machine. Optional **Keep extras** saves every other title as well. The original disc stays where it is.
+
+You can also select disc images in the Library and choose **Queue disc remux**. Both paths use the same overnight queue.
 
 The queue runs one disc at a time. The next starts when the previous one finishes, and only between the start and end hour in Settings (01:00–07:00 by default). A disc that has already started is left to finish. The next one waits if the window has closed, if Plex is scanning or someone is playing, or if language detection is reading a file. On Linux the remux runs at idle disk priority.
 

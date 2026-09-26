@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type RemuxStatusBody = {
@@ -49,5 +50,12 @@ export function RemuxStatus() {
     idle && latest?.status === "failed" ? `Last remux failed: ${latest.label}${latest.message ? `. ${latest.message}` : ""}` : null,
   ].filter(Boolean);
   if (parts.length === 0) return null;
-  return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {parts.join(" · ")}{" "}
+      <Link href="/rips" className="underline underline-offset-2">
+        Open Rips
+      </Link>
+    </p>
+  );
 }

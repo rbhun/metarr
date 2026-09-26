@@ -1,6 +1,7 @@
 "use client";
 
 import { TaskCount } from "@/components/detect-tasks";
+import { RemuxCount } from "@/components/remux-tasks";
 import { VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
+import { Disc3, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -36,6 +37,7 @@ export function useShell() {
 
 const NAV = [
   { href: "/", label: "Library", icon: Library },
+  { href: "/rips", label: "Rips", icon: Disc3 },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -75,6 +77,7 @@ function NavLinks({
             <Icon />
             {collapsed ? <span className="sr-only">{entry.label}</span> : entry.label}
             {entry.href === "/tasks" ? <TaskCount bump={bump} className={collapsed ? "sr-only" : "ml-auto text-xs"} /> : null}
+            {entry.href === "/rips" ? <RemuxCount className={collapsed ? "sr-only" : "ml-auto text-xs"} /> : null}
           </Link>
         );
       })}
