@@ -608,6 +608,42 @@ const EDITION_LABELS: Array<[RegExp, string]> = [
   [/final\s*cut/i, "Final Cut"],
 ];
 
+function partPair(index: number, total: number): string | null {
+  if (index < 1 || total < 2 || index > total || total > 12) return null;
+  return `${index} of ${total}`;
+}
+
+function partIndex(index: number): string | null {
+  if (index < 1 || index > 12) return null;
+  return `Part ${index}`;
+}
+
+/** A split file, such as "1 of 2" or "CD1". A sequel title like "Part II" or "Part 2" is left alone. */
+export function multiPartLabel(...sources: Array<string | null | undefined>): string | null {
+  let stacked: string | null = null;
+  for (const source of sources) {
+    if (!source?.trim()) continue;
+    const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+    const tight = of ? null : source.match(/(?:^|[^a-z0-9])0*(\d{1,2})of0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+    const counted = of ?? tight;
+    if (counted) {
+      const label = partPair(Number(counted[1]), Number(counted[2]));
+      if (label) return label;
+    }
+    const slash = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/);
+    if (slash) {
+      const label = partPair(Number(slash[1]), Number(slash[2]));
+      if (label) return label;
+    }
+    if (stacked) continue;
+    const disc = source.match(/(?:^|[^a-z0-9])(?:cd|disc|disk|dvd)\s*[._-]?\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+    const split = source.match(/(?:^|[^a-z0-9])(?:part|pt)0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+    const index = disc ?? split;
+    if (index) stacked = partIndex(Number(index[1]));
+  }
+  return stacked;
+}
+
 export function editionLabel(filePath: string | null | undefined): string | null {
   if (!filePath?.trim()) return null;
   for (const [pattern, label] of EDITION_LABELS) {

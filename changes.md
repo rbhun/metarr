@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.20
+
+- Mark a split movie, named like 1 of 2 or CD1, with a pill that says which part it is.
+
+## 0.0.19
+
+- Show finished and failed language checks in Tasks, and add a way to clear the tracks still waiting.
+
+## 0.0.18
+
+- Mark a commentary when one behind-the-camera phrase is heard, and listen again to a detected stereo or mono track.
+
 ## 0.0.17
 
 - Listen to one short clip just after the opening, so a Dolby Digital file is not read for minutes before Whisper starts.

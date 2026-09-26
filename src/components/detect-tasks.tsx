@@ -16,10 +16,24 @@ type DetectJobView = {
   message: string | null;
 };
 
+type JobTotals = { pending: number; running: number; done: number; failed: number; skipped: number };
+
 type DetectBody = {
   counts: { immediate: number; window: number; running: number };
+  totals?: JobTotals;
   jobs?: DetectJobView[];
 };
+
+function queueSummary(totals: JobTotals): string {
+  const parts = [
+    totals.pending ? `${totals.pending.toLocaleString("en")} waiting` : null,
+    totals.running ? `${totals.running} running` : null,
+    totals.failed ? `${totals.failed.toLocaleString("en")} failed` : null,
+    totals.done ? `${totals.done.toLocaleString("en")} done` : null,
+    totals.skipped ? `${totals.skipped.toLocaleString("en")} skipped` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
 
 const taskDialogOpeners = new Set<() => void>();
 
@@ -92,7 +106,35 @@ export function DetectTasks({
     else openTasksDialog();
   }
   const [jobs, setJobs] = useState<DetectJobView[]>([]);
+  const [totals, setTotals] = useState<JobTotals>({ pending: 0, running: 0, done: 0, failed: 0, skipped: 0 });
+  const [clearing, setClearing] = useState(false);
   const [active, setActive] = useState(0);
+
+  function applyBody(body: DetectBody) {
+    const next = body.jobs ?? [];
+    setTotals(body.totals ?? { pending: body.counts.window + body.counts.immediate, running: body.counts.running, done: 0, failed: 0, skipped: 0 });
+    setActive(body.counts.running + body.counts.immediate + body.counts.window);
+    setJobs(next);
+    return next;
+  }
+
+  async function clearQueue() {
+    if (totals.pending < 1 || clearing) return;
+    const waiting = totals.pending.toLocaleString("en");
+    if (!window.confirm(`Remove ${waiting} waiting tracks? The track already running will finish. Languages already found stay.`)) return;
+    setClearing(true);
+    try {
+      const response = await fetch("/api/detect", { method: "DELETE" });
+      const body = (await response.json().catch(() => null)) as (DetectBody & { error?: string }) | null;
+      if (!response.ok || !body) throw new Error(body?.error || "The queue could not be cleared.");
+      applyBody(body);
+      toast.success("Queue cleared.");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The queue could not be cleared.");
+    } finally {
+      setClearing(false);
+    }
+  }
 
   useEffect(() => {
     let stop = false;
@@ -106,15 +148,13 @@ export function DetectTasks({
       }
       if (!response.ok || stop) return;
       const body = (await response.json()) as DetectBody;
-      const next = body.jobs ?? [];
+      const next = applyBody(body);
       const finished = next
         .filter((job) => job.status === "done" || job.status === "failed" || job.status === "skipped")
         .map((job) => `${job.id}:${job.status}`)
         .join(",");
       if (seen !== null && finished !== seen) bump();
       seen = finished;
-      setActive(body.counts.running + body.counts.immediate + body.counts.window);
-      setJobs(next);
     }
     void load();
     const timer = window.setInterval(() => void load(), open ? 2_000 : 8_000);
@@ -143,10 +183,18 @@ export function DetectTasks({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Tasks</DialogTitle>
-            <DialogDescription>Language checks run one track at a time. A failed line says why the label stayed Unknown.</DialogDescription>
+            <DialogDescription>Language checks run one track at a time. Finished and failed tracks stay listed here. A failed line says why the label stayed Unknown.</DialogDescription>
           </DialogHeader>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">{queueSummary(totals) || "No language checks yet."}</p>
+            {totals.pending > 0 ? (
+              <Button size="sm" variant="outline" onClick={() => void clearQueue()} disabled={clearing}>
+                Clear queue
+              </Button>
+            ) : null}
+          </div>
           <div className="flex max-h-96 flex-col gap-3 overflow-auto">
-            {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No language checks yet.</p> : null}
+            {jobs.length === 0 ? <p className="text-sm text-muted-foreground">{totals.pending > 0 ? "Nothing has finished yet." : "No language checks yet."}</p> : null}
             {jobs.map((job) => (
               <div key={job.id} className="space-y-1">
                 <div className="flex items-center justify-between gap-3 text-sm">

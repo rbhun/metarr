@@ -6,8 +6,13 @@ export function audioTarget(path: string | null, track: AudioTrack, index: numbe
   return targets[0] ?? null;
 }
 
+function narrowLayout(layout: string | null | undefined): boolean {
+  return layout === "1.0" || layout === "2.0" || layout === "mono" || layout === "stereo";
+}
+
 export function audioTargets(path: string | null, track: AudioTrack, index: number, label: string): DetectTarget[] {
-  if (track.language || track.detectedLanguage) return [];
+  if (track.language) return [];
+  if (track.detectedLanguage && (track.detectedRole === "commentary" || !narrowLayout(track.layout))) return [];
   const copies = track.copies?.length ? track.copies : path ? [{ path, ordinal: track.streamIndex ?? index }] : [];
   return copies.map((copy) => ({
     path: copy.path,

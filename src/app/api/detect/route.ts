@@ -1,7 +1,7 @@
 import { filesForSelection } from "@/lib/detect/files";
 import { parsePathMaps } from "@/lib/detect/paths";
 import { clampHour } from "@/lib/detect/schedule";
-import { activeJob, detectCounts, enqueueTargets, listJobs, readDetectSettings, writeDetectSettings } from "@/lib/detect/store";
+import { activeJob, clearPendingJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings } from "@/lib/detect/store";
 import { targetsFromFiles, type DetectTarget } from "@/lib/detect/targets";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { getDb } from "@/lib/db";
@@ -44,7 +44,19 @@ export async function GET() {
   return NextResponse.json({
     settings: readDetectSettings(db),
     counts: detectCounts(db),
+    totals: jobTotals(db),
     active: activeJob(db),
+    jobs: listJobs(db),
+  });
+}
+
+export async function DELETE() {
+  const db = getDb();
+  const removed = clearPendingJobs(db);
+  return NextResponse.json({
+    removed,
+    counts: detectCounts(db),
+    totals: jobTotals(db),
     jobs: listJobs(db),
   });
 }

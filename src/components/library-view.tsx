@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
+import { multiPartLabel } from "@/lib/media";
 import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
 import { CONNECTOR_LABEL, type ConnectorId, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
@@ -166,6 +167,7 @@ function VideoSummary({
   flags,
   note,
   length,
+  part,
 }: {
   container: string | null;
   resolution: string | null;
@@ -178,6 +180,7 @@ function VideoSummary({
   flags?: string[];
   note?: string | null;
   length?: string | null;
+  part?: string | null;
 }) {
   return (
     <div>
@@ -185,7 +188,7 @@ function VideoSummary({
         <p className={cn("whitespace-nowrap", playableClass(playableLabel))}>{playableText(playableLabel)}</p>
       ) : null}
       <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <MediaPills container={container} resolution={resolution} threeD={is3d} />
+        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} />
         {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
         {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
       </p>
@@ -216,6 +219,7 @@ function VersionBands({ versions, wanted }: { versions: MediaVersion[]; wanted: 
             missing={version.missing}
             flags={version.flags}
             length={lengthText(version, length)}
+            part={multiPartLabel(version.path, version.name)}
           />
           <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
           <div>
@@ -745,6 +749,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   playableLabel={version.playableLabel}
                                   missing={version.missing}
                                   length={lengthText(version, differingLength(title.versions))}
+                                  part={multiPartLabel(version.path, version.name, title.title)}
                                 />
                                 </CellScroll>
                               </TableCell>
@@ -771,6 +776,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   playableLabel={title.playableLabel}
                                   missing={title.versions[0]?.missing}
                                   note={title.playableNote}
+                                  part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
                                 />
                                 </CellScroll>
                               </TableCell>
@@ -873,6 +879,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 playableLabel={title.playableLabel}
                                 missing={title.versions[0]?.missing}
                                 note={title.playableNote}
+                                part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
                               />
                             </dd>
                           </div>
@@ -1068,6 +1075,7 @@ function EpisodeRows({
                                 missing={version.missing}
                                 flags={version.flags}
                                 length={lengthText(version, differingLength(episode.versions))}
+                                part={multiPartLabel(version.path, version.name)}
                               />
                             </CellScroll>
                           </TableCell>
@@ -1093,6 +1101,7 @@ function EpisodeRows({
                                 bitrateKbps={null}
                                 playableLabel={episode.playableLabel}
                                 missing={episode.versions[0]?.missing}
+                                part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
                               />
                             </CellScroll>
                           </TableCell>
@@ -1185,7 +1194,7 @@ function EpisodeList({
                           </div>
                         ) : (
                           <p className="mt-1 flex flex-wrap items-center gap-1 text-muted-foreground">
-                            <MediaPills container={episode.container} resolution={episode.resolution} frameRate={episode.detail?.frameRate} />
+                            <MediaPills container={episode.container} resolution={episode.resolution} frameRate={episode.detail?.frameRate} part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)} />
                             {episode.qualityName}
                             {episode.versions[0]?.missing.length ? <span className="text-amber-800 dark:text-amber-200">Missing {episode.versions[0].missing.join(", ")}</span> : null}
                           </p>

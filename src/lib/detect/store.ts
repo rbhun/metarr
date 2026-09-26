@@ -174,6 +174,19 @@ export function releaseRunningJobs(db: Database.Database) {
   );
 }
 
+export function clearPendingJobs(db: Database.Database): number {
+  return db.prepare(`DELETE FROM detect_jobs WHERE status = 'pending'`).run().changes;
+}
+
+export function jobTotals(db: Database.Database): { pending: number; running: number; done: number; failed: number; skipped: number } {
+  const rows = db.prepare(`SELECT status, COUNT(*) AS count FROM detect_jobs GROUP BY status`).all() as Array<{ status: string; count: number }>;
+  const totals = { pending: 0, running: 0, done: 0, failed: 0, skipped: 0 };
+  for (const row of rows) {
+    if (row.status in totals) totals[row.status as keyof typeof totals] = row.count;
+  }
+  return totals;
+}
+
 export function detectCounts(db: Database.Database): { immediate: number; window: number; running: number } {
   const rows = db.prepare(`SELECT priority, status, COUNT(*) AS count FROM detect_jobs WHERE status IN ('pending', 'running') GROUP BY priority, status`).all() as Array<{
     priority: string;
@@ -194,9 +207,8 @@ export function listJobs(db: Database.Database): DetectJob[] {
   const rows = db
     .prepare(
       `SELECT * FROM detect_jobs
-       WHERE status IN ('pending', 'running') OR finished_at >= ?
-       ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
-         COALESCE(finished_at, created_at) DESC
+       WHERE status = 'running' OR (status IN ('done', 'failed', 'skipped') AND finished_at >= ?)
+       ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, finished_at DESC
        LIMIT 40`,
     )
     .all(since) as JobRow[];

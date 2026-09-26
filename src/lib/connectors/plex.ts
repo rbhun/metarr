@@ -90,7 +90,8 @@ function audioCodecLabel(codec: unknown, profile: unknown, title: unknown): stri
 function audioTrackFrom(stream: Record<string, unknown>, media: Record<string, unknown>, streamIndex: number): AudioTrack {
   const title = stream.displayTitle ?? stream.extendedDisplayTitle ?? stream.title;
   const language = collectLanguages([streamLanguage(stream)])[0] ?? null;
-  const label = textOf(stream.title);
+  const shown = textOf(stream.displayTitle) ?? textOf(stream.extendedDisplayTitle);
+  const label = textOf(stream.title) ?? (shown && /\bcommentary\b|\bcomm\b/i.test(shown) ? shown : null);
   return {
     language,
     layout: audioLayout(stream.channels ?? media.audioChannels, stream.audioChannelLayout ?? media.audioChannelLayout, title),

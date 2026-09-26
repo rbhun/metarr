@@ -8,11 +8,11 @@ import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, enqueueTargets, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearPendingJobs, enqueueTargets, finishJob, listJobs, saveDetection } from "@/lib/detect/store";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { rollupSubtitles } from "@/lib/detect/rollup";
-import { subtitleTargets } from "@/lib/detect/track";
+import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
@@ -54,6 +54,7 @@ test("path mapping rewrites a plex prefix and keeps a file that is already local
 test("commentary comes from the track title or from how people talk about the film", () => {
   assert.equal(commentaryRole("Director Commentary", ""), "commentary");
   assert.equal(commentaryRole(null, "In this scene we shot the ending. The director wanted another take."), "commentary");
+  assert.equal(commentaryRole(null, "We shot this on the lot."), "commentary");
   assert.equal(commentaryRole(null, "In this scene the ship arrives."), null);
 });
 
@@ -144,6 +145,15 @@ test("a series unknown subtitle queues every episode that still has it", () => {
   assert.equal(known?.copies, undefined);
   const queued = subtitleTargets(null, unknown ?? tracks[0]!, 0, "Show");
   assert.deepEqual(queued.map((target) => target.path), ["/tv/Show/S01E02.mkv", "/tv/Show/S01E03.mkv"]);
+});
+
+test("a detected stereo or mono track can be heard again until it is commentary", () => {
+  const stereo = { language: null, layout: "2.0", codec: "Dolby Digital", detectedLanguage: "English", streamIndex: 3 };
+  assert.equal(audioTargets("/movies/Alien.mkv", stereo, 3, "Alien").length, 1);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, layout: "1.0" }, 4, "Alien").length, 1);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, detectedRole: "commentary" }, 3, "Alien").length, 0);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, layout: "5.1" }, 0, "Alien").length, 0);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, language: "English" }, 3, "Alien").length, 0);
 });
 
 test("an audio sample is taken from the first minutes and keeps the decoded packets", () => {
@@ -331,6 +341,26 @@ test("immediate jobs run before queued ones, and a result is stored", () => {
   if (opened) saveDetection(db, opened, { language: "Hungarian", role: null, confidence: 1, message: null });
   const row = db.prepare(`SELECT language FROM detect_results WHERE path = '/a.mkv'`).get() as { language: string };
   assert.equal(row.language, "Hungarian");
+  db.close();
+});
+
+test("clearing the queue drops waiting tracks and keeps a finished one visible", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/done.mkv", kind: "subtitle", ordinal: 0, label: "Done", format: "PGS", placement: "internal", streamLabel: null },
+    { path: "/wait.mkv", kind: "subtitle", ordinal: 1, label: "Wait", format: "PGS", placement: "internal", streamLabel: null },
+  ], "immediate");
+  const job = claimNextJob(db, true);
+  assert.ok(job);
+  finishJob(db, job!.id, "failed", "This language cannot be reliably recognized.");
+  saveDetection(db, job!, { language: null, role: null, confidence: 0, message: "This language cannot be reliably recognized." });
+  assert.equal(clearPendingJobs(db), 1);
+  const listed = listJobs(db);
+  assert.deepEqual(listed.map((row) => row.label), ["Done"]);
+  assert.equal(listed[0]?.status, "failed");
+  const stored = db.prepare(`SELECT message FROM detect_results WHERE path = '/done.mkv'`).get() as { message: string };
+  assert.match(stored.message, /reliably recognized/);
   db.close();
 });
 

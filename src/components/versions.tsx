@@ -7,6 +7,7 @@ import { MarkedText } from "@/components/marked-text";
 import { MediaPills } from "@/components/media-pills";
 import { SubtitleRows } from "@/components/subtitle-rows";
 import { formatBitrate, hdrText } from "@/lib/format";
+import { multiPartLabel } from "@/lib/media";
 import type { MediaVersion } from "@/lib/types";
 
 function versionKey(version: MediaVersion, index: number): string {
@@ -25,7 +26,7 @@ export function VersionLines({ versions }: { versions: MediaVersion[] }) {
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} />
             <span><MarkedText text={versionHeading(version)} /></span>
           </p>
           {version.flags?.length ? (
@@ -82,7 +83,7 @@ export function VersionDetail({
         <div key={versionKey(version, index)} className="space-y-1 rounded-lg border p-2">
           <p className="font-medium">{version.name}</p>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} />
             <span><MarkedText text={versionHeading(version)} /></span>
             {version.is3d ? <span>3D</span> : null}
           </p>

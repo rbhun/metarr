@@ -111,10 +111,22 @@ export function AudioTracks({
   const items = rows.map((row, index) => (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
           {row.language ? (
-            <span>
-              {row.language}
-              {row.commentary ? " commentary" : ""}
-            </span>
+            row.targets.length ? (
+              <button
+                type="button"
+                onClick={() => void detectUnknown(row.targets)}
+                title="Listen again"
+                className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
+              >
+                {row.language}
+                {row.commentary ? " commentary" : ""}
+              </button>
+            ) : (
+              <span>
+                {row.language}
+                {row.commentary ? " commentary" : ""}
+              </span>
+            )
           ) : (
             <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
           )}

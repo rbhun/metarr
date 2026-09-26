@@ -21,18 +21,20 @@ export function MediaPills({
   resolution,
   frameRate,
   threeD,
+  part,
 }: {
   container?: string | null;
   resolution?: string | null;
   frameRate?: string | null;
   threeD?: boolean;
+  part?: string | null;
 }) {
   const pills = [
     container ? { kind: "container" as const, value: container } : null,
     resolution ? { kind: "resolution" as const, value: resolution } : null,
     frameRate ? { kind: "rate" as const, value: frameRate } : null,
   ].filter((pill): pill is { kind: "container" | "resolution" | "rate"; value: string } => Boolean(pill));
-  if (!pills.length && resolution !== null && !threeD) return null;
+  if (!pills.length && !part && resolution !== null && !threeD) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {pills.map((pill) => (
@@ -47,6 +49,14 @@ export function MediaPills({
       {threeD ? (
         <span className="rounded-full bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fuchsia-950 dark:text-fuchsia-100">
           3D
+        </span>
+      ) : null}
+      {part ? (
+        <span
+          title="Multi-part movie"
+          className="rounded-full bg-yellow-400/25 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-yellow-950 dark:text-yellow-100"
+        >
+          {part}
         </span>
       ) : null}
     </span>

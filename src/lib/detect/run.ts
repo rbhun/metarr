@@ -185,6 +185,24 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       agreed = agreeLanguage(samples);
       if (agreed.language) break;
     }
+    if (agreed.language && transcript.join(" ").trim().length < 80) {
+      const wav = path.join(directory, "clip-later.wav");
+      let extracted = false;
+      for (const filter of mix ? [mix, null] : [null]) {
+        try {
+          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, 180, wav, filter), 30_000);
+          extracted = true;
+          break;
+        } catch (caught) {
+          const timedOut = caught instanceof Error && /timed out/.test(caught.message);
+          if (timedOut) break;
+        }
+      }
+      if (extracted && fs.existsSync(wav) && fs.statSync(wav).size >= 8_000) {
+        const speech = await transcribe(wav);
+        if (speech.text) transcript.push(speech.text);
+      }
+    }
     if (samples.length === 0) return { language: null, role: null, confidence: 0, message: "No speech found in the sample." };
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));

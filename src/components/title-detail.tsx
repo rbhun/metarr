@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { arrPresence, episodeCode, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText } from "@/lib/format";
+import { multiPartLabel } from "@/lib/media";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
@@ -235,7 +236,7 @@ export function TitleDetail({
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Video</dt>
                   <dd className="mt-1 flex flex-wrap items-center gap-1">
-                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} />
+                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, file?.title)} />
                     <span>{[file?.qualityName, file?.bitrateKbps ? formatBitrate(file.bitrateKbps) : null].filter(Boolean).join(" · ")}</span>
                   </dd>
                 </div>
@@ -301,7 +302,7 @@ export function TitleDetail({
                         {file.detail.files.map((part) => (
                           <dd key={part.name} className="flex flex-wrap items-center gap-1">
                             <span className="break-all">{part.name}</span>
-                            <MediaPills container={part.container} resolution={part.resolution} frameRate={part.frameRate} />
+                            <MediaPills container={part.container} resolution={part.resolution} frameRate={part.frameRate} part={multiPartLabel(part.name)} />
                           </dd>
                         ))}
                       </div>

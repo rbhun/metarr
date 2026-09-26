@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detect3d, detectHdr, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
+import { detect3d, detectHdr, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -102,6 +102,22 @@ test("a 1080p SDR file stays listed beside a 2160p HDR file", () => {
   assert.deepEqual(versions[1]?.missing, ["subtitles"]);
   assert.deepEqual(versions[0]?.missing, []);
   assert.equal(resolvedResolution({ resolution: null, height: 336, path: "/movies/Fantasia.avi" }), "336p");
+});
+
+test("a split movie is marked as a part, and a sequel title is not", () => {
+  assert.equal(multiPartLabel("/movies/Lawrence/Lawrence (1962) - 1 of 2.mkv"), "1 of 2");
+  assert.equal(multiPartLabel("/movies/Lawrence/Lawrence (1962) - 02 of 02.mkv"), "2 of 2");
+  assert.equal(multiPartLabel("Movie.1of2.avi"), "1 of 2");
+  assert.equal(multiPartLabel("Movie (1/2).mkv"), "1 of 2");
+  assert.equal(multiPartLabel("/movies/Foo/Foo CD1.avi"), "Part 1");
+  assert.equal(multiPartLabel("/movies/Foo/Foo - pt2.mkv"), "Part 2");
+  assert.equal(multiPartLabel("/movies/Ben-Hur/Ben Hur - Part1.m2ts"), "Part 1");
+  assert.equal(multiPartLabel("/movies/Foo/Foo - part 1.mkv"), null);
+  assert.equal(multiPartLabel("/movies/The Godfather Part II.mkv"), null);
+  assert.equal(multiPartLabel("Harry Potter and the Deathly Hallows Part 2 (2011).mkv"), null);
+  assert.equal(multiPartLabel("History of the World - Part 1.avi"), null);
+  assert.equal(multiPartLabel("/movies/Airplane II/Airplane.2.mkv"), null);
+  assert.equal(multiPartLabel(null), null);
 });
 
 test("a sample name and a tiny extra file are marked, a feature is not", () => {
