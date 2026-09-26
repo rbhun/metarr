@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.21
+
+- Use the movie or episode title for the multi-part pill, so the image build can finish.
+
 ## 0.0.20
 
 - Mark a split movie, named like 1 of 2 or CD1, with a pill that says which part it is.

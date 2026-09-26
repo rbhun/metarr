@@ -236,7 +236,7 @@ export function TitleDetail({
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Video</dt>
                   <dd className="mt-1 flex flex-wrap items-center gap-1">
-                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, file?.title)} />
+                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, episode?.title ?? title.title)} />
                     <span>{[file?.qualityName, file?.bitrateKbps ? formatBitrate(file.bitrateKbps) : null].filter(Boolean).join(" · ")}</span>
                   </dd>
                 </div>
