@@ -4,14 +4,28 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { rebuildCatalog } from "@/lib/catalog";
 import { plexSessionBusy } from "@/lib/detect/plex";
 import type { ScanFile } from "@/lib/detect/targets";
-import { migrate } from "@/lib/db";
+import { insertSourceRecords, migrate } from "@/lib/db";
+import { demoRecords } from "@/lib/demo";
+import { listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
 import { makemkvSource, outputDirectory } from "@/lib/remux/source";
-import { claimNextRemux, enqueueDiscs, KEEP_ALL_SELECTION, readRemuxSettings, writeMakeMkvHome, writeRemuxSettings } from "@/lib/remux/store";
+import {
+  claimNextRemux,
+  clearPendingRemux,
+  enqueueDiscs,
+  enqueuePaths,
+  KEEP_ALL_SELECTION,
+  listRemuxJobs,
+  readRemuxSettings,
+  remuxTotals,
+  writeMakeMkvHome,
+  writeRemuxSettings,
+} from "@/lib/remux/store";
 
 const INFO = `
 TINFO:0,9,0,"0:02:11"
@@ -124,4 +138,33 @@ test("the queue keeps every track except 3D video, and the key stays out of the 
 test("a direct play counts as Plex being busy", () => {
   assert.equal(plexSessionBusy({ MediaContainer: { size: 1, Metadata: [{ title: "Film" }] } }), true);
   assert.equal(plexSessionBusy({ MediaContainer: { size: 0 } }), false);
+});
+
+test("paths and library discs feed the remux queue and history list", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const discs = listDiscCandidates(db);
+  assert.ok(discs.some((disc) => disc.path.includes("/BDMV/") && disc.kind === "bluray"));
+  const byPath = enqueuePaths(
+    db,
+    [
+      { path: "/movies/Alien DVD.iso", label: "Alien (1979)" },
+      { path: "/movies/NotADisc.mkv", label: "Skip" },
+      { path: "/movies/Alien DVD.iso", label: "Alien (1979)" },
+    ],
+    false,
+  );
+  assert.deepEqual(byPath, { added: 1, skipped: 1, already: 1 });
+  const again = enqueuePaths(db, [{ path: "/movies/Alien DVD.iso" }], true);
+  assert.equal(again.already, 1);
+  assert.deepEqual(remuxTotals(db), { pending: 1, running: 0, done: 0, failed: 0 });
+  const waiting = listRemuxJobs(db, { status: "pending", page: 1, pageSize: 50 });
+  assert.equal(waiting.total, 1);
+  assert.equal(waiting.jobs[0]?.label, "Alien (1979)");
+  assert.equal(waiting.jobs[0]?.extras, false);
+  assert.equal(clearPendingRemux(db), 1);
+  assert.equal(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 50 }).total, 0);
+  db.close();
 });

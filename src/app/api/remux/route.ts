@@ -1,6 +1,22 @@
-import { filesForSelection } from "@/lib/detect/files";
+import { listDiscCandidates } from "@/lib/remux/candidates";
 import { clampHour } from "@/lib/detect/schedule";
-import { activeRemux, enqueueDiscs, latestRemux, parseBinary, parseLicenseKey, readRemuxPause, readRemuxSettings, remuxCounts, writeRemuxSettings } from "@/lib/remux/store";
+import { filesForSelection } from "@/lib/detect/files";
+import {
+  activeRemux,
+  clearPendingRemux,
+  enqueueDiscs,
+  enqueuePaths,
+  latestRemux,
+  listRemuxJobs,
+  parseBinary,
+  parseLicenseKey,
+  readRemuxPause,
+  readRemuxSettings,
+  remuxCounts,
+  remuxTotals,
+  writeRemuxSettings,
+  type RemuxJobStatus,
+} from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
 import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
@@ -13,6 +29,25 @@ function idList(value: unknown): number[] {
   return value.filter((item): item is number => typeof item === "number" && Number.isInteger(item) && item > 0);
 }
 
+function pathList(value: unknown): Array<{ path: string; label?: string }> {
+  if (!Array.isArray(value)) return [];
+  const paths: Array<{ path: string; label?: string }> = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      const path = item.trim();
+      if (path) paths.push({ path });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const path = typeof record.path === "string" ? record.path.trim() : "";
+    if (!path) continue;
+    const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
+    paths.push({ path, label });
+  }
+  return paths;
+}
+
 function publicSettings(settings: ReturnType<typeof readRemuxSettings>) {
   return {
     startHour: settings.startHour,
@@ -22,15 +57,40 @@ function publicSettings(settings: ReturnType<typeof readRemuxSettings>) {
   };
 }
 
-export async function GET() {
+const JOB_STATUSES = new Set<RemuxJobStatus>(["pending", "running", "done", "failed"]);
+
+export async function GET(request: Request) {
   startRemuxWorker();
   const db = getDb();
+  const url = new URL(request.url);
+  const rawStatus = url.searchParams.get("status");
+  const status = rawStatus && JOB_STATUSES.has(rawStatus as RemuxJobStatus) ? (rawStatus as RemuxJobStatus) : null;
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page")) || 1));
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(url.searchParams.get("pageSize")) || 50)));
+  const list = status ? listRemuxJobs(db, { status, page, pageSize }) : { jobs: [], total: 0 };
+  const includeDiscs = url.searchParams.get("discs") === "1" || url.searchParams.get("discs") === "true";
   return NextResponse.json({
     settings: publicSettings(readRemuxSettings(db)),
     counts: remuxCounts(db),
+    totals: remuxTotals(db),
     active: activeRemux(db),
     pause: readRemuxPause(db),
     latest: latestRemux(db),
+    discs: includeDiscs ? listDiscCandidates(db) : undefined,
+    jobs: list.jobs,
+    total: list.total,
+    page,
+    pageSize,
+  });
+}
+
+export async function DELETE() {
+  const db = getDb();
+  const removed = clearPendingRemux(db);
+  return NextResponse.json({
+    removed,
+    counts: remuxCounts(db),
+    totals: remuxTotals(db),
   });
 }
 
@@ -43,11 +103,13 @@ export async function POST(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
-  const files = filesForSelection(db, idList(record.titles), idList(record.episodes));
-  const result = enqueueDiscs(db, files, record.extras === true);
+  const paths = pathList(record.paths);
+  const result = paths.length
+    ? enqueuePaths(db, paths, record.extras === true)
+    : enqueueDiscs(db, filesForSelection(db, idList(record.titles), idList(record.episodes)), record.extras === true);
   startRemuxWorker();
   kickRemuxWorker();
-  return NextResponse.json({ ...result, counts: remuxCounts(db) });
+  return NextResponse.json({ ...result, counts: remuxCounts(db), totals: remuxTotals(db) });
 }
 
 export async function PUT(request: Request) {

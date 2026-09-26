@@ -6,6 +6,7 @@ import { enqueueDetection } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
+import { toastRemux } from "@/components/remux-tasks";
 import { RemuxStatus } from "@/components/remux-status";
 import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
@@ -460,7 +461,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       if (episode) episodeIds.push(Number(episode[1]));
     }
     try {
-      toast.success(await enqueueRemux(titles, episodeIds, remuxExtras));
+      toastRemux(await enqueueRemux(titles, episodeIds, remuxExtras));
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue the disc remux.");
     }
