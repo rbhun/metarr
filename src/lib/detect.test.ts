@@ -356,9 +356,11 @@ test("clearing the queue drops waiting tracks and keeps a finished one visible",
   finishJob(db, job!.id, "failed", "This language cannot be reliably recognized.");
   saveDetection(db, job!, { language: null, role: null, confidence: 0, message: "This language cannot be reliably recognized." });
   assert.equal(clearPendingJobs(db), 1);
-  const listed = listJobs(db);
-  assert.deepEqual(listed.map((row) => row.label), ["Done"]);
-  assert.equal(listed[0]?.status, "failed");
+  const listed = listJobs(db, { status: "failed", page: 1, pageSize: 50 });
+  assert.equal(listed.total, 1);
+  assert.deepEqual(listed.jobs.map((row) => row.label), ["Done"]);
+  assert.equal(listed.jobs[0]?.status, "failed");
+  assert.equal(listJobs(db, { status: "pending", page: 1, pageSize: 50 }).total, 0);
   const stored = db.prepare(`SELECT message FROM detect_results WHERE path = '/done.mkv'`).get() as { message: string };
   assert.match(stored.message, /reliably recognized/);
   db.close();

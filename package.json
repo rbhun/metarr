@@ -1,6 +1,6 @@
 {
   "name": "metarr",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 4317",

@@ -19,6 +19,9 @@ export type DetectJob = {
   placement: string | null;
   streamLabel: string | null;
   message: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 };
 
 export type DetectSettings = {
@@ -40,6 +43,9 @@ type JobRow = {
   placement: string | null;
   stream_label: string | null;
   message: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 function meta(db: Database.Database, key: string): string | null {
@@ -125,6 +131,9 @@ function mapJob(row: JobRow): DetectJob {
     placement: row.placement,
     streamLabel: row.stream_label,
     message: row.message,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
   };
 }
 
@@ -202,17 +211,19 @@ export function detectCounts(db: Database.Database): { immediate: number; window
   return counts;
 }
 
-export function listJobs(db: Database.Database): DetectJob[] {
-  const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  const rows = db
-    .prepare(
-      `SELECT * FROM detect_jobs
-       WHERE status = 'running' OR (status IN ('done', 'failed', 'skipped') AND finished_at >= ?)
-       ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, finished_at DESC
-       LIMIT 40`,
-    )
-    .all(since) as JobRow[];
-  return rows.map(mapJob);
+export function listJobs(
+  db: Database.Database,
+  query: { status: DetectJobStatus; page: number; pageSize: number },
+): { jobs: DetectJob[]; total: number } {
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 50));
+  const page = Math.max(1, Math.trunc(query.page) || 1);
+  const total = (db.prepare(`SELECT COUNT(*) AS count FROM detect_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
+  const sql =
+    query.status === "pending"
+      ? `SELECT * FROM detect_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      : `SELECT * FROM detect_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
+  const rows = db.prepare(sql).all(query.status, pageSize, (page - 1) * pageSize) as JobRow[];
+  return { jobs: rows.map(mapJob), total };
 }
 
 export function activeJob(db: Database.Database): { label: string; kind: "audio" | "subtitle" } | null {

@@ -1,7 +1,7 @@
 import { filesForSelection } from "@/lib/detect/files";
 import { parsePathMaps } from "@/lib/detect/paths";
 import { clampHour } from "@/lib/detect/schedule";
-import { activeJob, clearPendingJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings } from "@/lib/detect/store";
+import { activeJob, clearPendingJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings, type DetectJobStatus } from "@/lib/detect/store";
 import { targetsFromFiles, type DetectTarget } from "@/lib/detect/targets";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { getDb } from "@/lib/db";
@@ -38,15 +38,26 @@ function trackList(value: unknown): DetectTarget[] {
   return targets;
 }
 
-export async function GET() {
+const JOB_STATUSES = new Set<DetectJobStatus>(["pending", "running", "done", "failed", "skipped"]);
+
+export async function GET(request: Request) {
   startDetectWorker();
   const db = getDb();
+  const url = new URL(request.url);
+  const rawStatus = url.searchParams.get("status");
+  const status = rawStatus && JOB_STATUSES.has(rawStatus as DetectJobStatus) ? (rawStatus as DetectJobStatus) : null;
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page")) || 1));
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(url.searchParams.get("pageSize")) || 50)));
+  const list = status ? listJobs(db, { status, page, pageSize }) : { jobs: [], total: 0 };
   return NextResponse.json({
     settings: readDetectSettings(db),
     counts: detectCounts(db),
     totals: jobTotals(db),
     active: activeJob(db),
-    jobs: listJobs(db),
+    jobs: list.jobs,
+    total: list.total,
+    page,
+    pageSize,
   });
 }
 
@@ -57,7 +68,6 @@ export async function DELETE() {
     removed,
     counts: detectCounts(db),
     totals: jobTotals(db),
-    jobs: listJobs(db),
   });
 }
 

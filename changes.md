@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.22
+
+- Open language checks on their own page, with pages of history and the reason a track failed.
+
 ## 0.0.21
 
 - Use the movie or episode title for the multi-part pill, so the image build can finish.

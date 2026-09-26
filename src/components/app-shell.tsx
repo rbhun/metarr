@@ -1,6 +1,6 @@
 "use client";
 
-import { DetectTasks } from "@/components/detect-tasks";
+import { TaskCount } from "@/components/detect-tasks";
 import { VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +14,9 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
+import { Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 type ShellContextValue = {
@@ -35,6 +36,7 @@ export function useShell() {
 
 const NAV = [
   { href: "/", label: "Library", icon: Library },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -48,35 +50,34 @@ function navItemClass(collapsed: boolean) {
 function NavLinks({
   onNavigate,
   collapsed = false,
-  tasks,
+  bump,
 }: {
   onNavigate?: () => void;
   collapsed?: boolean;
-  tasks?: React.ReactNode;
+  bump: () => void;
 }) {
-  const library = NAV[0];
-  const settings = NAV[1];
-  const item = (entry: (typeof NAV)[number]) => {
-    const Icon = entry.icon;
-    return (
-      <Link
-        key={entry.href}
-        href={entry.href}
-        onClick={onNavigate}
-        title={collapsed ? entry.label : undefined}
-        aria-label={entry.label}
-        className={navItemClass(collapsed)}
-      >
-        <Icon />
-        {collapsed ? <span className="sr-only">{entry.label}</span> : entry.label}
-      </Link>
-    );
-  };
+  const pathname = usePathname();
   return (
     <nav className="flex flex-col gap-1">
-      {item(library)}
-      {tasks}
-      {item(settings)}
+      {NAV.map((entry) => {
+        const Icon = entry.icon;
+        const current = entry.href === "/" ? pathname === "/" : pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+        return (
+          <Link
+            key={entry.href}
+            href={entry.href}
+            onClick={onNavigate}
+            title={collapsed ? entry.label : undefined}
+            aria-label={entry.label}
+            aria-current={current ? "page" : undefined}
+            className={cn(navItemClass(collapsed), current && "bg-sidebar-accent text-foreground")}
+          >
+            <Icon />
+            {collapsed ? <span className="sr-only">{entry.label}</span> : entry.label}
+            {entry.href === "/tasks" ? <TaskCount bump={bump} className={collapsed ? "sr-only" : "ml-auto text-xs"} /> : null}
+          </Link>
+        );
+      })}
     </nav>
   );
 }
@@ -164,7 +165,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
           <div className={cn(collapsed ? "px-2" : "px-3")}>
-            <NavLinks collapsed={collapsed} tasks={<DetectTasks dialog className={navItemClass(collapsed)} collapsed={collapsed} bump={bump} />} />
+            <NavLinks collapsed={collapsed} bump={bump} />
           </div>
           <div className={cn("mt-auto space-y-3", collapsed ? "p-2" : "p-3")}>
             <Button
@@ -197,10 +198,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <p className="text-xs text-muted-foreground">{VERSION}</p>
                 </SheetHeader>
                 <div className="px-4">
-                  <NavLinks
-                    onNavigate={() => setMenuOpen(false)}
-                    tasks={<DetectTasks className={navItemClass(false)} bump={bump} />}
-                  />
+                  <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
                 </div>
                 <div className="mt-auto space-y-2 p-4">
                   <Button className="w-full" onClick={() => void startSync()} disabled={status?.running}>
@@ -212,7 +210,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Sheet>
             <p className="text-sm font-semibold">Metarr</p>
             <span className="text-xs text-muted-foreground">{VERSION}</span>
-            <DetectTasks bump={bump} compact />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" asChild>
+              <Link href="/tasks">
+                <ListTodo />
+                Tasks
+                <TaskCount bump={bump} className="text-xs" />
+              </Link>
+            </Button>
             <Button className="ml-auto" size="sm" onClick={() => void startSync()} disabled={status?.running}>
               <RefreshCw className={status?.running ? "animate-spin" : undefined} />
               Sync
