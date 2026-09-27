@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.38
+
+- Install util-linux in the image so remux can drop to the media owner with setpriv.
+
 ## 0.0.37
 
 - Run the container as the media folder owner when possible, so remux can write the MKV beside a DVD.
