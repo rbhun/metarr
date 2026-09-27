@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.54
+
+- Fix the Docker build after forced-subtitle detection by only applying commentary roles to audio tracks.
+
 ## 0.0.53
 
 - Call a disc track silent when it only holds a blank moment at the start, instead of saying the sample could not be read.

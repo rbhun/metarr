@@ -13,7 +13,7 @@ export function overlayAudio(path: string | null, tracks: AudioTrack[], detectio
     return {
       ...track,
       ...(found.language ? { detectedLanguage: found.language } : {}),
-      ...(found.role ? { detectedRole: found.role } : {}),
+      ...(found.role === "commentary" ? { detectedRole: "commentary" as const } : {}),
     };
   });
 }
