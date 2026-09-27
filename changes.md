@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.55
+
+- Recreate the media Docker volume without a y/N prompt when switching to a direct NFS mount.
+
 ## 0.0.54
 
 - Fix the Docker build after forced-subtitle detection by only applying commentary roles to audio tracks.
