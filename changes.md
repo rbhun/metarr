@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.35
+
+- Fix the Docker image build after the remux path check failed TypeScript.
+
 ## 0.0.34
 
 - Mount `/mnt/media` for Docker remux, write temp files under the app data folder, and say clearly when the disc folder is missing inside Metarr.
