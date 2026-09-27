@@ -34,6 +34,7 @@ RUN apt-get update \
     tesseract-ocr-fra \
     tesseract-ocr-spa \
     tesseract-ocr-ita \
+    util-linux \
   && python3 -m venv /opt/whisper \
   && /opt/whisper/bin/pip install --no-cache-dir faster-whisper \
   && rm -rf /var/lib/apt/lists/* \
