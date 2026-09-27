@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.56
+
+- Switch to direct NFS with a new `media_nfs` volume instead of recreating/deleting media volumes, so deploy cannot wipe library data.
+
 ## 0.0.55
 
 - Recreate the media Docker volume without a y/N prompt when switching to a direct NFS mount.
