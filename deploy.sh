@@ -24,6 +24,34 @@ git pull --ff-only
 
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.media.yml"
 
+# Recreate only the media volume (never metarr-data / SQLite) when mount options change.
+# Avoids the interactive: Volume "metarr_media" exists but doesn't match configuration.
+recreate_media_volume() {
+  echo "Recreating the media volume non-interactively (SQLite data volume is kept)."
+  $COMPOSE stop metarr >/dev/null 2>&1 || true
+  cid=$($COMPOSE ps -aq metarr 2>/dev/null || true)
+  if [ -n "$cid" ]; then
+    docker rm -f $cid >/dev/null 2>&1 || true
+  fi
+  for vol in $(docker volume ls -q 2>/dev/null | grep -E '_media$' || true); do
+    case "$vol" in
+      *metarr-data*|*metarr_data*|*data*) continue ;;
+    esac
+    echo "  docker volume rm -f $vol"
+    docker volume rm -f "$vol" >/dev/null 2>&1 || true
+  done
+}
+
+compose_up() {
+  # Prefer --yes when the installed Compose supports it (skips volume recreate prompts).
+  if $COMPOSE up --help 2>&1 | grep -q -- '--yes'; then
+    $COMPOSE up --yes "$@"
+  else
+    # Older Compose: answer the volume recreate prompt if it appears.
+    yes y | $COMPOSE up "$@"
+  fi
+}
+
 write_media_bind() {
   cat > docker-compose.media.yml <<'EOF'
 # Host bind of /mnt/media (default).
@@ -63,8 +91,10 @@ nfs_source_from_host() {
 }
 
 # Choose media volume backing before the first compose up.
+media_recreate=0
 if [ -n "${METARR_NFS_ADDR:-}" ] && [ -n "${METARR_NFS_EXPORT:-}" ]; then
   write_media_nfs "$METARR_NFS_ADDR" "$METARR_NFS_EXPORT"
+  media_recreate=1
 elif [ ! -f docker-compose.media.yml ]; then
   write_media_bind
 fi
@@ -131,7 +161,10 @@ if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; th
   fi
 fi
 
-$COMPOSE up --build -d
+if [ "$media_recreate" -eq 1 ]; then
+  recreate_media_volume
+fi
+compose_up --build -d
 
 host_touch_as() {
   dir=$1
@@ -182,7 +215,8 @@ switch_to_direct_nfs_and_retry() {
     return 1
   fi
   write_media_nfs "$addr" "$export_path"
-  $COMPOSE up -d
+  recreate_media_volume
+  compose_up -d
   return 0
 }
 

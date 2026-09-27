@@ -33,7 +33,7 @@ The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. 
 
 **Mount `rw` vs write permission:** `findmnt` showing `rw` means the *client* did not request a read-only mount. Each title folder still has a Unix owner/group/mode. Remux creates the MKV **inside that title folder**, and the container runs as one `METARR_UID`/`METARR_GID` for **every** job. Deploy may sample any existing title (or a temporary folder) as a canary — it is not limited to one movie.
 
-If touch fails with **Read-only file system (EROFS)** on this host while your laptop or Plex can write the same share, the problem is this machine’s `/mnt/media` mount (often autofs/NFS), not Metarr UIDs. `deploy.sh` will try mounting NFS **directly into Docker**. You can also set it explicitly (use the same server/export your laptop uses):
+If touch fails with **Read-only file system (EROFS)** on this host while your laptop or Plex can write the same share, the problem is this machine’s `/mnt/media` mount (often autofs/NFS), not Metarr UIDs. `deploy.sh` will try mounting NFS **directly into Docker** and recreate the `metarr_media` volume without a prompt (SQLite data is kept). You can also set it explicitly (use the same server/export your laptop uses):
 
 ```bash
 export METARR_NFS_ADDR=192.168.20.2
@@ -43,7 +43,7 @@ export METARR_GID=$(stat -c %g /mnt/media/Movies)
 sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT /opt/metarr/deploy.sh
 ```
 
-`METARR_UID` / `METARR_GID` cannot fix EROFS.
+If deploy is stuck on `Recreate (data will be lost)? (y/N)`, answer **y** once (only the media volume is recreated), or Ctrl+C and redeploy after pulling 0.0.55+. `METARR_UID` / `METARR_GID` cannot fix EROFS.
 
 If it fails with a permission error (**EACCES**), the container user cannot write that folder. On **NFS**, `root_squash` maps uid 0 to nobody, so do not run as root even when folders show owner `0`. Set a non-root uid and the media group (used for all remuxes):
 
