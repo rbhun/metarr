@@ -2,11 +2,18 @@
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 50;
+
+const QUEUES = [
+  ["all", "All"],
+  ["language", "Languages"],
+  ["remux", "Rips"],
+] as const;
 
 const TABS = [
   ["failed", "Failed"],
@@ -16,20 +23,19 @@ const TABS = [
   ["skipped", "Skipped"],
 ] as const;
 
+type QueueFilter = (typeof QUEUES)[number][0];
 type JobStatus = (typeof TABS)[number][0];
 
-type DetectJobView = {
+type TaskJob = {
+  key: string;
+  queue: "language" | "remux";
   id: number;
   path: string;
   label: string;
-  kind: "audio" | "subtitle";
-  ordinal: number;
-  priority: "immediate" | "window";
   status: JobStatus;
-  format: string | null;
-  placement: string | null;
-  streamLabel: string | null;
   message: string | null;
+  detail: string;
+  progress: number | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -37,16 +43,19 @@ type DetectJobView = {
 
 type JobTotals = { pending: number; running: number; done: number; failed: number; skipped: number };
 
-type DetectBody = {
-  counts: { immediate: number; window: number; running: number };
+type TasksBody = {
   totals?: JobTotals;
-  jobs?: DetectJobView[];
+  jobs?: TaskJob[];
   total?: number;
   error?: string;
 };
 
 function isStatus(value: string | null): value is JobStatus {
   return TABS.some(([status]) => status === value);
+}
+
+function isQueue(value: string | null): value is QueueFilter {
+  return QUEUES.some(([queue]) => queue === value);
 }
 
 function queueSummary(totals: JobTotals): string {
@@ -60,28 +69,21 @@ function queueSummary(totals: JobTotals): string {
   return parts.join(" · ");
 }
 
-function taskState(job: DetectJobView): string {
-  if (job.status === "running") return job.kind === "audio" ? "Listening" : "Reading";
-  if (job.status === "pending" && job.priority === "window") return "Waiting for the window";
+function taskState(job: TaskJob): string {
+  if (job.status === "running") {
+    if (job.queue === "remux") {
+      if (job.progress != null && job.progress > 0) return `Remuxing ${job.progress}%`;
+      return job.message || "Remuxing";
+    }
+    return job.detail.startsWith("Audio") ? "Listening" : "Reading";
+  }
   if (job.status === "pending") return "Queued";
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 
-function trackLine(job: DetectJobView): string {
-  return [
-    job.kind === "audio" ? "Audio" : "Subtitle",
-    job.format,
-    job.placement,
-    `track ${job.ordinal + 1}`,
-    job.streamLabel,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function when(job: DetectJobView): string {
+function when(job: TaskJob): string {
   const stamp = job.finishedAt ?? job.startedAt ?? job.createdAt;
   const date = new Date(stamp);
   const label = job.finishedAt ? "Finished" : job.startedAt ? "Started" : "Queued";
@@ -90,8 +92,13 @@ function when(job: DetectJobView): string {
 }
 
 function tabCount(totals: JobTotals, status: JobStatus): number {
-  if (status === "pending") return totals.pending;
   return totals[status];
+}
+
+function failureText(job: TaskJob): string {
+  if (job.message?.trim()) return job.message;
+  if (job.queue === "remux") return "Remux failed with no further detail from MakeMKV.";
+  return "Language check failed with no further detail.";
 }
 
 export function TasksView() {
@@ -99,8 +106,9 @@ export function TasksView() {
   const searchParams = useSearchParams();
   const requested = searchParams.get("status");
   const status: JobStatus = isStatus(requested) ? requested : "failed";
+  const queue: QueueFilter = isQueue(searchParams.get("queue")) ? (searchParams.get("queue") as QueueFilter) : "all";
   const page = Math.max(1, Math.trunc(Number(searchParams.get("page")) || 1));
-  const [jobs, setJobs] = useState<DetectJobView[]>([]);
+  const [jobs, setJobs] = useState<TaskJob[]>([]);
   const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<JobTotals>({ pending: 0, running: 0, done: 0, failed: 0, skipped: 0 });
   const [loading, setLoading] = useState(true);
@@ -108,25 +116,26 @@ export function TasksView() {
   const [clearing, setClearing] = useState(false);
 
   const writeQuery = useCallback(
-    (next: { status?: JobStatus; page?: number }) => {
+    (next: { status?: JobStatus; page?: number; queue?: QueueFilter }) => {
       const params = new URLSearchParams(searchParams.toString());
+      params.set("queue", next.queue ?? queue);
       params.set("status", next.status ?? status);
-      params.set("page", String(next.page ?? (next.status && next.status !== status ? 1 : page)));
+      params.set("page", String(next.page ?? ((next.status && next.status !== status) || (next.queue && next.queue !== queue) ? 1 : page)));
       router.replace(`/tasks?${params.toString()}`);
     },
-    [page, router, searchParams, status],
+    [page, queue, router, searchParams, status],
   );
 
   const load = useCallback(async () => {
     let response: Response;
     try {
-      response = await fetch(`/api/detect?status=${status}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
+      response = await fetch(`/api/tasks?queue=${queue}&status=${status}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
     } catch {
       setError("The task list could not be loaded.");
       setLoading(false);
       return;
     }
-    const body = (await response.json().catch(() => null)) as DetectBody | null;
+    const body = (await response.json().catch(() => null)) as TasksBody | null;
     if (!response.ok || !body) {
       setError(body?.error || "The task list could not be loaded.");
       setLoading(false);
@@ -135,17 +144,9 @@ export function TasksView() {
     setError(null);
     setJobs(body.jobs ?? []);
     setTotal(body.total ?? 0);
-    setTotals(
-      body.totals ?? {
-        pending: body.counts.window + body.counts.immediate,
-        running: body.counts.running,
-        done: 0,
-        failed: 0,
-        skipped: 0,
-      },
-    );
+    setTotals(body.totals ?? { pending: 0, running: 0, done: 0, failed: 0, skipped: 0 });
     setLoading(false);
-  }, [page, status]);
+  }, [page, queue, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -167,10 +168,11 @@ export function TasksView() {
   async function clearQueue() {
     if (totals.pending < 1 || clearing) return;
     const waiting = totals.pending.toLocaleString("en");
-    if (!window.confirm(`Remove ${waiting} waiting tracks? The track already running will finish. Languages already found stay.`)) return;
+    const what = queue === "remux" ? "discs" : queue === "language" ? "tracks" : "jobs";
+    if (!window.confirm(`Remove ${waiting} waiting ${what}? Anything already running will finish.`)) return;
     setClearing(true);
     try {
-      const response = await fetch("/api/detect", { method: "DELETE" });
+      const response = await fetch(`/api/tasks?queue=${queue}`, { method: "DELETE" });
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) throw new Error(body?.error || "The queue could not be cleared.");
       toast.success("Queue cleared.");
@@ -196,7 +198,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Language checks run one track at a time. Failed tracks stay here with the reason they were not read, including an SRT or MP3 whose file path this machine cannot open.
+                Language checks and disc remuxes share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
             {totals.pending > 0 ? (
@@ -205,7 +207,14 @@ export function TasksView() {
               </Button>
             ) : null}
           </div>
-          <p className="text-sm text-muted-foreground">{queueSummary(totals) || "No language checks yet."}</p>
+          <p className="text-sm text-muted-foreground">{queueSummary(totals) || "No tasks yet."}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {QUEUES.map(([value, label]) => (
+              <Button key={value} size="sm" variant={queue === value ? "default" : "outline"} onClick={() => writeQuery({ queue: value, page: 1 })}>
+                {label}
+              </Button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {TABS.map(([value, label]) => (
               <Button key={value} size="sm" variant={status === value ? "default" : "outline"} onClick={() => writeQuery({ status: value, page: 1 })}>
@@ -226,19 +235,38 @@ export function TasksView() {
           ) : null}
           {loading && jobs.length === 0 ? <p className="text-sm text-muted-foreground">Loading tasks…</p> : null}
           {!loading && jobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{total === 0 ? `No ${tabLabel.toLowerCase()} tracks.` : "This page is empty."}</p>
+            <p className="text-sm text-muted-foreground">{total === 0 ? `No ${tabLabel.toLowerCase()} tasks.` : "This page is empty."}</p>
           ) : null}
           <div className="flex flex-col gap-3">
             {jobs.map((job) => (
-              <article key={job.id} className="space-y-1.5 rounded-lg border px-3 py-3">
+              <article
+                key={job.key}
+                className={cn("space-y-1.5 rounded-lg border px-3 py-3", job.status === "failed" && "border-destructive/40 bg-destructive/5")}
+              >
                 <div className="flex items-start justify-between gap-3">
-                  <h2 className="min-w-0 text-sm font-medium">{job.label}</h2>
+                  <div className="min-w-0">
+                    <h2 className="min-w-0 text-sm font-medium">{job.label}</h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {job.queue === "remux" ? "Rip" : "Language"}
+                      {job.detail ? ` · ${job.detail}` : ""}
+                    </p>
+                  </div>
                   <span className={cn("shrink-0 text-xs", job.status === "failed" ? "text-destructive" : "text-muted-foreground")}>{taskState(job)}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">{trackLine(job)}</p>
-                {job.message ? <p className="text-sm leading-6">{job.message}</p> : null}
+                {job.status === "failed" ? (
+                  <p className="text-sm leading-6 text-destructive">{failureText(job)}</p>
+                ) : job.message ? (
+                  <p className="text-sm leading-6">{job.message}</p>
+                ) : null}
                 <p className="text-xs leading-5 break-all text-muted-foreground">{job.path}</p>
-                <p className="text-xs text-muted-foreground">{when(job)}</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>{when(job)}</span>
+                  {job.queue === "remux" ? (
+                    <Link href="/rips" className="underline underline-offset-2">
+                      Open Rips
+                    </Link>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>

@@ -155,9 +155,15 @@ export function updateRemuxProgress(db: Database.Database, id: number, progress:
 }
 
 export function finishRemux(db: Database.Database, id: number, status: "done" | "failed", message: string | null) {
+  const text =
+    message && message.trim()
+      ? message.trim().slice(0, 1000)
+      : status === "failed"
+        ? "Remux failed with no further detail from MakeMKV."
+        : null;
   db.prepare(`UPDATE remux_jobs SET status = ?, message = ?, progress = NULL, finished_at = ? WHERE id = ?`).run(
     status,
-    message ? message.slice(0, 500) : null,
+    text,
     new Date().toISOString(),
     id,
   );

@@ -22,5 +22,5 @@ async function enqueueRemuxBody(body: Record<string, unknown>): Promise<string> 
   const discs = added === 1 ? "1 disc" : `${added} discs`;
   const extra = body.extras === true ? " Extras are saved beside the movie." : " Only the longest title is saved.";
   const rest = skipped ? ` ${skipped} selected ${skipped === 1 ? "file is" : "files are"} not a disc.` : "";
-  return `Queued ${discs} for Rips. One disc runs at a time during the overnight window.${extra}${rest}`;
+  return `Queued ${discs} for Tasks. One disc runs at a time during the overnight window.${extra}${rest}`;
 }

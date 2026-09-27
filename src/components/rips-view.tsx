@@ -5,40 +5,15 @@ import { toastRemux } from "@/components/remux-tasks";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-
-const PAGE_SIZE = 50;
-
-const TABS = [
-  ["pending", "Waiting"],
-  ["running", "Running"],
-  ["done", "Done"],
-  ["failed", "Failed"],
-] as const;
-
-type JobStatus = (typeof TABS)[number][0];
 
 type DiscCandidate = {
   path: string;
   label: string;
   kind: string;
   kindLabel: string;
-};
-
-type RemuxJobView = {
-  id: number;
-  path: string;
-  label: string;
-  extras: boolean;
-  status: JobStatus;
-  message: string | null;
-  progress: number | null;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
 };
 
 type JobTotals = { pending: number; running: number; done: number; failed: number };
@@ -49,14 +24,9 @@ type RemuxBody = {
   totals?: JobTotals;
   pause: "window" | "plex" | "detect" | null;
   discs?: DiscCandidate[];
-  jobs?: RemuxJobView[];
-  total?: number;
+  latest?: { label: string; status: "done" | "failed"; message: string | null } | null;
   error?: string;
 };
-
-function isStatus(value: string | null): value is JobStatus {
-  return TABS.some(([status]) => status === value);
-}
 
 function hourLabel(hour: number): string {
   return `${String(hour).padStart(2, "0")}:00`;
@@ -78,40 +48,12 @@ function queueSummary(totals: JobTotals, pause: RemuxBody["pause"], settings: Re
   return base;
 }
 
-function jobState(job: RemuxJobView): string {
-  if (job.status === "running") {
-    if (job.progress != null && job.progress > 0) return `Remuxing ${job.progress}%`;
-    return job.message || "Remuxing";
-  }
-  if (job.status === "pending") return "Queued";
-  if (job.status === "failed") return "Failed";
-  return "Done";
-}
-
-function when(job: RemuxJobView): string {
-  const stamp = job.finishedAt ?? job.startedAt ?? job.createdAt;
-  const date = new Date(stamp);
-  const label = job.finishedAt ? "Finished" : job.startedAt ? "Started" : "Queued";
-  if (Number.isNaN(date.getTime())) return label;
-  return `${label} ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
-}
-
-function tabCount(totals: JobTotals, status: JobStatus): number {
-  return totals[status];
-}
-
 export function RipsView() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const requested = searchParams.get("status");
-  const status: JobStatus = isStatus(requested) ? requested : "pending";
-  const page = Math.max(1, Math.trunc(Number(searchParams.get("page")) || 1));
   const [discs, setDiscs] = useState<DiscCandidate[]>([]);
-  const [jobs, setJobs] = useState<RemuxJobView[]>([]);
-  const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<JobTotals>({ pending: 0, running: 0, done: 0, failed: 0 });
   const [settings, setSettings] = useState({ startHour: 1, endHour: 7 });
   const [pause, setPause] = useState<RemuxBody["pause"]>(null);
+  const [latest, setLatest] = useState<RemuxBody["latest"]>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -121,20 +63,10 @@ export function RipsView() {
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
 
-  const writeQuery = useCallback(
-    (next: { status?: JobStatus; page?: number }) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("status", next.status ?? status);
-      params.set("page", String(next.page ?? (next.status && next.status !== status ? 1 : page)));
-      router.replace(`/rips?${params.toString()}`);
-    },
-    [page, router, searchParams, status],
-  );
-
   const load = useCallback(async () => {
     let response: Response;
     try {
-      response = await fetch(`/api/remux?discs=1&status=${status}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
+      response = await fetch("/api/remux?discs=1", { cache: "no-store" });
     } catch {
       setError("The remux list could not be loaded.");
       setLoading(false);
@@ -148,8 +80,6 @@ export function RipsView() {
     }
     setError(null);
     setDiscs(body.discs ?? []);
-    setJobs(body.jobs ?? []);
-    setTotal(body.total ?? 0);
     setTotals(
       body.totals ?? {
         pending: body.counts.waiting,
@@ -160,8 +90,9 @@ export function RipsView() {
     );
     setSettings(body.settings);
     setPause(body.pause);
+    setLatest(body.latest ?? null);
     setLoading(false);
-  }, [page, status]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -173,12 +104,6 @@ export function RipsView() {
       window.clearInterval(poll);
     };
   }, [load]);
-
-  useEffect(() => {
-    if (loading || error) return;
-    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    if (page > pages) writeQuery({ page: pages });
-  }, [error, loading, page, total, writeQuery]);
 
   const filteredDiscs = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -222,7 +147,6 @@ export function RipsView() {
       toastRemux(await enqueueRemuxPaths(paths, extras));
       setSelected(new Set());
       await load();
-      writeQuery({ status: "pending", page: 1 });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue the disc remux.");
     } finally {
@@ -238,7 +162,6 @@ export function RipsView() {
       toastRemux(await enqueueRemuxPaths([{ path }], extras));
       setPathInput("");
       await load();
-      writeQuery({ status: "pending", page: 1 });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue the disc remux.");
     } finally {
@@ -264,12 +187,13 @@ export function RipsView() {
     }
   }
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, pages);
-  const pageStart = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(safePage * PAGE_SIZE, total);
-  const tabLabel = TABS.find(([value]) => value === status)?.[1] ?? "Waiting";
   const allVisibleSelected = filteredDiscs.length > 0 && filteredDiscs.every((disc) => selected.has(disc.path));
+  const tasksHref =
+    totals.failed > 0 && totals.pending === 0 && totals.running === 0
+      ? "/tasks?queue=remux&status=failed"
+      : totals.running > 0
+        ? "/tasks?queue=remux&status=running"
+        : "/tasks?queue=remux&status=pending";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -278,9 +202,38 @@ export function RipsView() {
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Rips</h1>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Send ISO, DVD, and Blu-ray disc images for a high-quality MakeMKV remux. Every audio and subtitle track is copied into an MKV beside the disc; nothing is re-encoded, and the disc stays where it is.
+              Send ISO, DVD, and Blu-ray disc images for a high-quality MakeMKV remux. Every audio and subtitle track is copied into an MKV beside the disc; nothing is re-encoded, and the disc stays where it is. Progress and failure reasons stay on{" "}
+              <Link href="/tasks?queue=remux" className="underline underline-offset-2">
+                Tasks
+              </Link>
+              .
             </p>
           </div>
+
+          <section className="space-y-2 rounded-lg border px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium">Queue</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{queueSummary(totals, pause, settings)}</p>
+                {latest?.status === "failed" ? (
+                  <p className="mt-2 text-sm leading-6 text-destructive">
+                    Last failure: {latest.label}
+                    {latest.message ? ` — ${latest.message}` : ""}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {totals.pending > 0 ? (
+                  <Button size="sm" variant="outline" onClick={() => void clearQueue()} disabled={clearing}>
+                    Clear waiting
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={tasksHref}>Open Tasks</Link>
+                </Button>
+              </div>
+            </div>
+          </section>
 
           <section className="space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -304,6 +257,14 @@ export function RipsView() {
               placeholder="Search disc titles or paths"
               aria-label="Search disc titles or paths"
             />
+            {error ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm">
+                <p>{error}</p>
+                <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
+                  Retry
+                </Button>
+              </div>
+            ) : null}
             {loading && discs.length === 0 ? <p className="text-sm text-muted-foreground">Loading disc images…</p> : null}
             {!loading && discs.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -316,11 +277,7 @@ export function RipsView() {
             {filteredDiscs.length > 0 ? (
               <div className="overflow-hidden rounded-lg border">
                 <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
-                  <Checkbox
-                    checked={allVisibleSelected}
-                    onCheckedChange={() => toggleAllVisible()}
-                    aria-label="Select all visible discs"
-                  />
+                  <Checkbox checked={allVisibleSelected} onCheckedChange={() => toggleAllVisible()} aria-label="Select all visible discs" />
                   <span className="text-muted-foreground">
                     {filteredDiscs.length.toLocaleString("en")} disc{filteredDiscs.length === 1 ? "" : "s"}
                     {selected.size ? ` · ${selected.size} selected` : ""}
@@ -372,75 +329,8 @@ export function RipsView() {
               </Button>
             </div>
           </section>
-
-          <section className="space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-medium">Queue</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{queueSummary(totals, pause, settings)}</p>
-              </div>
-              {totals.pending > 0 ? (
-                <Button size="sm" variant="outline" onClick={() => void clearQueue()} disabled={clearing}>
-                  Clear waiting
-                </Button>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {TABS.map(([value, label]) => (
-                <Button key={value} size="sm" variant={status === value ? "default" : "outline"} onClick={() => writeQuery({ status: value, page: 1 })}>
-                  {label}
-                  <span className={cn("text-xs", status === value ? "text-primary-foreground/80" : "text-muted-foreground")}>
-                    {tabCount(totals, value).toLocaleString("en")}
-                  </span>
-                </Button>
-              ))}
-            </div>
-            {error ? (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm">
-                <p>{error}</p>
-                <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
-                  Retry
-                </Button>
-              </div>
-            ) : null}
-            {loading && jobs.length === 0 ? <p className="text-sm text-muted-foreground">Loading queue…</p> : null}
-            {!loading && jobs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{total === 0 ? `No ${tabLabel.toLowerCase()} remux jobs.` : "This page is empty."}</p>
-            ) : null}
-            <div className="flex flex-col gap-3">
-              {jobs.map((job) => (
-                <article key={job.id} className="space-y-1.5 rounded-lg border px-3 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="min-w-0 text-sm font-medium">{job.label}</h3>
-                    <span className={cn("shrink-0 text-xs", job.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
-                      {jobState(job)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{job.extras ? "Longest title and extras" : "Longest title only"}</p>
-                  {job.message ? <p className="text-sm leading-6">{job.message}</p> : null}
-                  <p className="text-xs leading-5 break-all text-muted-foreground">{job.path}</p>
-                  <p className="text-xs text-muted-foreground">{when(job)}</p>
-                </article>
-              ))}
-            </div>
-          </section>
         </div>
       </div>
-      {total > 0 ? (
-        <div className="flex items-center justify-between gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
-          <p>
-            {pageStart.toLocaleString("en")}–{pageEnd.toLocaleString("en")} of {total.toLocaleString("en")}
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={safePage <= 1} onClick={() => writeQuery({ page: safePage - 1 })}>
-              Previous
-            </Button>
-            <Button size="sm" variant="outline" disabled={safePage * PAGE_SIZE >= total} onClick={() => writeQuery({ page: safePage + 1 })}>
-              Next
-            </Button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
