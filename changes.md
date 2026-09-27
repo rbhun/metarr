@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.40
+
+- Open Tasks links on the All list by default.
+
 ## 0.0.39
 
 - Add an All filter on Tasks that shows waiting, running, done, and failed jobs in one list.
