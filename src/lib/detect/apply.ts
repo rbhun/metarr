@@ -123,7 +123,7 @@ export async function writeFinding(
   job: WriteJob,
   localFile: string,
   language: string,
-  role: "commentary" | null,
+  role: "commentary" | "forced" | null,
 ): Promise<WriteResult> {
   const plan = planTag(localFile, job.kind, job.ordinal, language, role);
   if (plan.action === "skip") return unchanged(job, skipSentence(plan.reason));
@@ -149,6 +149,7 @@ export async function writeFinding(
     if (plan.action === "matroska") {
       const args = [localFile, "--edit", plan.selector, "--set", `language=${plan.language}`];
       if (plan.commentary) args.push("--set", "flag-commentary=1");
+      if (plan.forced) args.push("--set", "flag-forced=1");
       if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push("--set", "name=Commentary");
       await runTool("mkvpropedit", args, 60_000, true);
     } else if (plan.action === "mp4") {
@@ -173,6 +174,7 @@ export async function writeFinding(
         `language=${plan.language}`,
       ];
       if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push(`-metadata:${plan.specifier}`, "title=Commentary");
+      if (plan.forced) args.push(`-disposition:s:${job.ordinal}`, "forced");
       args.push(retagTempPath(localFile));
       await replaceMp4(localFile, args);
     } else {
@@ -225,7 +227,7 @@ export async function applyNextSaved(db: Database.Database, maps: PathMap[]): Pr
   if (!row || !row.language) return false;
   const key = savedKey(row.path, row.kind, row.ordinal);
   const kind = row.kind === "subtitle" ? "subtitle" : "audio";
-  const role = row.role === "commentary" ? "commentary" : null;
+  const role = row.role === "commentary" || row.role === "forced" ? row.role : null;
   const local = resolveMediaPath(row.path, maps, (candidate) => {
     try {
       return fs.existsSync(candidate) && fs.statSync(candidate).isFile();

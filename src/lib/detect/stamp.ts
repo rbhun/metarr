@@ -5,7 +5,7 @@ type StampInput = {
   kind: "audio" | "subtitle";
   ordinal: number;
   language: string;
-  role: "commentary" | null;
+  role: "commentary" | "forced" | null;
   renamedTo: string | null;
 };
 
@@ -49,6 +49,7 @@ function stampTracks(value: unknown, videoPath: string | null, input: StampInput
       if (!file || !samePath(file, input.path)) return;
       if (!track.language) track.language = input.language;
       if (input.renamedTo) track.file = input.renamedTo;
+      if (input.role === "forced") track.forced = true;
       changed = true;
       return;
     }
@@ -59,6 +60,10 @@ function stampTracks(value: unknown, videoPath: string | null, input: StampInput
     if (streamIndex !== input.ordinal) return;
     if (!track.language) {
       track.language = input.language;
+      changed = true;
+    }
+    if (input.kind === "subtitle" && input.role === "forced" && track.forced !== true) {
+      track.forced = true;
       changed = true;
     }
     if (input.kind === "audio" && input.role === "commentary") {

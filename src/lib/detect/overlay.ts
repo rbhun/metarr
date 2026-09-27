@@ -26,6 +26,6 @@ export function overlaySubtitles(path: string | null, tracks: SubtitleTrack[], d
     const ordinal = external ? 0 : (track.streamIndex ?? index);
     const found = detections.get(detectionKey(mediaPath, "subtitle", ordinal));
     if (!found?.language) return track;
-    return { ...track, detectedLanguage: found.language };
+    return { ...track, detectedLanguage: found.language, ...(found.role === "forced" ? { forced: true } : {}) };
   });
 }

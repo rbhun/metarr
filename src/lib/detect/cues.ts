@@ -1,3 +1,9 @@
+export function cueCount(raw: string): number {
+  const arrows = raw.match(/-->/g)?.length ?? 0;
+  if (arrows > 0) return arrows;
+  return raw.match(/^Dialogue:/gim)?.length ?? 0;
+}
+
 export function cueText(raw: string): string {
   const pieces: string[] = [];
   for (const line of raw.replace(/^\uFEFF/, "").replace(/\r/g, "").split("\n")) {

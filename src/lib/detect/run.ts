@@ -3,14 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { audioClipArgs, audioCopyArgs, audioDecodeArgs, clipStart, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { audioClipArgs, audioCopyArgs, audioDecodeArgs, audioSliceArgs, clipStart, dialogueMix, isTransportStream, openingWindow, packetBytes, pcmIsSilent, sampleOffsets, tsWindow } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
-import { cueText } from "@/lib/detect/cues";
+import { cueCount, cueText } from "@/lib/detect/cues";
+import { isForcedCueCount } from "@/lib/detect/forced";
 import type { DetectJob } from "@/lib/detect/store";
 import { readPgsImages, scaleBitmap, writePng } from "@/lib/detect/pgs";
-import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
@@ -19,7 +20,7 @@ import { languageName } from "@/lib/media";
 
 export type DetectionOutcome = {
   language: string | null;
-  role: "commentary" | null;
+  role: "commentary" | "forced" | null;
   confidence: number;
   message: string | null;
 };
@@ -53,13 +54,22 @@ function secondsOf(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function probeAudio(file: string, ordinal: number): Promise<{ duration: number | null; start: number | null; layout: string | null; channels: number | null }> {
+async function probeAudio(file: string, ordinal: number, quick = false): Promise<{ duration: number | null; start: number | null; layout: string | null; channels: number | null }> {
   const empty = { duration: null, start: null, layout: null, channels: null };
   try {
     const { stdout } = await runCommand(
       "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration,start_time:stream=codec_type,start_time,channel_layout,channels", "-of", "json", file],
-      30_000,
+      [
+        "-v",
+        "error",
+        ...(quick ? ["-probesize", "8000000", "-analyzeduration", "2000000"] : []),
+        "-show_entries",
+        "format=duration,start_time:stream=codec_type,start_time,channel_layout,channels",
+        "-of",
+        "json",
+        file,
+      ],
+      quick ? 15_000 : 30_000,
     );
     const body = JSON.parse(stdout) as {
       format?: { duration?: unknown; start_time?: unknown };
@@ -153,6 +163,53 @@ function ensureWhisper(): ChildProcessWithoutNullStreams {
   return child;
 }
 
+function ffmpegSlice(file: string, start: number, end: number, args: string[], timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child: ChildProcess = spawn("nice", ["-n", "15", "ffmpeg", ...args], {
+      stdio: ["pipe", "ignore", "pipe"],
+      env: limitedEnv,
+    });
+    const reader = fs.createReadStream(file, { start, end: Math.max(start, end - 1) });
+    let stderr = "";
+    let settled = false;
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reader.destroy();
+      child.stdin?.destroy();
+      if (child.exitCode == null && !child.killed) child.kill("SIGKILL");
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => settle(new Error("ffmpeg timed out.")), timeout);
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = `${stderr}${chunk.toString()}`.slice(-2000);
+    });
+    child.stdin?.on("error", () => undefined);
+    reader.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED") return;
+      settle(error);
+    });
+    child.on("error", (error) => settle(error));
+    if (child.stdin) reader.pipe(child.stdin);
+    child.on("close", (code) => {
+      if (settled) return;
+      if (code === 0) {
+        settle();
+        return;
+      }
+      const detail = stderr
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("_STATISTICS_"))
+        .slice(-4)
+        .join(" ");
+      settle(new Error(detail || "ffmpeg could not read the audio slice."));
+    });
+  });
+}
+
 function transcribe(wav: string): Promise<Speech> {
   const child = ensureWhisper();
   return new Promise((resolve, reject) => {
@@ -168,34 +225,22 @@ function transcribe(wav: string): Promise<Speech> {
 async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
   try {
-    const heard = await probeAudio(file, job.ordinal);
+    const transport = isTransportStream(file);
+    const heard = await probeAudio(file, job.ordinal, transport);
     const mix = dialogueMix(heard.layout, heard.channels);
+    const fileSize = transport ? fs.statSync(file).size : 0;
     const samples: Array<{ language: string; probability: number }> = [];
     const transcript: string[] = [];
     let agreed = { language: null as string | null, confidence: 0 };
     let readSample = false;
-    const listen = async (offset: number, index: number): Promise<"timeout" | "heard"> => {
-      const copied = path.join(directory, `clip-${index}.mka`);
-      const wav = path.join(directory, `clip-${index}.wav`);
-      const present = (target: string, minimum: number) => fs.existsSync(target) && fs.statSync(target).size >= minimum;
-      try {
-        await runCommand("ffmpeg", audioCopyArgs(file, job.ordinal, offset, copied), 45_000);
-      } catch (caught) {
-        if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
-      }
-      const source = present(copied, 1_000) ? copied : null;
-      for (const filter of mix ? [mix, null] : [null]) {
-        try {
-          const args = source
-            ? audioDecodeArgs(source, wav, filter)
-            : audioClipArgs(file, job.ordinal, offset, wav, filter);
-          await runCommand("ffmpeg", args, source ? 20_000 : 45_000);
-          break;
-        } catch (caught) {
-          if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
-        }
-      }
+    let silent = false;
+    const present = (target: string, minimum: number) => fs.existsSync(target) && fs.statSync(target).size >= minimum;
+    const hearFile = async (wav: string): Promise<"timeout" | "heard"> => {
       if (!present(wav, 8_000)) return "heard";
+      if (pcmIsSilent(fs.readFileSync(wav))) {
+        silent = true;
+        return "heard";
+      }
       readSample = true;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
@@ -203,18 +248,67 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       agreed = agreeLanguage(samples);
       return "heard";
     };
+    const listenSlice = async (window: { start: number; end: number } | null, index: number): Promise<"timeout" | "heard"> => {
+      const wav = path.join(directory, `clip-${index}.wav`);
+      if (!window) return "heard";
+      for (const filter of mix ? [mix, null] : [null]) {
+        try {
+          await ffmpegSlice(file, window.start, window.end, audioSliceArgs(job.ordinal, wav, filter), 40_000);
+          if (present(wav, 8_000)) break;
+        } catch (caught) {
+          if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
+        }
+      }
+      return hearFile(wav);
+    };
+    const listen = async (offset: number, index: number): Promise<"timeout" | "heard"> => {
+      const copied = path.join(directory, `clip-${index}.mka`);
+      const wav = path.join(directory, `clip-${index}.wav`);
+      if (transport) {
+        return listenSlice(tsWindow(fileSize, heard.duration, offset, packetBytes(file)), index);
+      } else {
+        try {
+          await runCommand("ffmpeg", audioCopyArgs(file, job.ordinal, offset, copied), 45_000);
+        } catch (caught) {
+          if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
+        }
+        const source = present(copied, 1_000) ? copied : null;
+        for (const filter of mix ? [mix, null] : [null]) {
+          try {
+            const args = source
+              ? audioDecodeArgs(source, wav, filter)
+              : audioClipArgs(file, job.ordinal, offset, wav, filter);
+            await runCommand("ffmpeg", args, source ? 20_000 : 45_000);
+            break;
+          } catch (caught) {
+            if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
+          }
+        }
+      }
+      return hearFile(wav);
+    };
+    let timedOut = false;
     for (const [index, offset] of sampleOffsets(heard.duration).entries()) {
-      const outcome = await listen(clipStart(offset, heard.start), index);
-      if (outcome === "timeout") break;
+      const outcome = await listen(transport ? offset : clipStart(offset, heard.start), index);
+      if (outcome === "timeout") {
+        timedOut = true;
+        break;
+      }
       if (agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
+    if (transport && samples.length === 0 && !readSample && !timedOut) {
+      const outcome = await listenSlice(openingWindow(fileSize, packetBytes(file)), 2);
+      if (outcome === "timeout") timedOut = true;
+    }
     if (samples.length === 0) {
-      return {
-        language: null,
-        role: null,
-        confidence: 0,
-        message: readSample ? "No speech found in the sample." : "The audio sample could not be read in time.",
-      };
+      const message = readSample
+        ? "No speech found in the sample."
+        : silent
+          ? "This track is silent."
+          : timedOut
+            ? "The audio sample could not be read in time."
+            : "This track has no audio to hear.";
+      return { language: null, role: null, confidence: 0, message };
     }
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));
@@ -247,9 +341,29 @@ function clearDirectory(directory: string) {
   for (const name of fs.readdirSync(directory)) fs.rmSync(path.join(directory, name), { force: true });
 }
 
-async function pgsFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
-  const duration = await durationSeconds(file);
-  const starts = sampleOffsets(duration);
+async function subtitleCues(file: string, ordinal: number): Promise<{ starts: number[]; count: number }> {
+  try {
+    const { stdout } = await runCommand(
+      "ffprobe",
+      ["-v", "error", "-select_streams", `s:${ordinal}`, "-show_entries", "packet=pts_time,size", "-of", "csv=p=0", file],
+      60_000,
+    );
+    const times: number[] = [];
+    for (const line of stdout.split("\n")) {
+      const [pts, size] = line.split(",");
+      const time = Number(pts);
+      const bytes = Number(size);
+      if (!Number.isFinite(time) || time < 0) continue;
+      if (!Number.isFinite(bytes) || bytes < 500) continue;
+      times.push(time);
+    }
+    return { starts: cueSampleStarts(times).map((time) => Math.max(0, time - 1)), count: times.length };
+  } catch {
+    return { starts: [], count: 0 };
+  }
+}
+
+async function collectPgs(file: string, ordinal: number, directory: string, starts: number[], seconds: number): Promise<{ bitmaps: ReturnType<typeof readPgsImages>; timedOut: boolean }> {
   const sup = path.join(directory, "track.sup");
   const bitmaps = [];
   let timedOut = false;
@@ -257,7 +371,7 @@ async function pgsFrames(file: string, ordinal: number, directory: string): Prom
     clearDirectory(directory);
     timedOut = false;
     try {
-      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup), 90_000);
+      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup, seconds), 90_000);
     } catch (error) {
       const failed = error instanceof Error ? error : new Error(String(error));
       timedOut = /timed out/i.test(failed.message);
@@ -269,10 +383,25 @@ async function pgsFrames(file: string, ordinal: number, directory: string): Prom
     }
     if (bitmaps.length >= 4 || timedOut) break;
   }
+  return { bitmaps, timedOut };
+}
+
+async function pgsFrames(file: string, ordinal: number, directory: string): Promise<{ frames: string[]; forced: boolean }> {
+  const duration = await durationSeconds(file);
+  let { bitmaps, timedOut } = await collectPgs(file, ordinal, directory, sampleOffsets(duration), 45);
+  let cues = 0;
+  if (bitmaps.length < 4 && !timedOut) {
+    const found = await subtitleCues(file, ordinal);
+    cues = found.count;
+    if (bitmaps.length === 0) ({ bitmaps, timedOut } = await collectPgs(file, ordinal, directory, found.starts, 8));
+  }
   if (bitmaps.length === 0 && timedOut) throw new Error("ffmpeg timed out.");
   const frames = spread(bitmaps, 8).map((bitmap) => scaleBitmap(bitmap, 3));
   frames.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
-  return frames.length ? fs.readdirSync(directory).filter((name) => name.endsWith(".png")) : [];
+  return {
+    frames: frames.length ? fs.readdirSync(directory).filter((name) => name.endsWith(".png")) : [],
+    forced: isForcedCueCount(cues, duration),
+  };
 }
 
 async function tightenFrame(file: string) {
@@ -306,7 +435,8 @@ async function vobsubFrames(file: string, ordinal: number, directory: string): P
 async function detectPictureSubtitle(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
   try {
-    const frames = job.format === "PGS" ? await pgsFrames(file, job.ordinal, directory) : await vobsubFrames(file, job.ordinal, directory);
+    const picture = job.format === "PGS" ? await pgsFrames(file, job.ordinal, directory) : { frames: await vobsubFrames(file, job.ordinal, directory), forced: false };
+    const frames = picture.frames;
     if (frames.length === 0) return { language: null, role: null, confidence: 0, message: "No subtitle images could be read." };
     const languages = await ocrLanguages();
     let best = { language: null as string | null, confidence: 0 };
@@ -323,7 +453,7 @@ async function detectPictureSubtitle(job: DetectJob, file: string): Promise<Dete
     }
     return {
       language: best.language,
-      role: null,
+      role: picture.forced ? "forced" : null,
       confidence: best.confidence,
       message: best.language ? null : "This language cannot be reliably recognized.",
     };
@@ -342,6 +472,7 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
     };
   }
   let raw = "";
+  let complete = false;
   if (isSubtitleFile(file)) {
     const handle = fs.openSync(file, "r");
     try {
@@ -356,17 +487,19 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
         return { language: null, role: null, confidence: 0, message: "The subtitle file is not readable text." };
       }
       raw = decodeSubtitleBytes(sample);
+      complete = bytes < buffer.length;
     } finally {
       fs.closeSync(handle);
     }
   } else {
     const extracted = await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", file, "-map", `0:s:${job.ordinal}`, "-f", "srt", "pipe:1"], 45_000);
     raw = extracted.stdout;
+    complete = true;
   }
   const detected = detectTextLanguage(cueText(raw));
   return {
     language: detected.language,
-    role: null,
+    role: complete && isForcedCueCount(cueCount(raw), null) ? "forced" : null,
     confidence: detected.confidence,
     message: detected.language ? null : "This language cannot be reliably recognized.",
   };

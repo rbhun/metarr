@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyDetailedItems, parsePlexItem } from "@/lib/connectors/plex";
+import { applyDetailedItems, externalSubtitleLacksFile, parsePlexItem } from "@/lib/connectors/plex";
 
 const movie = {
   ratingKey: "10",
@@ -78,6 +78,36 @@ test("plex uses the media audio summary when streams are missing", () => {
     Media: [{ videoResolution: "2160", audioChannels: 8, audioCodec: "truehd", container: "mkv", Part: [{ file: "/movies/Arrival.mkv", container: "mkv" }] }],
   });
   assert.deepEqual(parsed?.audioTracks, [{ language: null, layout: "7.1", codec: "Dolby TrueHD" }]);
+});
+
+test("plex keeps the subtitle path when the file is in a subs folder", () => {
+  const listed = {
+    ratingKey: "4",
+    type: "movie",
+    title: "Ace Ventura: Pet Detective",
+    Media: {
+      Part: {
+        file: "/movies/Ace.mkv",
+        Stream: [{ streamType: 3, codec: "srt", index: -1, displayTitle: "Unknown (SRT External)" }],
+      },
+    },
+  };
+  assert.equal(externalSubtitleLacksFile(listed), true);
+  const detailed = {
+    ratingKey: "4",
+    type: "movie",
+    title: "Ace Ventura: Pet Detective",
+    Media: {
+      Part: {
+        file: "/movies/Ace.mkv",
+        Stream: [{ streamType: 3, codec: "srt", index: -1, displayTitle: "Unknown (SRT External)", file: "/movies/subs/Ace.srt" }],
+      },
+    },
+  };
+  assert.equal(externalSubtitleLacksFile(detailed), false);
+  const parsed = parsePlexItem(detailed);
+  assert.equal(parsed?.subtitleTracks[0]?.placement, "external");
+  assert.equal(parsed?.subtitleTracks[0]?.file, "/movies/subs/Ace.srt");
 });
 
 test("listing items without streams are replaced by full metadata", () => {

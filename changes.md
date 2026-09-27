@@ -1,5 +1,21 @@
 # Changes
 
+## 0.0.52
+
+- Mark a subtitle as forced when a long film only has a few cues, the signs and titles rather than the dialogue.
+
+## 0.0.51
+
+- Read a picture subtitle from the times it actually has images, when the ten- and twenty-minute windows are empty.
+
+## 0.0.50
+
+- Read an external subtitle from Plex's file path, including one kept in a subs folder.
+
+## 0.0.49
+
+- Read a short slice of a Blu-ray file at the ten-minute mark, so a 4K disc is not scanned until the audio read runs out of time.
+
 ## 0.0.48
 
 - If this host's /mnt/media returns EROFS while other NFS clients can write, mount the share directly into Docker (auto-detect or METARR_NFS_ADDR/EXPORT).

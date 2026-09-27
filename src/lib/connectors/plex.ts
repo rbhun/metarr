@@ -370,7 +370,7 @@ async function fetchPage(
   type: number | null,
   start: number,
 ): Promise<{ items: unknown[]; total: number | null }> {
-  const params = new URLSearchParams({ includeGuids: "1" });
+  const params = new URLSearchParams({ includeGuids: "1", includeExternalMedia: "1" });
   if (type != null) params.set("type", String(type));
   const payload = await fetchJson(
     `${baseUrl}/library/sections/${encodeURIComponent(sectionKey)}/all?${params.toString()}`,
@@ -418,6 +418,27 @@ async function fetchAllPaged(
     if (batch.items.length < PAGE_SIZE) break;
   }
   return collected;
+}
+
+export function externalSubtitleLacksFile(item: unknown): boolean {
+  const record = asRecord(item);
+  if (!record) return false;
+  for (const mediaValue of plexList(record.Media)) {
+    const media = asRecord(mediaValue);
+    if (!media) continue;
+    const parts = plexList(media.Part).map(asRecord).filter((part): part is Record<string, unknown> => part != null);
+    const containers = parts.length ? parts : [media];
+    for (const part of containers) {
+      const partFile = textOf(part.file);
+      for (const streamValue of plexList(part.Stream ?? media.Stream)) {
+        const stream = asRecord(streamValue);
+        if (!stream || streamTypeOf(stream) !== 3) continue;
+        if (subtitlePlacement(stream, partFile) !== "external") continue;
+        if (!textOf(stream.file)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function itemHasStreams(item: unknown): boolean {
@@ -468,7 +489,8 @@ async function withStreamDetails(
     const record = asRecord(item);
     const type = record?.type;
     if (type !== "movie" && type !== "episode") continue;
-    if (itemHasStreams(item) || record?.ratingKey == null) continue;
+    if (record?.ratingKey == null) continue;
+    if (itemHasStreams(item) && !externalSubtitleLacksFile(item)) continue;
     const key = String(record.ratingKey);
     if (seen.has(key)) continue;
     seen.add(key);

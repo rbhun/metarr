@@ -3,7 +3,8 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
-import { cueText } from "@/lib/detect/cues";
+import { cueCount, cueText } from "@/lib/detect/cues";
+import { isForcedCueCount } from "@/lib/detect/forced";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
@@ -17,13 +18,13 @@ import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
-import { audioClipArgs, audioCopyArgs, clipStart, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
+import { audioClipArgs, audioCopyArgs, audioSliceArgs, clipStart, dialogueMix, sampleOffsets, tsWindow } from "@/lib/detect/audio";
 import { planTag, retagTempPath, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
-import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
-import { shownLanguage } from "@/lib/format";
+import { shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
 
@@ -80,6 +81,10 @@ test("subtitle cues drop timestamps and ass styling", () => {
   assert.equal(cueText(srt), "Hello there. Come in.");
   const ass = "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\i1}Becsukta az ajtót.";
   assert.equal(cueText(ass), "Becsukta az ajtót.");
+  assert.equal(cueCount(srt), 2);
+  assert.equal(isForcedCueCount(12, 6_636), true);
+  assert.equal(isForcedCueCount(800, 6_636), false);
+  assert.equal(isForcedCueCount(12, 90), false);
 });
 
 test("an untagged sidecar takes its language from the file name and is not a third subtitle", () => {
@@ -127,6 +132,18 @@ test("a hungarian subtitle with a different name still belongs to that video", (
     { language: "Magyar", placement: "external", format: "SRT", forced: false },
   ], ["Other Movie.mkv", "Crank.2.High.Voltage.2009.HUN.srt"]);
   assert.equal(crowded[0]?.file, undefined);
+});
+
+test("a subtitle in the subs folder is the external file", () => {
+  const video = "/mnt/media/Movies/Ace Ventura - Pet Detective (1994)/hrt-avpd.1994.1080p.mkv";
+  const tracks = assignSidecars(video, [
+    { language: null, placement: "external", format: "SRT", forced: false },
+  ], ["hrt-avpd.1994.1080p.mkv", "subs/hrt-avpd.1994.1080p.srt"]);
+  assert.equal(tracks[0]?.file, "/mnt/media/Movies/Ace Ventura - Pet Detective (1994)/subs/hrt-avpd.1994.1080p.srt");
+  const named = assignSidecars(video, [
+    { language: null, placement: "external", format: "SRT", forced: false },
+  ], ["subs/Ace Ventura.srt"]);
+  assert.equal(named[0]?.file?.endsWith("subs/Ace Ventura.srt"), true);
 });
 
 test("a series unknown subtitle queues every episode that still has it", () => {
@@ -182,6 +199,29 @@ test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packet
   assert.equal(surround[surround.indexOf("-af") + 1], "pan=mono|c0=0.7*FC+0.15*FL+0.15*FR");
   assert.equal(dialogueMix("stereo", 2), null);
   assert.equal(dialogueMix("5.1(side)", 6), "pan=mono|c0=0.7*FC+0.15*FL+0.15*FR");
+  const size = 40_000_000_000;
+  const early = tsWindow(size, 6_360, 600, 192);
+  const later = tsWindow(size, 6_360, 1_200, 192);
+  assert.ok(early);
+  assert.ok(later);
+  assert.equal(early.start % 192, 0);
+  assert.ok(early.start > size * 0.08 && early.start < size * 0.11);
+  assert.ok(later.start > early.start);
+  assert.ok(early.end <= size);
+  assert.ok(early.end - early.start < size * 0.01);
+  const tail = tsWindow(10_000_000, 100, 90, 192);
+  assert.ok(tail);
+  assert.equal(tail.start % 192, 0);
+  assert.ok(tail.end <= 10_000_000);
+  const slice = audioSliceArgs(0, "/tmp/clip.wav", null);
+  assert.equal(slice.includes("-ss"), false);
+  assert.equal(slice[slice.indexOf("-i") + 1], "pipe:0");
+  assert.equal(slice[slice.indexOf("-map") + 1], "0:a:0");
+});
+
+test("a sparse subtitle is sampled where its cues are", () => {
+  assert.deepEqual(cueSampleStarts([74.9, 412.1, 532.1, 1418.3, 3733.3, 3770.4, 3822.4, 3869.8, 6001.3, 6195.9]), [412, 1418, 3822, 6001]);
+  assert.deepEqual(cueSampleStarts([12, 40]), [12, 40]);
 });
 
 test("a pgs subtitle is copied out of the video instead of decoding the picture", () => {
@@ -338,6 +378,13 @@ test("detected languages replace unknown on the matching stream", () => {
     { language: null, placement: "external", format: "SRT", forced: false, file: "/movies/Dune.hu.srt" },
   ], new Map([[`/movies/Dune.hu.srt\0subtitle\0${0}`, { language: "Hungarian", role: null }]]));
   assert.equal(subtitle?.detectedLanguage, "Hungarian");
+  assert.equal(subtitle?.forced, false);
+  const [signs] = overlaySubtitles("/movies/Backrooms.mkv", [
+    { language: null, placement: "internal", format: "PGS", forced: false, streamIndex: 0 },
+  ], new Map([["/movies/Backrooms.mkv\0subtitle\0" + "0", { language: "French", role: "forced" }]]));
+  assert.equal(signs?.detectedLanguage, "French");
+  assert.equal(signs?.forced, true);
+  assert.equal(subtitleNote(signs!), "PGS · forced");
 });
 
 test("a manual start pulls a waiting track out of the overnight queue", () => {
@@ -476,21 +523,33 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
     selector: "track:a2",
     language: "hun",
     commentary: true,
+    forced: false,
   });
   assert.deepEqual(planTag("/movies/Dune.mkv", "subtitle", 0, "Hungarian", null), {
     action: "matroska",
     selector: "track:s1",
     language: "hun",
     commentary: false,
+    forced: false,
+  });
+  assert.deepEqual(planTag("/movies/Backrooms.mkv", "subtitle", 0, "French", "forced"), {
+    action: "matroska",
+    selector: "track:s1",
+    language: "fra",
+    commentary: false,
+    forced: true,
   });
   assert.deepEqual(planTag("/movies/Dune.mp4", "audio", 0, "English", null), {
     action: "mp4",
     specifier: "s:a:0",
     language: "eng",
     commentary: false,
+    forced: false,
   });
   const renamed = planTag("/movies/Dune.srt", "subtitle", 0, "Hungarian", null);
   assert.equal(renamed.action === "rename" && renamed.to, "/movies/Dune.hun.srt");
+  const signs = planTag("/movies/Backrooms.srt", "subtitle", 0, "French", "forced");
+  assert.equal(signs.action === "rename" && signs.to, "/movies/Backrooms.fra.forced.srt");
   const forced = planTag("/movies/Dune.forced.srt", "subtitle", 0, "Hungarian", null);
   assert.equal(forced.action === "rename" && forced.to, "/movies/Dune.hun.forced.srt");
   const pair = planTag("/movies/Dune.idx", "subtitle", 0, "Hungarian", null);

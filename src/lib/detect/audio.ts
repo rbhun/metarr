@@ -19,6 +19,91 @@ export function clipStart(programOffset: number, mediaStart: number | null): num
   return Math.round((start + programOffset) * 1000) / 1000;
 }
 
+const WINDOW_SECONDS = 30;
+const UNKNOWN_WINDOW = 160 * 1024 * 1024;
+const OPENING_BYTES = 16 * 1024 * 1024;
+
+export function isTransportStream(file: string): boolean {
+  return /\.m2ts$/i.test(file) || /\.ts$/i.test(file);
+}
+
+/** Blu-ray packets are 192 bytes. A plain transport stream uses 188. */
+export function packetBytes(file: string): number {
+  return /\.m2ts$/i.test(file) ? 192 : 188;
+}
+
+/**
+ * A disc file has no index, so a timestamp seek reads the 4K picture from the
+ * start. The same moment is a short aligned slice of the file instead.
+ */
+export function tsWindow(size: number, duration: number | null, programOffset: number, packet: number): { start: number; end: number } | null {
+  if (size < packet * 2 || packet < 1) return null;
+  const ratio = duration != null && duration > programOffset
+    ? programOffset / duration
+    : programOffset >= TWENTY_MINUTES
+      ? 0.22
+      : programOffset >= TEN_MINUTES
+        ? 0.12
+        : 0.5;
+  const span = duration != null && duration > 0 ? Math.ceil((WINDOW_SECONDS / duration) * size) : UNKNOWN_WINDOW;
+  const bytes = Math.min(size, Math.max(span, packet * 64));
+  let start = Math.floor(size * Math.min(ratio, 0.98));
+  if (start + bytes > size) start = Math.max(0, size - bytes);
+  start -= start % packet;
+  const end = Math.min(size, start + bytes);
+  if (end - start < packet) return null;
+  return { start, end };
+}
+
+/** The first slice of a disc, where a stub track may exist before it disappears. */
+export function openingWindow(size: number, packet: number): { start: number; end: number } | null {
+  if (size < packet * 2 || packet < 1) return null;
+  const end = Math.min(size, OPENING_BYTES) - (Math.min(size, OPENING_BYTES) % packet);
+  if (end < packet) return null;
+  return { start: 0, end };
+}
+
+/** A wav of digital silence, such as a disc track that only holds a blank second. */
+export function pcmIsSilent(wav: Buffer): boolean {
+  const data = wav.length > 44 && wav.toString("ascii", 0, 4) === "RIFF" ? wav.subarray(44) : wav;
+  if (data.length < 2) return true;
+  const step = Math.max(2, (Math.floor(data.length / 4000) * 2) || 2);
+  for (let offset = 0; offset + 1 < data.length; offset += step) {
+    const sample = data.readInt16LE(offset);
+    if (sample > 80 || sample < -80) return false;
+  }
+  return true;
+}
+
+/** Decode audio from a transport-stream slice already positioned on stdin. */
+export function audioSliceArgs(ordinal: number, wav: string, mix: string | null = null): string[] {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "mpegts",
+    "-probesize",
+    "2000000",
+    "-analyzeduration",
+    "2000000",
+    "-i",
+    "pipe:0",
+    "-map",
+    `0:a:${ordinal}`,
+    ...(mix ? ["-af", mix] : []),
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    "-vn",
+    wav,
+  ];
+}
+
 const CENTERED = /^(?:3\.0|4\.0|5\.0|5\.1|6\.0|6\.1|7\.0|7\.1)(?:\(|$)/;
 
 /** Center carries most of the dialogue. Front left and right carry the rest. Surrounds stay out. */

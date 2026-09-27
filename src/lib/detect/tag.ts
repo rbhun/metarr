@@ -8,8 +8,8 @@ const SIDECAR = new Set(["srt", "ass", "ssa", "vtt", "sub", "idx"]);
 const FLAG = /[._-](forced|sdh|cc|hi)$/i;
 
 export type TagPlan =
-  | { action: "matroska"; selector: string; language: string; commentary: boolean }
-  | { action: "mp4"; specifier: string; language: string; commentary: boolean }
+  | { action: "matroska"; selector: string; language: string; commentary: boolean; forced: boolean }
+  | { action: "mp4"; specifier: string; language: string; commentary: boolean; forced: boolean }
   | { action: "rename"; to: string; pairFrom: string | null; pairTo: string | null }
   | { action: "skip"; reason: "unknown-language" | "container" | "already-named" };
 
@@ -26,6 +26,13 @@ export function renamedSidecar(file: string, code: string): string | null {
   return `${stem}.${code}${ext}`;
 }
 
+function withForcedFlag(file: string): string {
+  const ext = path.extname(file);
+  const stem = ext ? file.slice(0, -ext.length) : file;
+  if (FLAG.test(stem)) return file;
+  return `${stem}.forced${ext}`;
+}
+
 function sidecarPair(file: string): string | null {
   if (/\.idx$/i.test(file)) return file.replace(/\.idx$/i, ".sub");
   if (/\.sub$/i.test(file)) return file.replace(/\.sub$/i, ".idx");
@@ -37,25 +44,28 @@ export function planTag(
   kind: "audio" | "subtitle",
   ordinal: number,
   language: string,
-  role: "commentary" | null,
+  role: "commentary" | "forced" | null,
 ): TagPlan {
   const code = languageCode(language);
   if (!code) return { action: "skip", reason: "unknown-language" };
   const ext = fileExtension(file);
   const commentary = kind === "audio" && role === "commentary";
+  const forced = kind === "subtitle" && role === "forced";
   if (ext && MATROSKA.has(ext)) {
     const track = kind === "audio" ? "a" : "s";
-    return { action: "matroska", selector: `track:${track}${ordinal + 1}`, language: code, commentary };
+    return { action: "matroska", selector: `track:${track}${ordinal + 1}`, language: code, commentary, forced };
   }
   if (ext && ISO_BMFF.has(ext)) {
     const track = kind === "audio" ? "a" : "s";
-    return { action: "mp4", specifier: `s:${track}:${ordinal}`, language: code, commentary };
+    return { action: "mp4", specifier: `s:${track}:${ordinal}`, language: code, commentary, forced };
   }
   if (ext && SIDECAR.has(ext) && kind === "subtitle") {
-    const to = renamedSidecar(file, code);
-    if (!to) return { action: "skip", reason: "already-named" };
+    const named = renamedSidecar(file, code);
+    if (!named) return { action: "skip", reason: "already-named" };
+    const to = forced ? withForcedFlag(named) : named;
     const pairFrom = sidecarPair(file);
-    const pairTo = pairFrom ? renamedSidecar(pairFrom, code) : null;
+    const pairNamed = pairFrom ? renamedSidecar(pairFrom, code) : null;
+    const pairTo = pairNamed && forced ? withForcedFlag(pairNamed) : pairNamed;
     return { action: "rename", to, pairFrom: pairTo ? pairFrom : null, pairTo };
   }
   return { action: "skip", reason: "container" };

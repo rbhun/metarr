@@ -34,12 +34,12 @@ export type Sidecar = { file: string; language: string | null };
 function subtitleNames(videoPath: string, names: string[]): string[] {
   const stem = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
   if (!stem) return [];
-  const matched = names.filter((name) => SUBTITLE_EXT.test(name) && name.toLowerCase().startsWith(stem));
+  const subs = names.filter((name) => SUBTITLE_EXT.test(path.basename(name)));
+  const matched = subs.filter((name) => path.basename(name).toLowerCase().startsWith(stem));
   if (matched.length > 0) return matched;
-  const subs = names.filter((name) => SUBTITLE_EXT.test(name));
   if (subs.length !== 1) return [];
   const base = path.basename(videoPath);
-  const otherVideo = names.some((name) => VIDEO_EXT.test(name) && name !== base);
+  const otherVideo = names.some((name) => VIDEO_EXT.test(name) && path.basename(name) === name && name !== base);
   return otherVideo ? [] : subs;
 }
 
@@ -91,6 +91,8 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   return next;
 }
 
+const SUBTITLE_DIRS = ["subs", "Subs", "subtitles", "Subtitles"];
+
 export function readSidecarNames(videoPath: string | null): string[] {
   if (!videoPath) return [];
   const directory = path.dirname(videoPath);
@@ -98,8 +100,22 @@ export function readSidecarNames(videoPath: string | null): string[] {
   if (cached) return cached;
   try {
     const names = fs.readdirSync(directory);
-    listed.set(directory, names);
-    return names;
+    const nested: string[] = [];
+    for (const folder of SUBTITLE_DIRS) {
+      if (!names.includes(folder)) continue;
+      const subdirectory = path.join(directory, folder);
+      try {
+        if (!fs.statSync(subdirectory).isDirectory()) continue;
+        for (const name of fs.readdirSync(subdirectory)) {
+          if (SUBTITLE_EXT.test(name)) nested.push(path.join(folder, name));
+        }
+      } catch {
+        continue;
+      }
+    }
+    const found = [...names, ...nested];
+    listed.set(directory, found);
+    return found;
   } catch {
     listed.set(directory, []);
     return [];

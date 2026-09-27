@@ -186,7 +186,7 @@ export function finishJob(db: Database.Database, id: number, status: "done" | "f
 export function saveDetection(
   db: Database.Database,
   job: DetectJob,
-  result: { language: string | null; role: "commentary" | null; confidence: number; message: string | null },
+  result: { language: string | null; role: "commentary" | "forced" | null; confidence: number; message: string | null },
 ) {
   db.prepare(
     `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, scanned_at)
@@ -290,7 +290,7 @@ export function activeJob(db: Database.Database): { label: string; kind: "audio"
   return { label: row.label, kind: row.kind === "subtitle" ? "subtitle" : "audio" };
 }
 
-export type StoredDetection = { language: string | null; role: "commentary" | null };
+export type StoredDetection = { language: string | null; role: "commentary" | "forced" | null };
 
 export function detectionMap(db: Database.Database): Map<string, StoredDetection> {
   const rows = db.prepare(`SELECT path, kind, ordinal, language, role FROM detect_results`).all() as Array<{
@@ -304,7 +304,7 @@ export function detectionMap(db: Database.Database): Map<string, StoredDetection
   for (const row of rows) {
     map.set(`${row.path}\0${row.kind}\0${row.ordinal}`, {
       language: row.language,
-      role: row.role === "commentary" ? "commentary" : null,
+      role: row.role === "commentary" || row.role === "forced" ? row.role : null,
     });
   }
   return map;

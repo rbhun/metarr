@@ -87,7 +87,7 @@ async function step() {
           players = "The players could not be asked to re-read the file.";
         }
       }
-      const name = outcome.role === "commentary" ? `${outcome.language} commentary.` : `${outcome.language}.`;
+      const name = outcome.role === "commentary" ? `${outcome.language} commentary.` : outcome.role === "forced" ? `${outcome.language} forced.` : `${outcome.language}.`;
       note = [name, written.sentence, players].filter(Boolean).join(" ");
     }
     saveDetection(db, stored, outcome);
