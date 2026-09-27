@@ -38,10 +38,10 @@ findmnt /mnt/media
 sudo mount -o remount,rw /mnt/media
 ```
 
-If it fails with a permission error instead, the container user does not own the media files. `deploy.sh` tries to set `METARR_UID` / `METARR_GID` from `/mnt/media`, or you can set them yourself before deploy:
+If it fails with a permission error instead, the container user cannot write the media files. On **NFS**, `root_squash` maps uid 0 to nobody, so Metarr must not run as root even when folders show owner `0`. `deploy.sh` picks a non-root uid and the media group when it sees that, or set them yourself:
 
 ```bash
-export METARR_UID=$(stat -c %u /mnt/media/Movies)
+export METARR_UID=1000
 export METARR_GID=$(stat -c %g /mnt/media/Movies)
 sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh
 ```

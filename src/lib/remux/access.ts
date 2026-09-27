@@ -52,10 +52,15 @@ export function writeAccessDeniedMessage(directory: string, detail?: string): st
       `and make sure docker-compose mounts it as :rw — Docker cannot write if the host mount is read-only.`
     );
   }
+  const uid = process.getuid?.();
+  const nfsHint =
+    uid === 0
+      ? ` If the media share is NFS, root is often squashed to nobody — set METARR_UID to a non-root user and METARR_GID to the media group (for example 1002), then redeploy.`
+      : ` On the host, give that user write access to the movie folder, or set METARR_UID/METARR_GID to match the media owner/group and redeploy.`;
   return (
-    `Cannot write next to the disc at ${directory}${why}. ${who}; ${folder}. ` +
-    `On the host, either give that user write access to the movie folder, or set METARR_UID/METARR_GID in docker-compose to the owner of /mnt/media and redeploy. ` +
-    `The volume must be read-write (not :ro).`
+    `Cannot write next to the disc at ${directory}${why}. ${who}; ${folder}.` +
+    nfsHint +
+    ` The volume must be read-write (not :ro).`
   );
 }
 
