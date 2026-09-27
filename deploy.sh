@@ -5,6 +5,7 @@
 # Optional: match media ownership so disc remux can write MKVs:
 #   export METARR_UID=$(stat -c %u /mnt/media/Movies)
 #   export METARR_GID=$(stat -c %g /mnt/media/Movies)
+# On NFS, avoid METARR_UID=0 (root_squash maps root to nobody).
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -15,6 +16,7 @@ fi
 cd "$root"
 git pull --ff-only
 
+media_sample=""
 if [ -d /mnt/media ]; then
   opts=$(findmnt -no OPTIONS /mnt/media 2>/dev/null || true)
   case ",$opts," in
@@ -24,15 +26,36 @@ if [ -d /mnt/media ]; then
       echo "  mount -o remount,rw /mnt/media" >&2
       ;;
   esac
+  # Prefer a library folder (Movies/TV) — the NFS mount root is often not group-writable.
+  for candidate in /mnt/media/Movies /mnt/media/TV /mnt/media; do
+    if [ -d "$candidate" ]; then
+      media_sample=$candidate
+      break
+    fi
+  done
 fi
 
 if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; then
-  sample=$(find /mnt/media -mindepth 1 -maxdepth 2 -type d 2>/dev/null | head -n 1 || true)
-  if [ -n "$sample" ]; then
-    METARR_UID=$(stat -c %u "$sample")
-    METARR_GID=$(stat -c %g "$sample")
+  if [ -n "$media_sample" ] && [ -d "$media_sample" ]; then
+    METARR_UID=$(stat -c %u "$media_sample")
+    METARR_GID=$(stat -c %g "$media_sample")
+    # NFS root_squash: client uid 0 becomes nobody and cannot write mode 775 folders.
+    if [ "$METARR_UID" = "0" ]; then
+      alt=$(find "$media_sample" -mindepth 1 -maxdepth 3 \( -type f -o -type d \) -printf '%u\n' 2>/dev/null | awk '$1 != "0" { print; exit }' || true)
+      if [ -z "$alt" ]; then
+        # First named user in the media group, else a common non-root uid.
+        alt=$(getent group "$METARR_GID" 2>/dev/null | cut -d: -f4 | cut -d, -f1 || true)
+      fi
+      if [ -z "$alt" ] || [ "$alt" = "0" ]; then
+        alt=1000
+      fi
+      echo "Media sample $media_sample is owned by uid 0; NFS root_squash would block root writes."
+      echo "Using METARR_UID=$alt METARR_GID=$METARR_GID (group write) instead of uid 0."
+      METARR_UID=$alt
+    else
+      echo "Using METARR_UID=$METARR_UID METARR_GID=$METARR_GID from $media_sample"
+    fi
     export METARR_UID METARR_GID
-    echo "Using METARR_UID=$METARR_UID METARR_GID=$METARR_GID from $sample"
   fi
 fi
 
@@ -42,12 +65,18 @@ i=0
 while [ "$i" -lt 30 ]; do
   if curl -4 -fsS -m 3 -o /dev/null http://127.0.0.1:4317/; then
     echo "Metarr is up at http://127.0.0.1:4317/"
-    if docker compose exec -T metarr sh -c 'test -d /mnt/media && touch /mnt/media/.metarr-write-test && rm -f /mnt/media/.metarr-write-test' 2>/dev/null; then
-      echo "Write access to /mnt/media is OK."
+    probe_dir=${media_sample:-/mnt/media}
+    probe_uid=${METARR_UID:-0}
+    probe_gid=${METARR_GID:-0}
+    if [ -d "$probe_dir" ] && docker compose exec -T -u "${probe_uid}:${probe_gid}" metarr \
+      sh -c "test -d \"$probe_dir\" && touch \"$probe_dir/.metarr-write-test\" && rm -f \"$probe_dir/.metarr-write-test\"" 2>/dev/null; then
+      echo "Write access to $probe_dir as ${probe_uid}:${probe_gid} is OK."
     else
-      echo "Warning: Metarr cannot write to /mnt/media." >&2
-      echo "  If findmnt shows ro, remount: mount -o remount,rw /mnt/media" >&2
-      echo "  Otherwise set METARR_UID/METARR_GID to the media owner and redeploy." >&2
+      echo "Warning: Metarr cannot write to $probe_dir as uid ${probe_uid} gid ${probe_gid}." >&2
+      echo "  findmnt /mnt/media should show rw (not ro)." >&2
+      echo "  On NFS, do not run as uid 0 (root_squash). Set METARR_UID to a non-root user and METARR_GID to the media group (often 1002), then redeploy:" >&2
+      echo "    export METARR_UID=1000 METARR_GID=\$(stat -c %g /mnt/media/Movies)" >&2
+      echo "    sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh" >&2
     fi
     exit 0
   fi

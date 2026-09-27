@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.44
+
+- On NFS media shares, avoid running remux as root (root_squash) and probe write access in the Movies folder as the app user.
+
 ## 0.0.43
 
 - Say clearly when disc remux fails because `/mnt/media` is mounted read-only (EROFS).
