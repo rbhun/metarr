@@ -29,7 +29,7 @@ The database file is `data/library.db` unless `DATABASE_PATH` is set. See `.env.
 docker compose up --build
 ```
 
-The app listens on port **4317**. SQLite is stored in the `metarr-data` volume.
+The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
 On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
 
@@ -84,7 +84,7 @@ The queue runs one disc at a time. The next starts when the previous one finishe
 
 MakeMKV copies every audio language, commentary track, and subtitle into the MKV. It does not re-encode them. The 3D MVC video track is left out. The longest title is saved as `Title (Year).mkv` in the disc’s folder. With extras on, the other titles are `Title (Year)-other.mkv`, `Title (Year)-other2.mkv`, and so on, in that same folder, which Plex lists as extras. Disc menus are not included.
 
-Install MakeMKV on this machine, put `makemkvcon` on `PATH` or set its path in Settings, and paste the MakeMKV key there. The key stays in the local database. Path mapping from language detection is used when a Plex path is not a file on this machine.
+Install MakeMKV on this machine, put `makemkvcon` on `PATH` or set its path in Settings, and paste the MakeMKV key there. The key stays in the local database. Path mapping from language detection is used when a Plex path is not a file on this machine. With Docker, the media folder must be mounted at the same path Metarr sees (default `/mnt/media`); MakeMKV must also be available inside the container or Metarr must run on the host.
 
 ## Online sources
 

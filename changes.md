@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.34
+
+- Mount `/mnt/media` for Docker remux, write temp files under the app data folder, and say clearly when the disc folder is missing inside Metarr.
+
 ## 0.0.33
 
 - Keep the movie's file type when saving a language into an MP4, so the new file can be written.

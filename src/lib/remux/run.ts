@@ -118,6 +118,7 @@ export async function ripDisc(options: {
 }): Promise<string> {
   const { binary, source, outputDir, workDir, label, extras, home, onProgress } = options;
   fs.rmSync(workDir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(workDir), { recursive: true });
   fs.mkdirSync(workDir, { recursive: true });
   try {
     onProgress(0, "Reading the disc");

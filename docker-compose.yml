@@ -12,6 +12,8 @@ services:
       MKL_NUM_THREADS: "1"
     volumes:
       - metarr-data:/app/data
+      # Same path as on the Plex host so disc remux can read ISOs/DVDs and write MKVs beside them.
+      - /mnt/media:/mnt/media
     restart: unless-stopped
 
 volumes:

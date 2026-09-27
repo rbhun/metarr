@@ -29,3 +29,4 @@ next-env.d.ts
 /data/*.db
 /data/*.db-*
 /data/makemkv-home/
+/data/remux-work/
