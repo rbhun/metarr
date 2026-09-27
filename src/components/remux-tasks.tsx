@@ -12,7 +12,7 @@ type RemuxBody = {
 };
 
 export function toastRemux(message: string) {
-  const index = message.indexOf("Rips");
+  const index = message.indexOf("Tasks");
   if (index < 0) {
     toast.success(message);
     return;
@@ -20,10 +20,10 @@ export function toastRemux(message: string) {
   toast.success(
     <span>
       {message.slice(0, index)}
-      <Link href="/rips" className="underline underline-offset-2">
-        Rips
+      <Link href="/tasks?queue=remux&status=pending" className="underline underline-offset-2">
+        Tasks
       </Link>
-      {message.slice(index + "Rips".length)}
+      {message.slice(index + "Tasks".length)}
     </span>,
     { duration: 8000 },
   );

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.24
+
+- Show disc remux jobs on Tasks with the failure reason, and keep Rips for sending discs.
+
 ## 0.0.23
 
 - Add a Rips page to send ISO and DVD disc images for high-quality MakeMKV remuxes, with queue history.

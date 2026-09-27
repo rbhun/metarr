@@ -38,8 +38,25 @@ function placeFile(from: string, to: string) {
   }
 }
 
+function makemkvFailure(output: string, code: number | null): string {
+  const messages = output
+    .split(/\r?\n/)
+    .map((line) => /^MSG:[^,]*,[^,]*,[^,]*,"(.*)"\s*$/.exec(line.trim())?.[1] ?? "")
+    .filter(Boolean)
+    .map((line) => line.replace(/\\"/g, '"'));
+  const useful = messages.filter((line) => !/^(This application|Using library|Operation successfully completed)/i.test(line));
+  const quoted = (useful.length ? useful : messages).slice(-3).join(" ").trim();
+  if (quoted) return quoted;
+  if (code == null) return "MakeMKV stopped without an exit code.";
+  return `MakeMKV exited with code ${code}.`;
+}
+
 function runMakeMkv(binary: string, args: string[], home: string, onLine: (line: string) => void): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (!binary.trim()) {
+      reject(new Error("makemkvcon is not set. Enter its path in Settings → Disc remux."));
+      return;
+    }
     const wrapped = withIdle(binary, ["--robot", "--minlength=0", ...args]);
     const child = spawn(wrapped.command, wrapped.args, {
       env: { ...process.env, HOME: home },
@@ -71,22 +88,20 @@ function runMakeMkv(binary: string, args: string[], home: string, onLine: (line:
     });
     child.on("error", (error) => {
       const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-      fail(new Error(missing ? `${wrapped.command} is not installed.` : error.message));
+      fail(
+        new Error(
+          missing
+            ? `${binary} is not installed or not on PATH. Install MakeMKV on this machine, or set the full path in Settings → Disc remux.`
+            : error.message,
+        ),
+      );
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (code === 0) resolve(output);
-      else {
-        const quoted = output
-          .split(/\r?\n/)
-          .map((line) => /^MSG:[^,]*,[^,]*,[^,]*,"(.*)"\s*$/.exec(line.trim())?.[1] ?? "")
-          .filter(Boolean)
-          .slice(-2)
-          .join(" ");
-        reject(new Error(quoted || `MakeMKV exited with code ${code}.`));
-      }
+      else reject(new Error(makemkvFailure(output, code)));
     });
   });
 }

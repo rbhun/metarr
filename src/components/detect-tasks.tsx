@@ -6,8 +6,7 @@ import { toast } from "sonner";
 
 type JobTotals = { pending: number; running: number; done: number; failed: number; skipped: number };
 
-type DetectBody = {
-  counts: { immediate: number; window: number; running: number };
+type TasksBody = {
   totals?: JobTotals;
 };
 
@@ -20,7 +19,7 @@ export function toastDetection(message: string) {
   toast.success(
     <span>
       {message.slice(0, index)}
-      <Link href="/tasks" className="underline underline-offset-2">
+      <Link href="/tasks?queue=language" className="underline underline-offset-2">
         Tasks
       </Link>
       {message.slice(index + "Tasks".length)}
@@ -38,19 +37,13 @@ export function TaskCount({ bump, className }: { bump: () => void; className?: s
     async function load() {
       let response: Response;
       try {
-        response = await fetch("/api/detect", { cache: "no-store" });
+        response = await fetch("/api/tasks?queue=all&status=failed&page=1&pageSize=1", { cache: "no-store" });
       } catch {
         return;
       }
       if (!response.ok || stop) return;
-      const body = (await response.json()) as DetectBody;
-      const totals = body.totals ?? {
-        pending: body.counts.immediate + body.counts.window,
-        running: body.counts.running,
-        done: 0,
-        failed: 0,
-        skipped: 0,
-      };
+      const body = (await response.json()) as TasksBody;
+      const totals = body.totals ?? { pending: 0, running: 0, done: 0, failed: 0, skipped: 0 };
       setActive(totals.pending + totals.running);
       const finished = `${totals.done}:${totals.failed}:${totals.skipped}`;
       if (seen !== null && finished !== seen) bump();

@@ -19,6 +19,7 @@ import {
   clearPendingRemux,
   enqueueDiscs,
   enqueuePaths,
+  finishRemux,
   KEEP_ALL_SELECTION,
   listRemuxJobs,
   readRemuxSettings,
@@ -26,6 +27,7 @@ import {
   writeMakeMkvHome,
   writeRemuxSettings,
 } from "@/lib/remux/store";
+import { listTaskJobs, taskTotalsFor } from "@/lib/tasks";
 
 const INFO = `
 TINFO:0,9,0,"0:02:11"
@@ -166,5 +168,16 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(waiting.jobs[0]?.extras, false);
   assert.equal(clearPendingRemux(db), 1);
   assert.equal(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 50 }).total, 0);
+  const job = enqueuePaths(db, [{ path: "/movies/Fail.iso", label: "Fail (1999)" }], false);
+  assert.equal(job.added, 1);
+  const claimed = claimNextRemux(db);
+  assert.ok(claimed);
+  finishRemux(db, claimed.id, "failed", null);
+  const failed = listRemuxJobs(db, { status: "failed", page: 1, pageSize: 10 });
+  assert.equal(failed.jobs[0]?.message, "Remux failed with no further detail from MakeMKV.");
+  const tasks = listTaskJobs(db, { queue: "remux", status: "failed", page: 1, pageSize: 10 });
+  assert.equal(tasks.total, 1);
+  assert.match(tasks.jobs[0]?.detail ?? "", /Disc remux/);
+  assert.equal(taskTotalsFor(db, "remux").failed, 1);
   db.close();
 });
