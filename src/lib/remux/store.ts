@@ -35,6 +35,9 @@ type JobRow = {
   status: string;
   message: string | null;
   progress: number | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 function meta(db: Database.Database, key: string): string | null {
@@ -175,6 +178,83 @@ export function remuxCounts(db: Database.Database): RemuxCounts {
     else counts.waiting += row.count;
   }
   return counts;
+}
+
+export type RemuxJobStatus = "pending" | "running" | "done" | "failed";
+
+export type RemuxJobView = {
+  id: number;
+  path: string;
+  label: string;
+  extras: boolean;
+  status: RemuxJobStatus;
+  message: string | null;
+  progress: number | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export function remuxTotals(db: Database.Database): { pending: number; running: number; done: number; failed: number } {
+  const rows = db.prepare(`SELECT status, COUNT(*) AS count FROM remux_jobs GROUP BY status`).all() as Array<{ status: string; count: number }>;
+  const totals = { pending: 0, running: 0, done: 0, failed: 0 };
+  for (const row of rows) {
+    if (row.status in totals) totals[row.status as keyof typeof totals] = row.count;
+  }
+  return totals;
+}
+
+export function clearPendingRemux(db: Database.Database): number {
+  return db.prepare(`DELETE FROM remux_jobs WHERE status = 'pending'`).run().changes;
+}
+
+export function listRemuxJobs(
+  db: Database.Database,
+  query: { status: RemuxJobStatus; page: number; pageSize: number },
+): { jobs: RemuxJobView[]; total: number } {
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 50));
+  const page = Math.max(1, Math.trunc(query.page) || 1);
+  const total = (db.prepare(`SELECT COUNT(*) AS count FROM remux_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
+  const sql =
+    query.status === "pending"
+      ? `SELECT * FROM remux_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      : `SELECT * FROM remux_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
+  const rows = db.prepare(sql).all(query.status, pageSize, (page - 1) * pageSize) as JobRow[];
+  return {
+    jobs: rows.map((row) => ({
+      id: row.id,
+      path: row.path,
+      label: row.label,
+      extras: row.extras === 1,
+      status: row.status as RemuxJobStatus,
+      message: row.message,
+      progress: row.progress,
+      createdAt: row.created_at,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+    })),
+    total,
+  };
+}
+
+export function enqueuePaths(
+  db: Database.Database,
+  paths: Array<{ path: string; label?: string }>,
+  extras: boolean,
+): { added: number; skipped: number; already: number } {
+  const files: ScanFile[] = paths.map((item) => {
+    const filePath = item.path.trim();
+    return {
+      label: item.label?.trim() || path.basename(filePath) || filePath,
+      path: filePath,
+      container: path.extname(filePath).replace(/^\./, "") || null,
+      playableLabel: "iso",
+      audioTracks: [],
+      subtitleTracks: [],
+      versions: [],
+    };
+  });
+  return enqueueDiscs(db, files, extras);
 }
 
 export function remuxIsRunning(db: Database.Database): boolean {

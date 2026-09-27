@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.23
+
+- Add a Rips page to send ISO and DVD disc images for high-quality MakeMKV remuxes, with queue history.
+
 ## 0.0.22
 
 - Open language checks on their own page, with pages of history and the reason a track failed.
