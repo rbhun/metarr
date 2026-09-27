@@ -2,59 +2,43 @@
 # Pull the latest main branch and rebuild the Metarr container.
 # On the Plex machine: sudo /opt/metarr/deploy.sh
 #
+# MEDIA SAFETY: this script never deletes library files and never runs
+# `docker volume rm` on a media volume. Write probes only create/remove tiny
+# `.metarr-write-test*` marker files. Switching to direct NFS uses a new
+# volume name (media_nfs) so Compose does not recreate/destroy anything.
+#
 # Optional: match media ownership so disc remux can write MKVs beside any disc:
 #   export METARR_UID=1000
 #   export METARR_GID=$(stat -c %g /mnt/media/Movies)
 # On NFS, avoid METARR_UID=0 (root_squash maps root to nobody).
 #
-# If this host's /mnt/media returns EROFS but other NFS clients (laptop, Plex
-# with its own mount) can write, mount NFS directly into Docker instead:
+# If this host's /mnt/media returns EROFS but other NFS clients can write:
 #   export METARR_NFS_ADDR=192.168.20.2
 #   export METARR_NFS_EXPORT=/tank/media
-# Or let deploy auto-detect addr/export from findmnt after an EROFS failure.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 if [ "$(id -u)" -ne 0 ]; then
-  exec sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT -- "$root/$(basename "$0")" "$@"
+  exec sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT,METARR_MEDIA_VOLUME -- "$root/$(basename "$0")" "$@"
 fi
 
 cd "$root"
 git pull --ff-only
 
+# Persist NFS choice across deploys (gitignored). Never stores credentials.
+NFS_STATE="$root/.metarr-nfs.env"
+if [ -f "$NFS_STATE" ] && [ -z "${METARR_NFS_ADDR:-}" ] && [ -z "${METARR_NFS_EXPORT:-}" ]; then
+  # shellcheck disable=SC1090
+  . "$NFS_STATE"
+fi
+
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.media.yml"
 
-# Recreate only the media volume (never metarr-data / SQLite) when mount options change.
-# Avoids the interactive: Volume "metarr_media" exists but doesn't match configuration.
-recreate_media_volume() {
-  echo "Recreating the media volume non-interactively (SQLite data volume is kept)."
-  $COMPOSE stop metarr >/dev/null 2>&1 || true
-  cid=$($COMPOSE ps -aq metarr 2>/dev/null || true)
-  if [ -n "$cid" ]; then
-    docker rm -f $cid >/dev/null 2>&1 || true
-  fi
-  for vol in $(docker volume ls -q 2>/dev/null | grep -E '_media$' || true); do
-    case "$vol" in
-      *metarr-data*|*metarr_data*|*data*) continue ;;
-    esac
-    echo "  docker volume rm -f $vol"
-    docker volume rm -f "$vol" >/dev/null 2>&1 || true
-  done
-}
-
-compose_up() {
-  # Prefer --yes when the installed Compose supports it (skips volume recreate prompts).
-  if $COMPOSE up --help 2>&1 | grep -q -- '--yes'; then
-    $COMPOSE up --yes "$@"
-  else
-    # Older Compose: answer the volume recreate prompt if it appears.
-    yes y | $COMPOSE up "$@"
-  fi
-}
-
 write_media_bind() {
+  METARR_MEDIA_VOLUME=media
+  export METARR_MEDIA_VOLUME
   cat > docker-compose.media.yml <<'EOF'
-# Host bind of /mnt/media (default).
+# Host bind of /mnt/media. Attach-only — does not copy or delete library files.
 volumes:
   media:
     driver: local
@@ -68,21 +52,30 @@ EOF
 write_media_nfs() {
   addr=$1
   export_path=$2
+  # New volume name avoids Compose "recreate volume / data will be lost" prompts.
+  # Old bind volume "media" is left unused; nothing on the NAS is removed.
+  METARR_MEDIA_VOLUME=media_nfs
+  export METARR_MEDIA_VOLUME
   cat > docker-compose.media.yml <<EOF
-# Direct NFS mount into the container (bypasses a host/autofs mount that returns EROFS).
+# Direct NFS mount (separate volume name from the host bind).
+# Mount-only: Docker does not own or delete files on the NFS server.
 volumes:
-  media:
+  media_nfs:
     driver: local
     driver_opts:
       type: nfs
       o: addr=${addr},rw,nfsvers=4.2,hard,timeo=600,retrans=2
       device: ":${export_path}"
 EOF
-  echo "Using direct NFS mount ${addr}:${export_path} -> /mnt/media in the container."
+  cat > "$NFS_STATE" <<EOF
+METARR_NFS_ADDR=${addr}
+METARR_NFS_EXPORT=${export_path}
+METARR_MEDIA_VOLUME=media_nfs
+EOF
+  echo "Using direct NFS mount ${addr}:${export_path} -> /mnt/media (volume media_nfs; no media data deleted)."
 }
 
 nfs_source_from_host() {
-  # Prefer the real nfs/nfs4 line under /mnt/media (autofs parent is not useful).
   src=$(findmnt -no SOURCE -t nfs,nfs4 /mnt/media 2>/dev/null | tail -n 1 || true)
   if [ -z "$src" ]; then
     src=$(findmnt -no SOURCE /mnt/media 2>/dev/null | grep -E ':/' | tail -n 1 || true)
@@ -90,13 +83,13 @@ nfs_source_from_host() {
   echo "$src"
 }
 
-# Choose media volume backing before the first compose up.
-media_recreate=0
 if [ -n "${METARR_NFS_ADDR:-}" ] && [ -n "${METARR_NFS_EXPORT:-}" ]; then
   write_media_nfs "$METARR_NFS_ADDR" "$METARR_NFS_EXPORT"
-  media_recreate=1
 elif [ ! -f docker-compose.media.yml ]; then
   write_media_bind
+else
+  METARR_MEDIA_VOLUME=${METARR_MEDIA_VOLUME:-media}
+  export METARR_MEDIA_VOLUME
 fi
 
 library_dir=""
@@ -161,10 +154,7 @@ if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; th
   fi
 fi
 
-if [ "$media_recreate" -eq 1 ]; then
-  recreate_media_volume
-fi
-compose_up --build -d
+$COMPOSE up --build -d
 
 host_touch_as() {
   dir=$1
@@ -180,6 +170,20 @@ host_touch_as() {
   fi
   rm -f "$marker"
   return 0
+}
+
+remove_write_probe_dir() {
+  # Only remove the temporary probe directory we created; never a title folder.
+  dir=$1
+  base=$(basename "$dir")
+  if [ "$base" != ".metarr-write-probe" ]; then
+    return 0
+  fi
+  case "$dir" in
+    /mnt/media/*/.metarr-write-probe)
+      rm -rf "$dir" 2>/dev/null || true
+      ;;
+  esac
 }
 
 print_mount_diagnostics() {
@@ -215,8 +219,8 @@ switch_to_direct_nfs_and_retry() {
     return 1
   fi
   write_media_nfs "$addr" "$export_path"
-  recreate_media_volume
-  compose_up -d
+  echo "Switching the container to volume media_nfs (mount-only; library files are not deleted)."
+  $COMPOSE up -d
   return 0
 }
 
@@ -248,7 +252,6 @@ while [ "$i" -lt 30 ]; do
     fi
 
     if [ -z "$probe_dir" ] || [ ! -d "$probe_dir" ]; then
-      # Still probe inside the container — host bind may be EROFS while a direct NFS volume works.
       probe_dir=${library_dir:-/mnt/media/Movies}
       echo "No host-writable sample folder; will probe $probe_dir inside the container only."
     else
@@ -289,7 +292,7 @@ while [ "$i" -lt 30 ]; do
         echo "often the host autofs/NFS client mount is broken or ro, while Plex uses its own mount." >&2
         print_mount_diagnostics "$probe_dir"
         if [ "$container_ok" -eq 0 ]; then
-          echo "Retrying with a direct NFS mount inside Docker (same share your laptop uses)..." >&2
+          echo "Retrying with a direct NFS mount inside Docker (mount-only; will not delete library files)..." >&2
           if switch_to_direct_nfs_and_retry; then
             sleep 2
             if container_err=$($COMPOSE exec -T -u "${probe_uid}:${probe_gid}" metarr \
@@ -318,7 +321,7 @@ while [ "$i" -lt 30 ]; do
     esac
 
     if [ "$created_probe" -eq 1 ]; then
-      rm -rf "$probe_dir" 2>/dev/null || true
+      remove_write_probe_dir "$probe_dir"
     fi
     exit 0
   fi

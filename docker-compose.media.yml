@@ -1,7 +1,6 @@
-# Default: bind the host media path (same path Plex often uses).
-# deploy.sh may rewrite this file to mount NFS directly when the host bind
-# returns EROFS (common with a broken autofs/NFS client mount) while other
-# NFS clients can still write.
+# Default: bind the host media path. This only attaches /mnt/media into Docker.
+# It does not copy or own library files. deploy.sh may rewrite this file to use
+# a separate media_nfs volume (direct NFS) without deleting any volume or path.
 volumes:
   media:
     driver: local

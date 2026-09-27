@@ -16,11 +16,12 @@ services:
       METARR_GID: "${METARR_GID:-0}"
     volumes:
       - metarr-data:/app/data
-      # Backing store for /mnt/media is defined in docker-compose.media.yml
-      # (host bind by default, or a direct NFS mount when the host path is EROFS).
-      - media:/mnt/media
+      # Volume name is "media" (host bind) or "media_nfs" (direct NFS).
+      # Switching uses a new volume name — deploy never deletes a media volume.
+      - ${METARR_MEDIA_VOLUME:-media}:/mnt/media
     restart: unless-stopped
 
 volumes:
   metarr-data:
   media:
+  media_nfs:
