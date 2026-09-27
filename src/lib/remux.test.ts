@@ -158,6 +158,7 @@ test("remux work folders stay under the database directory and missing media pat
   });
   assert.match(friendlyFsError(error, "Remux failed."), /mount the host media folder|Missing path component|\/mnt\/media/);
   assert.match(writeAccessDeniedMessage("/mnt/media/Movies/Film"), /METARR_UID/);
+  assert.match(writeAccessDeniedMessage("/mnt/media/Movies/Film", "EROFS"), /mounted read-only/);
   const writable = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-write-"));
   try {
     assert.doesNotThrow(() => assertWritableDiscFolder(writable));
