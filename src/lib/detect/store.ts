@@ -94,8 +94,9 @@ export function scannedKeys(db: Database.Database): Set<string> {
 
 export function enqueueTargets(db: Database.Database, targets: DetectTarget[], priority: DetectPriority): { added: number; already: number } {
   const existing = db.prepare(
-    `SELECT 1 AS ok FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running')`,
+    `SELECT id, priority, status FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running')`,
   );
+  const promote = db.prepare(`UPDATE detect_jobs SET priority = 'immediate' WHERE id = ?`);
   const insert = db.prepare(
     `INSERT INTO detect_jobs (
       path, kind, ordinal, priority, status, label, format, placement, stream_label, created_at
@@ -106,8 +107,12 @@ export function enqueueTargets(db: Database.Database, targets: DetectTarget[], p
   let already = 0;
   const write = db.transaction(() => {
     for (const target of targets) {
-      if (existing.get(target.path, target.kind, target.ordinal)) {
-        already += 1;
+      const row = existing.get(target.path, target.kind, target.ordinal) as { id: number; priority: string; status: string } | undefined;
+      if (row) {
+        if (priority === "immediate" && row.status === "pending" && row.priority !== "immediate") {
+          promote.run(row.id);
+          added += 1;
+        } else already += 1;
         continue;
       }
       insert.run(target.path, target.kind, target.ordinal, priority, target.label, target.format, target.placement, target.streamLabel, now);

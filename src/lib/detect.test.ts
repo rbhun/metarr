@@ -331,6 +331,23 @@ test("detected languages replace unknown on the matching stream", () => {
   assert.equal(subtitle?.detectedLanguage, "Hungarian");
 });
 
+test("a manual start pulls a waiting track out of the overnight queue", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/movies/Kwai.m2ts", kind: "subtitle", ordinal: 31, label: "Kwai", format: "PGS", placement: "internal", streamLabel: null },
+  ], "window");
+  const again = enqueueTargets(db, [
+    { path: "/movies/Kwai.m2ts", kind: "subtitle", ordinal: 31, label: "Kwai", format: "PGS", placement: "internal", streamLabel: null },
+  ], "immediate");
+  assert.equal(again.added, 1);
+  assert.equal(again.already, 0);
+  const job = claimNextJob(db, false);
+  assert.equal(job?.path, "/movies/Kwai.m2ts");
+  assert.equal(job?.priority, "immediate");
+  db.close();
+});
+
 test("immediate jobs run before queued ones, and a result is stored", () => {
   const db = new Database(":memory:");
   migrate(db);

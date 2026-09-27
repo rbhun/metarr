@@ -34,6 +34,7 @@ type TaskJob = {
   label: string;
   status: JobStatus;
   message: string | null;
+  priority: "immediate" | "window" | null;
   detail: string;
   progress: number | null;
   createdAt: string;
@@ -77,7 +78,7 @@ function taskState(job: TaskJob): string {
     }
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
-  if (job.status === "pending") return "Queued";
+  if (job.status === "pending") return job.priority === "window" ? "Waiting for the window" : "Starting";
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";

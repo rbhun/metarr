@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.35
+
+- Start a track as soon as you click Unknown, even when the overnight queue already has it.
+
 ## 0.0.34
 
 - Mount `/mnt/media` for Docker remux, write temp files under the app data folder, and say clearly when the disc folder is missing inside Metarr.
