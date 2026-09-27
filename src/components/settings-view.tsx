@@ -568,8 +568,10 @@ export function SettingsView() {
           </Card>
         </div>
 
-        <DetectSettingsCard />
-        <RemuxSettingsCard />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <DetectSettingsCard />
+          <RemuxSettingsCard />
+        </div>
 
         <div>
           <h2 className="text-base font-semibold tracking-tight">Online sources</h2>

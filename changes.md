@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.41
+
+- Redo a failed task from Tasks, and put language detection and disc remux in half-width settings cards.
+
 ## 0.0.40
 
 - Open Tasks links on the All list by default.

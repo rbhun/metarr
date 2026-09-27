@@ -160,6 +160,25 @@ export function claimNextJob(db: Database.Database, allowWindow: boolean): Detec
   return mapJob({ ...row, status: "running", message: null });
 }
 
+export function retryFailedJob(db: Database.Database, id: number): "retried" | "missing" | "already" {
+  const row = db.prepare(`SELECT path, kind, ordinal, status FROM detect_jobs WHERE id = ?`).get(id) as
+    | { path: string; kind: string; ordinal: number; status: string }
+    | undefined;
+  if (!row || row.status !== "failed") return "missing";
+  const busy = db
+    .prepare(`SELECT 1 AS ok FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running') AND id != ?`)
+    .get(row.path, row.kind, row.ordinal, id);
+  if (busy) return "already";
+  const changed = db
+    .prepare(
+      `UPDATE detect_jobs
+       SET status = 'pending', priority = 'immediate', message = NULL, started_at = NULL, finished_at = NULL
+       WHERE id = ? AND status = 'failed'`,
+    )
+    .run(id);
+  return changed.changes === 1 ? "retried" : "missing";
+}
+
 export function finishJob(db: Database.Database, id: number, status: "done" | "failed" | "skipped", message: string | null) {
   db.prepare(`UPDATE detect_jobs SET status = ?, message = ?, finished_at = ? WHERE id = ?`).run(status, message, new Date().toISOString(), id);
 }

@@ -22,6 +22,7 @@ import {
   enqueuePaths,
   finishRemux,
   KEEP_ALL_SELECTION,
+  retryFailedRemux,
   listRemuxJobs,
   readRemuxSettings,
   remuxTotals,
@@ -209,5 +210,8 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.ok(all.jobs.some((job) => job.status === "failed"));
   assert.ok(all.jobs.some((job) => job.status === "pending"));
   assert.equal(taskTotalsSum(taskTotalsFor(db, "remux")), 2);
+  assert.equal(retryFailedRemux(db, claimed.id), "retried");
+  assert.equal(listRemuxJobs(db, { status: "failed", page: 1, pageSize: 10 }).total, 0);
+  assert.ok(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 10 }).jobs.some((row) => row.label === "Fail (1999)"));
   db.close();
 });

@@ -157,6 +157,17 @@ export function updateRemuxProgress(db: Database.Database, id: number, progress:
   db.prepare(`UPDATE remux_jobs SET progress = ?, message = ? WHERE id = ? AND status = 'running'`).run(progress, message.slice(0, 500), id);
 }
 
+export function retryFailedRemux(db: Database.Database, id: number): "retried" | "missing" | "already" {
+  const row = db.prepare(`SELECT path, status FROM remux_jobs WHERE id = ?`).get(id) as { path: string; status: string } | undefined;
+  if (!row || row.status !== "failed") return "missing";
+  const busy = db.prepare(`SELECT 1 AS ok FROM remux_jobs WHERE path = ? AND status IN ('pending', 'running') AND id != ?`).get(row.path, id);
+  if (busy) return "already";
+  const changed = db
+    .prepare(`UPDATE remux_jobs SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL WHERE id = ? AND status = 'failed'`)
+    .run(id);
+  return changed.changes === 1 ? "retried" : "missing";
+}
+
 export function finishRemux(db: Database.Database, id: number, status: "done" | "failed", message: string | null) {
   const text =
     message && message.trim()

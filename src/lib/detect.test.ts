@@ -9,7 +9,8 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, listJobs, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, listJobs, retryFailedJob, saveDetection } from "@/lib/detect/store";
+import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { rollupSubtitles } from "@/lib/detect/rollup";
@@ -411,6 +412,39 @@ test("clearing a filter removes only that status and keeps the language", () => 
   assert.equal(listJobs(db, { status: "done", page: 1, pageSize: 50 }).total, 1);
   const stored = db.prepare(`SELECT language FROM detect_results WHERE path = '/done.mkv'`).get() as { language: string };
   assert.equal(stored.language, "Hungarian");
+  db.close();
+});
+
+test("all tasks shows failed and waiting in one list", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/failed.mkv", kind: "subtitle", ordinal: 0, label: "Failed", format: "PGS", placement: "internal", streamLabel: null },
+    { path: "/wait.mkv", kind: "subtitle", ordinal: 1, label: "Wait", format: "SRT", placement: "internal", streamLabel: null },
+  ], "immediate");
+  const job = claimNextJob(db, true);
+  finishJob(db, job!.id, "failed", "This language cannot be reliably recognized.");
+  const mixed = listTaskJobs(db, { queue: "all", status: "all", page: 1, pageSize: 50 });
+  assert.equal(mixed.total, 2);
+  assert.deepEqual(mixed.jobs.map((row) => row.status).sort(), ["failed", "pending"]);
+  const failedOnly = listTaskJobs(db, { queue: "all", status: "failed", page: 1, pageSize: 50 });
+  assert.equal(failedOnly.total, 1);
+  db.close();
+});
+
+test("redoing a failed language check queues that same track now", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/failed.mkv", kind: "subtitle", ordinal: 0, label: "Failed", format: "PGS", placement: "internal", streamLabel: null },
+  ], "window");
+  const job = claimNextJob(db, true);
+  finishJob(db, job!.id, "failed", "This language cannot be reliably recognized.");
+  assert.equal(retryFailedJob(db, job!.id), "retried");
+  const again = claimNextJob(db, false);
+  assert.equal(again?.id, job!.id);
+  assert.equal(again?.priority, "immediate");
+  assert.equal(retryFailedJob(db, job!.id), "missing");
   db.close();
 });
 

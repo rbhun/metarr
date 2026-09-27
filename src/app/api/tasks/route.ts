@@ -1,7 +1,7 @@
-import { clearJobs, detectCounts, jobTotals as languageTotals, type DetectJobStatus } from "@/lib/detect/store";
-import { clearRemuxJobs, remuxCounts, remuxTotals, type RemuxJobStatus } from "@/lib/remux/store";
+import { clearJobs, detectCounts, jobTotals as languageTotals, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
+import { clearRemuxJobs, remuxCounts, remuxTotals, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
-import { startDetectWorker } from "@/lib/detect/worker";
+import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
 import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
@@ -43,6 +43,27 @@ export async function GET(request: Request) {
     page,
     pageSize,
   });
+}
+
+export async function POST(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
+  }
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const queue = record.queue === "language" || record.queue === "remux" ? record.queue : null;
+  const id = typeof record.id === "number" && Number.isInteger(record.id) && record.id > 0 ? record.id : null;
+  if (!queue || !id) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
+  const db = getDb();
+  const result = queue === "language" ? retryFailedJob(db, id) : retryFailedRemux(db, id);
+  if (result === "missing") return NextResponse.json({ error: "That failed task is no longer there." }, { status: 404 });
+  if (result === "retried") {
+    if (queue === "language") kickDetectWorker();
+    else kickRemuxWorker();
+  }
+  return NextResponse.json({ result, totals: taskTotalsFor(db, queue) });
 }
 
 export async function DELETE(request: Request) {

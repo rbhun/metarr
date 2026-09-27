@@ -138,6 +138,7 @@ export function TasksView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [redoing, setRedoing] = useState<string | null>(null);
 
   const writeQuery = useCallback(
     (next: { status?: StatusFilter; page?: number; queue?: QueueFilter }) => {
@@ -188,6 +189,26 @@ export function TasksView() {
     const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (page > pages) writeQuery({ page: pages });
   }, [error, loading, page, total, writeQuery]);
+
+  async function redoJob(job: TaskJob) {
+    if (job.status !== "failed" || redoing) return;
+    setRedoing(job.key);
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queue: job.queue, id: job.id }),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
+      if (!response.ok) throw new Error(body?.error || "That task could not be redone.");
+      toast.success(body?.result === "already" ? "That task is already queued." : "Queued again.");
+      await load();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "That task could not be redone.");
+    } finally {
+      setRedoing(null);
+    }
+  }
 
   async function clearFiltered() {
     const count = tabCount(totals, status);
@@ -276,7 +297,14 @@ export function TasksView() {
                       {job.detail ? ` · ${job.detail}` : ""}
                     </p>
                   </div>
-                  <span className={cn("shrink-0 text-xs", stateTone(job.status))}>{taskState(job)}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {job.status === "failed" ? (
+                      <Button size="sm" variant="outline" disabled={redoing === job.key} onClick={() => void redoJob(job)}>
+                        {redoing === job.key ? "Queuing…" : "Redo"}
+                      </Button>
+                    ) : null}
+                    <span className={cn("text-xs", stateTone(job.status))}>{taskState(job)}</span>
+                  </div>
                 </div>
                 {job.status === "failed" ? (
                   <p className="text-sm leading-6">{failureText(job)}</p>
