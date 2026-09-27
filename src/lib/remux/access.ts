@@ -10,11 +10,11 @@ export function remuxWorkDirectory(databasePath: string, jobId: number): string 
 export function missingPathMessage(target: string): string {
   const resolved = path.resolve(target);
   const parts = resolved.split(path.sep).filter(Boolean);
-  let current = path.sep;
+  let current: string = path.sep;
   for (const part of parts) {
-    const next = path.join(current, part);
+    const next = path.join(/*turbopackIgnore: true*/ current, part);
     try {
-      fs.statSync(next);
+      fs.statSync(/*turbopackIgnore: true*/ next);
     } catch (caught) {
       const code = (caught as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
