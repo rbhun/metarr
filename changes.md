@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.57
+
+- Let deploy reset its generated docker-compose.media.yml before git pull so a prior NFS rewrite cannot block updates.
+
 ## 0.0.56
 
 - Switch to direct NFS with a new `media_nfs` volume instead of recreating/deleting media volumes, so deploy cannot wipe library data.

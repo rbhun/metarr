@@ -23,10 +23,36 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 cd "$root"
-git pull --ff-only
 
 # Persist NFS choice across deploys (gitignored). Never stores credentials.
 NFS_STATE="$root/.metarr-nfs.env"
+
+# docker-compose.media.yml is rewritten by this script. Discard local edits so
+# git pull is not blocked (library data is never touched).
+capture_nfs_from_media_yml() {
+  [ -f docker-compose.media.yml ] || return 0
+  [ -n "${METARR_NFS_ADDR:-}" ] && [ -n "${METARR_NFS_EXPORT:-}" ] && return 0
+  [ -f "$NFS_STATE" ] && return 0
+  if grep -q 'type: nfs' docker-compose.media.yml 2>/dev/null; then
+    addr=$(sed -n 's/.*addr=\([^,]*\).*/\1/p' docker-compose.media.yml | head -n 1 || true)
+    export_path=$(sed -n 's/.*device: ":\([^"]*\)".*/\1/p' docker-compose.media.yml | head -n 1 || true)
+    if [ -n "$addr" ] && [ -n "$export_path" ]; then
+      METARR_NFS_ADDR=$addr
+      METARR_NFS_EXPORT=$export_path
+      export METARR_NFS_ADDR METARR_NFS_EXPORT
+      echo "Remembered direct NFS ${addr}:${export_path} from local docker-compose.media.yml."
+    fi
+  fi
+}
+
+capture_nfs_from_media_yml
+if git status --porcelain -- docker-compose.media.yml 2>/dev/null | grep -q .; then
+  echo "Resetting generated docker-compose.media.yml so git pull can update Metarr."
+  git checkout -- docker-compose.media.yml
+fi
+
+git pull --ff-only
+
 if [ -f "$NFS_STATE" ] && [ -z "${METARR_NFS_ADDR:-}" ] && [ -z "${METARR_NFS_EXPORT:-}" ]; then
   # shellcheck disable=SC1090
   . "$NFS_STATE"
