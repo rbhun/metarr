@@ -55,7 +55,7 @@ export function RemuxStatus() {
   return (
     <p className="text-xs text-muted-foreground">
       {parts.join(" · ")}{" "}
-      <Link href={failed ? "/tasks?queue=remux&status=failed" : "/tasks?queue=remux"} className="underline underline-offset-2">
+      <Link href={failed ? "/tasks?queue=remux&status=failed" : "/tasks?queue=remux&status=all"} className="underline underline-offset-2">
         Open Tasks
       </Link>
     </p>

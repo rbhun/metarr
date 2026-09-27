@@ -37,7 +37,7 @@ export function TaskCount({ bump, className }: { bump: () => void; className?: s
     async function load() {
       let response: Response;
       try {
-        response = await fetch("/api/tasks?queue=all&status=failed&page=1&pageSize=1", { cache: "no-store" });
+        response = await fetch("/api/tasks?queue=all&status=all&page=1&pageSize=1", { cache: "no-store" });
       } catch {
         return;
       }
