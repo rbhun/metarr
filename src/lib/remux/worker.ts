@@ -4,6 +4,7 @@ import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
+import { assertWritableDiscFolder, friendlyFsError, remuxWorkDirectory } from "@/lib/remux/access";
 import { safeBaseName } from "@/lib/remux/place";
 import { outputDirectory, makemkvSource } from "@/lib/remux/source";
 import { ripDisc } from "@/lib/remux/run";
@@ -74,12 +75,13 @@ async function step() {
       finishRemux(db, job.id, "failed", "This path is not a disc image MakeMKV can open.");
       return;
     }
+    assertWritableDiscFolder(directory);
     const mainName = `${safeBaseName(job.label)}.mkv`;
     if (fs.existsSync(path.join(directory, mainName))) {
       finishRemux(db, job.id, "failed", `${mainName} already exists next to the disc.`);
       return;
     }
-    workDir.current = path.join(directory, `.metarr-remux-${job.id}`);
+    workDir.current = remuxWorkDirectory(db.name, job.id);
     const home = writeMakeMkvHome(path.join(path.dirname(db.name), "makemkv-home"), settings.licenseKey);
     const message = await ripDisc({
       binary: settings.binary,
@@ -94,8 +96,7 @@ async function step() {
     finishRemux(db, job.id, "done", message);
   } catch (caught) {
     if (workDir.current) fs.rmSync(workDir.current, { recursive: true, force: true });
-    const message = caught instanceof Error ? caught.message : "Remux failed.";
-    finishRemux(db, job.id, "failed", message);
+    finishRemux(db, job.id, "failed", friendlyFsError(caught, "Remux failed."));
   }
 }
 

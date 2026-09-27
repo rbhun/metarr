@@ -9,6 +9,7 @@ import { plexSessionBusy } from "@/lib/detect/plex";
 import type { ScanFile } from "@/lib/detect/targets";
 import { insertSourceRecords, migrate } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
+import { friendlyFsError, missingPathMessage, remuxWorkDirectory } from "@/lib/remux/access";
 import { listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
@@ -65,9 +66,11 @@ test("disc paths become a MakeMKV source and an output folder", () => {
   assert.equal(makemkvSource("/movies/Film.iso"), "iso:/movies/Film.iso");
   assert.equal(makemkvSource("/movies/Film/BDMV/STREAM/00000.m2ts"), "file:/movies/Film");
   assert.equal(makemkvSource("/movies/Film/VIDEO_TS/VTS_01_1.VOB"), "file:/movies/Film");
+  assert.equal(makemkvSource("/mnt/media/Movies/50 First Dates (2004)/VIDEO_TS/VIDEO_TS.VOB"), "file:/mnt/media/Movies/50 First Dates (2004)");
   assert.equal(makemkvSource("/movies/bdmv-extra/clip.mkv"), null);
   assert.equal(outputDirectory("/movies/Film.iso"), "/movies");
   assert.equal(outputDirectory("/movies/Film/BDMV/STREAM/00000.m2ts"), "/movies/Film");
+  assert.equal(outputDirectory("/mnt/media/Movies/50 First Dates (2004)/VIDEO_TS/VIDEO_TS.VOB"), "/mnt/media/Movies/50 First Dates (2004)");
 });
 
 test("the longest file is the movie and other titles get Plex extra names", () => {
@@ -143,6 +146,16 @@ test("the queue keeps every track except 3D video, and the key stays out of the 
 test("a direct play counts as Plex being busy", () => {
   assert.equal(plexSessionBusy({ MediaContainer: { size: 1, Metadata: [{ title: "Film" }] } }), true);
   assert.equal(plexSessionBusy({ MediaContainer: { size: 0 } }), false);
+});
+
+test("remux work folders stay under the database directory and missing media paths say to mount Docker", () => {
+  assert.equal(remuxWorkDirectory("/app/data/library.db", 7), path.join("/app/data", "remux-work", "job-7"));
+  const missing = missingPathMessage("/mnt/media/Movies/Missing Film (1999)");
+  assert.match(missing, /mount the host media folder/);
+  const error = Object.assign(new Error("ENOENT: no such file or directory, mkdir '/mnt/media/Movies/Film/.metarr-remux-1'"), {
+    code: "ENOENT",
+  });
+  assert.match(friendlyFsError(error, "Remux failed."), /mount the host media folder|Missing path component|\/mnt\/media/);
 });
 
 test("paths and library discs feed the remux queue and history list", () => {
