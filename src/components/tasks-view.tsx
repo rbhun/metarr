@@ -16,6 +16,7 @@ const QUEUES = [
 ] as const;
 
 const TABS = [
+  ["all", "All"],
   ["failed", "Failed"],
   ["done", "Done"],
   ["pending", "Waiting"],
@@ -24,7 +25,8 @@ const TABS = [
 ] as const;
 
 type QueueFilter = (typeof QUEUES)[number][0];
-type JobStatus = (typeof TABS)[number][0];
+type JobStatus = Exclude<(typeof TABS)[number][0], "all">;
+type StatusFilter = (typeof TABS)[number][0];
 
 type TaskJob = {
   key: string;
@@ -46,13 +48,18 @@ type JobTotals = { pending: number; running: number; done: number; failed: numbe
 
 type TasksBody = {
   totals?: JobTotals;
+  allTotal?: number;
   jobs?: TaskJob[];
   total?: number;
   error?: string;
 };
 
-function isStatus(value: string | null): value is JobStatus {
+function isStatus(value: string | null): value is StatusFilter {
   return TABS.some(([status]) => status === value);
+}
+
+function totalsSum(totals: JobTotals): number {
+  return totals.pending + totals.running + totals.done + totals.failed + totals.skipped;
 }
 
 function isQueue(value: string | null): value is QueueFilter {
@@ -92,7 +99,8 @@ function when(job: TaskJob): string {
   return `${label} ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
 }
 
-function tabCount(totals: JobTotals, status: JobStatus): number {
+function tabCount(totals: JobTotals, status: StatusFilter): number {
+  if (status === "all") return totalsSum(totals);
   return totals[status];
 }
 
@@ -121,7 +129,7 @@ export function TasksView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requested = searchParams.get("status");
-  const status: JobStatus = isStatus(requested) ? requested : "failed";
+  const status: StatusFilter = isStatus(requested) ? requested : "all";
   const queue: QueueFilter = isQueue(searchParams.get("queue")) ? (searchParams.get("queue") as QueueFilter) : "all";
   const page = Math.max(1, Math.trunc(Number(searchParams.get("page")) || 1));
   const [jobs, setJobs] = useState<TaskJob[]>([]);
@@ -132,7 +140,7 @@ export function TasksView() {
   const [clearing, setClearing] = useState(false);
 
   const writeQuery = useCallback(
-    (next: { status?: JobStatus; page?: number; queue?: QueueFilter }) => {
+    (next: { status?: StatusFilter; page?: number; queue?: QueueFilter }) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("queue", next.queue ?? queue);
       params.set("status", next.status ?? status);
@@ -183,7 +191,7 @@ export function TasksView() {
 
   async function clearFiltered() {
     const count = tabCount(totals, status);
-    if (count < 1 || clearing || status === "running") return;
+    if (count < 1 || clearing || status === "running" || status === "all") return;
     const name = (TABS.find(([value]) => value === status)?.[1] ?? status).toLowerCase();
     const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
@@ -206,7 +214,7 @@ export function TasksView() {
   const safePage = Math.min(page, pages);
   const pageStart = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(safePage * PAGE_SIZE, total);
-  const tabLabel = TABS.find(([value]) => value === status)?.[1] ?? "Failed";
+  const tabLabel = TABS.find(([value]) => value === status)?.[1] ?? "All";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -219,7 +227,7 @@ export function TasksView() {
                 Language checks and disc remuxes share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
-            {status !== "running" && tabCount(totals, status) > 0 ? (
+            {status !== "running" && status !== "all" && tabCount(totals, status) > 0 ? (
               <Button size="sm" variant="outline" onClick={() => void clearFiltered()} disabled={clearing}>
                 Clear
               </Button>
@@ -253,7 +261,9 @@ export function TasksView() {
           ) : null}
           {loading && jobs.length === 0 ? <p className="text-sm text-muted-foreground">Loading tasks…</p> : null}
           {!loading && jobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{total === 0 ? `No ${tabLabel.toLowerCase()} tasks.` : "This page is empty."}</p>
+            <p className="text-sm text-muted-foreground">
+              {total === 0 ? (status === "all" ? "No tasks yet." : `No ${tabLabel.toLowerCase()} tasks.`) : "This page is empty."}
+            </p>
           ) : null}
           <div className="flex flex-col gap-3">
             {jobs.map((job) => (

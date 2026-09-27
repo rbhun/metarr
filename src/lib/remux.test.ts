@@ -28,7 +28,7 @@ import {
   writeMakeMkvHome,
   writeRemuxSettings,
 } from "@/lib/remux/store";
-import { listTaskJobs, taskTotalsFor } from "@/lib/tasks";
+import { listTaskJobs, taskTotalsFor, taskTotalsSum } from "@/lib/tasks";
 
 const INFO = `
 TINFO:0,9,0,"0:02:11"
@@ -202,5 +202,12 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(tasks.total, 1);
   assert.match(tasks.jobs[0]?.detail ?? "", /Disc remux/);
   assert.equal(taskTotalsFor(db, "remux").failed, 1);
+  const pending = enqueuePaths(db, [{ path: "/movies/Wait.iso", label: "Wait (2000)" }], false);
+  assert.equal(pending.added, 1);
+  const all = listTaskJobs(db, { queue: "remux", status: "all", page: 1, pageSize: 20 });
+  assert.equal(all.total, 2);
+  assert.ok(all.jobs.some((job) => job.status === "failed"));
+  assert.ok(all.jobs.some((job) => job.status === "pending"));
+  assert.equal(taskTotalsSum(taskTotalsFor(db, "remux")), 2);
   db.close();
 });
