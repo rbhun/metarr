@@ -10,10 +10,14 @@ services:
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
+      # Match the owner of /mnt/media so remux can write MKVs beside discs.
+      # deploy.sh sets these when unset; or export before deploy.
+      METARR_UID: "${METARR_UID:-0}"
+      METARR_GID: "${METARR_GID:-0}"
     volumes:
       - metarr-data:/app/data
       # Same path as on the Plex host so disc remux can read ISOs/DVDs and write MKVs beside them.
-      - /mnt/media:/mnt/media
+      - /mnt/media:/mnt/media:rw
     restart: unless-stopped
 
 volumes:

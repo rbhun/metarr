@@ -45,5 +45,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=builder /app/scripts/detect_speech.py ./scripts/detect_speech.py
+COPY --from=builder /app/scripts/entrypoint.sh ./scripts/entrypoint.sh
+RUN chmod +x /app/scripts/entrypoint.sh
 EXPOSE 4317
-CMD ["node", "server.js"]
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
