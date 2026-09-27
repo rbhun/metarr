@@ -1,5 +1,5 @@
-import { clearPendingJobs, detectCounts, jobTotals as languageTotals } from "@/lib/detect/store";
-import { clearPendingRemux, remuxCounts, remuxTotals } from "@/lib/remux/store";
+import { clearJobs, detectCounts, jobTotals as languageTotals, type DetectJobStatus } from "@/lib/detect/store";
+import { clearRemuxJobs, remuxCounts, remuxTotals, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
 import { startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, type TaskQueue, type TaskStatus } from "@/lib/tasks";
@@ -42,10 +42,12 @@ export async function DELETE(request: Request) {
   const url = new URL(request.url);
   const rawQueue = url.searchParams.get("queue") ?? "all";
   const queue = QUEUES.has(rawQueue as TaskQueue | "all") ? (rawQueue as TaskQueue | "all") : "all";
+  const rawStatus = url.searchParams.get("status");
+  const status = rawStatus && STATUSES.has(rawStatus as TaskStatus) ? (rawStatus as TaskStatus) : "pending";
   const db = getDb();
   let removed = 0;
-  if (queue === "all" || queue === "language") removed += clearPendingJobs(db);
-  if (queue === "all" || queue === "remux") removed += clearPendingRemux(db);
+  if (queue === "all" || queue === "language") removed += clearJobs(db, status as DetectJobStatus);
+  if ((queue === "all" || queue === "remux") && status !== "skipped") removed += clearRemuxJobs(db, status as RemuxJobStatus);
   kickRemuxWorker();
   return NextResponse.json({
     removed,

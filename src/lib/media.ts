@@ -113,6 +113,42 @@ const LANGUAGE_NAMES: Record<string, string> = {
   vie: "Vietnamese",
 };
 
+const LANGUAGE_CODES: Record<string, string> = {
+  English: "eng",
+  Hungarian: "hun",
+  German: "deu",
+  Spanish: "spa",
+  French: "fra",
+  Italian: "ita",
+  Japanese: "jpn",
+  Korean: "kor",
+  Chinese: "zho",
+  Portuguese: "por",
+  Russian: "rus",
+  Polish: "pol",
+  Dutch: "nld",
+  Swedish: "swe",
+  Norwegian: "nor",
+  Danish: "dan",
+  Finnish: "fin",
+  Czech: "ces",
+  Turkish: "tur",
+  Arabic: "ara",
+  Hindi: "hin",
+  Thai: "tha",
+  Ukrainian: "ukr",
+  Hebrew: "heb",
+  Greek: "ell",
+  Romanian: "ron",
+  Slovak: "slk",
+  Croatian: "hrv",
+  Serbian: "srp",
+  Bulgarian: "bul",
+  Catalan: "cat",
+  Indonesian: "ind",
+  Vietnamese: "vie",
+};
+
 const HDR_RANK: Record<HdrLabel, number> = {
   none: 0,
   HLG: 1,
@@ -346,6 +382,13 @@ export function normalizeNumericId(value: unknown): string | null {
   const numeric = Number(match[0]);
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
   return String(numeric);
+}
+
+/** ISO 639-2 tag stored in Matroska and MP4, such as `hun` for Hungarian. */
+export function languageCode(name: string): string | null {
+  const named = languageName(name);
+  if (!named) return null;
+  return LANGUAGE_CODES[named] ?? null;
 }
 
 export function languageName(raw: string): string | null {

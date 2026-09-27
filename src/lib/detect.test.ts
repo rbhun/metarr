@@ -7,8 +7,9 @@ import { cueText } from "@/lib/detect/cues";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
+import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearPendingJobs, enqueueTargets, finishJob, listJobs, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, listJobs, saveDetection } from "@/lib/detect/store";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { rollupSubtitles } from "@/lib/detect/rollup";
@@ -16,6 +17,9 @@ import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
+import { planTag, retagTempPath, retargetPath } from "@/lib/detect/tag";
+import { stampLanguage } from "@/lib/detect/stamp";
+import { playerIdsForPaths } from "@/lib/detect/publish";
 import { pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { shownLanguage } from "@/lib/format";
@@ -156,9 +160,11 @@ test("a detected stereo or mono track can be heard again until it is commentary"
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, language: "English" }, 3, "Alien").length, 0);
 });
 
-test("an audio sample is taken from the first minutes and keeps the decoded packets", () => {
-  assert.deepEqual(sampleOffsets(6360), [45, 12]);
-  assert.deepEqual(sampleOffsets(40), [13]);
+test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packets", () => {
+  assert.deepEqual(sampleOffsets(6360), [600, 1200]);
+  assert.deepEqual(sampleOffsets(null), [600, 1200]);
+  assert.deepEqual(sampleOffsets(15 * 60), [600]);
+  assert.deepEqual(sampleOffsets(40), [20]);
   const args = audioClipArgs("/movies/Adjustment.m2ts", 0, 90, "/tmp/clip.wav");
   assert.ok(args.indexOf("-t") < args.indexOf("-i"));
   assert.equal(args[args.indexOf("-map") + 1], "0:a:0");
@@ -175,7 +181,8 @@ test("a pgs subtitle is copied out of the video instead of decoding the picture"
   assert.equal(args[args.indexOf("-c") + 1], "copy");
   assert.equal(args.includes("-filter_complex"), false);
   assert.equal(args.at(-2), "sup");
-  assert.equal(args[args.indexOf("-t") + 1], "180");
+  assert.ok(args.indexOf("-t") < args.indexOf("-i"));
+  assert.equal(args[args.indexOf("-t") + 1], "45");
 });
 
 test("a vobsub picture is drawn as an image and cropped to the text", () => {
@@ -355,6 +362,9 @@ test("clearing the queue drops waiting tracks and keeps a finished one visible",
   assert.ok(job);
   finishJob(db, job!.id, "failed", "This language cannot be reliably recognized.");
   saveDetection(db, job!, { language: null, role: null, confidence: 0, message: "This language cannot be reliably recognized." });
+  const mixed = listJobs(db, { page: 1, pageSize: 50 });
+  assert.equal(mixed.total, 2);
+  assert.deepEqual(mixed.jobs.map((row) => row.status).sort(), ["failed", "pending"]);
   assert.equal(clearPendingJobs(db), 1);
   const listed = listJobs(db, { status: "failed", page: 1, pageSize: 50 });
   assert.equal(listed.total, 1);
@@ -366,9 +376,149 @@ test("clearing the queue drops waiting tracks and keeps a finished one visible",
   db.close();
 });
 
+test("clearing a filter removes only that status and keeps the language", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/failed.mkv", kind: "subtitle", ordinal: 0, label: "Failed", format: "PGS", placement: "internal", streamLabel: null },
+    { path: "/done.mkv", kind: "subtitle", ordinal: 1, label: "Named", format: "SRT", placement: "internal", streamLabel: null },
+  ], "immediate");
+  const failed = claimNextJob(db, true);
+  finishJob(db, failed!.id, "failed", "This language cannot be reliably recognized.");
+  saveDetection(db, failed!, { language: null, role: null, confidence: 0, message: "This language cannot be reliably recognized." });
+  const named = claimNextJob(db, true);
+  finishJob(db, named!.id, "done", "Hungarian");
+  saveDetection(db, named!, { language: "Hungarian", role: null, confidence: 1, message: null });
+  assert.equal(clearJobs(db, "failed"), 1);
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  assert.equal(listJobs(db, { status: "done", page: 1, pageSize: 50 }).total, 1);
+  const stored = db.prepare(`SELECT language FROM detect_results WHERE path = '/done.mkv'`).get() as { language: string };
+  assert.equal(stored.language, "Hungarian");
+  db.close();
+});
+
+test("an unread subtitle file is a failed check, not a finished one", () => {
+  assert.equal(finishedStatus({ language: null, message: "Plex did not name this subtitle file, so the video was not read as text." }), "failed");
+  assert.equal(finishedStatus({ language: null, message: "The subtitle file is not readable text." }), "failed");
+  assert.equal(finishedStatus({ language: null, message: "This language cannot be reliably recognized." }), "failed");
+  assert.equal(finishedStatus({ language: "Hungarian", message: null }), "done");
+});
+
 test("plex background work and transcodes count as busy", () => {
   assert.equal(plexActivitiesBusy({ MediaContainer: { size: 0 } }), false);
   assert.equal(plexActivitiesBusy({ MediaContainer: { size: 1, Activity: [{ type: "library.update" }] } }), true);
   assert.equal(plexTranscodeBusy({ MediaContainer: { Metadata: [{ title: "Dune" }] } }), false);
   assert.equal(plexTranscodeBusy({ MediaContainer: { Metadata: [{ TranscodeSession: { throttled: false } }] } }), true);
+});
+
+test("a recognized language is planned as a file tag or a renamed subtitle", () => {
+  assert.deepEqual(planTag("/movies/Dune.mkv", "audio", 1, "Hungarian", "commentary"), {
+    action: "matroska",
+    selector: "track:a2",
+    language: "hun",
+    commentary: true,
+  });
+  assert.deepEqual(planTag("/movies/Dune.mkv", "subtitle", 0, "Hungarian", null), {
+    action: "matroska",
+    selector: "track:s1",
+    language: "hun",
+    commentary: false,
+  });
+  assert.deepEqual(planTag("/movies/Dune.mp4", "audio", 0, "English", null), {
+    action: "mp4",
+    specifier: "s:a:0",
+    language: "eng",
+    commentary: false,
+  });
+  const renamed = planTag("/movies/Dune.srt", "subtitle", 0, "Hungarian", null);
+  assert.equal(renamed.action === "rename" && renamed.to, "/movies/Dune.hun.srt");
+  const forced = planTag("/movies/Dune.forced.srt", "subtitle", 0, "Hungarian", null);
+  assert.equal(forced.action === "rename" && forced.to, "/movies/Dune.hun.forced.srt");
+  const pair = planTag("/movies/Dune.idx", "subtitle", 0, "Hungarian", null);
+  assert.equal(pair.action === "rename" && pair.pairTo, "/movies/Dune.hun.sub");
+  assert.deepEqual(planTag("/movies/Dune.eng.srt", "subtitle", 0, "Hungarian", null), { action: "skip", reason: "already-named" });
+  assert.deepEqual(planTag("/movies/Dune.avi", "audio", 0, "Hungarian", null), { action: "skip", reason: "container" });
+  assert.equal(retargetPath("/mnt/media/Dune.srt", "/Volumes/media/Dune.srt", "/Volumes/media/Dune.hun.srt"), "/mnt/media/Dune.hun.srt");
+  assert.equal(
+    retagTempPath("/movies/Breakfast.at.Tiffany's.1961.mp4"),
+    "/movies/Breakfast.at.Tiffany's.1961.metarr-writing.mp4",
+  );
+});
+
+test("a recognized language is saved on the library row that owns the file", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  db.prepare(
+    `INSERT INTO catalog_titles (
+      kind, title, sort_title, playable_label, path, audio_tracks, subtitle_tracks, audio_languages, subtitle_languages, versions_json
+    ) VALUES ('movie', 'Dune', 'dune', 'video', '/movies/Dune.mkv', ?, ?, '[]', '[]', ?)`,
+  ).run(
+    JSON.stringify([{ language: null, layout: "2.0", codec: "AAC", streamIndex: 1 }]),
+    JSON.stringify([{ language: null, placement: "external", format: "SRT", forced: false, file: "/movies/Dune.srt" }]),
+    JSON.stringify([
+      {
+        path: "/movies/Dune.other.mkv",
+        audioTracks: [{ language: null, layout: "2.0", codec: "AAC", streamIndex: 0 }],
+        audioLanguages: [],
+        subtitleTracks: [],
+        subtitleLanguages: [],
+      },
+    ]),
+  );
+  const videos = stampLanguage(db, {
+    path: "/movies/Dune.mkv",
+    kind: "audio",
+    ordinal: 1,
+    language: "Hungarian",
+    role: "commentary",
+    renamedTo: null,
+  });
+  assert.deepEqual(videos, ["/movies/Dune.mkv"]);
+  const row = db.prepare(`SELECT audio_tracks, audio_languages, subtitle_tracks, versions_json FROM catalog_titles`).get() as {
+    audio_tracks: string;
+    audio_languages: string;
+    subtitle_tracks: string;
+    versions_json: string;
+  };
+  const audio = JSON.parse(row.audio_tracks) as Array<{ language: string; label: string }>;
+  assert.equal(audio[0]?.language, "Hungarian");
+  assert.equal(audio[0]?.label, "Commentary");
+  assert.deepEqual(JSON.parse(row.audio_languages), ["Hungarian"]);
+  const other = JSON.parse(row.versions_json) as Array<{ audioTracks: Array<{ language: string | null }> }>;
+  assert.equal(other[0]?.audioTracks[0]?.language, null);
+
+  const renamed = stampLanguage(db, {
+    path: "/movies/Dune.srt",
+    kind: "subtitle",
+    ordinal: 0,
+    language: "Hungarian",
+    role: null,
+    renamedTo: "/movies/Dune.hun.srt",
+  });
+  assert.deepEqual(renamed, ["/movies/Dune.mkv"]);
+  const subtitles = JSON.parse(
+    (db.prepare(`SELECT subtitle_tracks FROM catalog_titles`).get() as { subtitle_tracks: string }).subtitle_tracks,
+  ) as Array<{ language: string; file: string }>;
+  assert.equal(subtitles[0]?.language, "Hungarian");
+  assert.equal(subtitles[0]?.file, "/movies/Dune.hun.srt");
+  db.close();
+});
+
+test("player ids follow the video path", () => {
+  const ids = playerIdsForPaths(
+    [
+      { connector: "plex", externalKey: "item:42", parentKey: null, path: "/movies/Dune.mkv", filesJson: "[]" },
+      { connector: "plex", externalKey: "episode:9", parentKey: null, path: "/tv/Show.mkv", filesJson: "[]" },
+      { connector: "radarr", externalKey: "7", parentKey: null, path: null, filesJson: JSON.stringify([{ path: "/movies/Dune.mkv" }]) },
+      { connector: "sonarr", externalKey: "3", parentKey: "sonarr-series:15", path: "/tv/Show.mkv", filesJson: "[]" },
+      { connector: "bazarr", externalKey: "radarr:7", parentKey: null, path: "/movies/Dune.mkv", filesJson: "[]" },
+      { connector: "bazarr", externalKey: "sonarr-episode:3", parentKey: "sonarr-series:15", path: "/tv/Show.mkv", filesJson: "[]" },
+    ],
+    ["/movies/Dune.mkv"],
+  );
+  assert.deepEqual(ids.plex, ["42"]);
+  assert.deepEqual(ids.radarr, [7]);
+  assert.deepEqual(ids.sonarr, []);
+  assert.deepEqual(ids.bazarrMovies, [7]);
+  assert.deepEqual(ids.bazarrSeries, []);
 });

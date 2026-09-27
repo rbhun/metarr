@@ -5,10 +5,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
 type RemuxSettings = {
+  enabled: boolean;
   startHour: number;
   endHour: number;
   binary: string;
@@ -50,6 +52,7 @@ export function RemuxSettingsCard() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          enabled: settings.enabled,
           startHour: settings.startHour,
           endHour: settings.endHour,
           binary: settings.binary,
@@ -79,6 +82,14 @@ export function RemuxSettingsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+          <Label htmlFor="remux-enabled">Run queued discs</Label>
+          <Switch
+            id="remux-enabled"
+            checked={settings.enabled}
+            onCheckedChange={(value) => setSettings({ ...settings, enabled: value === true })}
+          />
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="remux-start">Start hour</Label>

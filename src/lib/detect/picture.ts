@@ -1,4 +1,4 @@
-export function pgsCopyArgs(file: string, ordinal: number, startSeconds: number, output: string, seconds = 180): string[] {
+export function pgsCopyArgs(file: string, ordinal: number, startSeconds: number, output: string, seconds = 45): string[] {
   return [
     "-hide_banner",
     "-loglevel",
@@ -6,14 +6,14 @@ export function pgsCopyArgs(file: string, ordinal: number, startSeconds: number,
     "-y",
     "-ss",
     String(startSeconds),
+    "-t",
+    String(seconds),
     "-i",
     file,
     "-map",
     `0:s:${ordinal}`,
     "-c",
     "copy",
-    "-t",
-    String(seconds),
     "-f",
     "sup",
     output,

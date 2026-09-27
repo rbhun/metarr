@@ -1,7 +1,7 @@
 import { filesForSelection } from "@/lib/detect/files";
 import { parsePathMaps } from "@/lib/detect/paths";
 import { clampHour } from "@/lib/detect/schedule";
-import { activeJob, clearPendingJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings, type DetectJobStatus } from "@/lib/detect/store";
+import { activeJob, clearJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings, type DetectJobStatus } from "@/lib/detect/store";
 import { targetsFromFiles, type DetectTarget } from "@/lib/detect/targets";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { getDb } from "@/lib/db";
@@ -48,7 +48,8 @@ export async function GET(request: Request) {
   const status = rawStatus && JOB_STATUSES.has(rawStatus as DetectJobStatus) ? (rawStatus as DetectJobStatus) : null;
   const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page")) || 1));
   const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(url.searchParams.get("pageSize")) || 50)));
-  const list = status ? listJobs(db, { status, page, pageSize }) : { jobs: [], total: 0 };
+  const listed = url.searchParams.has("page") || url.searchParams.has("pageSize");
+  const list = listed ? listJobs(db, { status, page, pageSize }) : { jobs: [], total: 0 };
   return NextResponse.json({
     settings: readDetectSettings(db),
     counts: detectCounts(db),
@@ -61,9 +62,13 @@ export async function GET(request: Request) {
   });
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  const status = new URL(request.url).searchParams.get("status");
+  if (!status || !JOB_STATUSES.has(status as DetectJobStatus)) {
+    return NextResponse.json({ error: "Choose a filter before clearing." }, { status: 400 });
+  }
   const db = getDb();
-  const removed = clearPendingJobs(db);
+  const removed = clearJobs(db, status as DetectJobStatus);
   return NextResponse.json({
     removed,
     counts: detectCounts(db),

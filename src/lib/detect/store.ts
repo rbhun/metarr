@@ -176,6 +176,21 @@ export function saveDetection(
   ).run(job.path, job.kind, job.ordinal, result.language, result.role, result.confidence, result.message, new Date().toISOString());
 }
 
+export function markWritten(db: Database.Database, from: { path: string; kind: string; ordinal: number }, storedPath: string) {
+  const now = new Date().toISOString();
+  if (from.path !== storedPath) {
+    db.prepare(`DELETE FROM detect_results WHERE path = ? AND kind = ? AND ordinal = ?`).run(storedPath, from.kind, from.ordinal);
+    db.prepare(`UPDATE detect_results SET path = ?, written_at = ? WHERE path = ? AND kind = ? AND ordinal = ?`).run(storedPath, now, from.path, from.kind, from.ordinal);
+    return;
+  }
+  db.prepare(`UPDATE detect_results SET written_at = ? WHERE path = ? AND kind = ? AND ordinal = ?`).run(now, from.path, from.kind, from.ordinal);
+}
+
+export function hasUnwritten(db: Database.Database): boolean {
+  const row = db.prepare(`SELECT 1 AS ok FROM detect_results WHERE language IS NOT NULL AND written_at IS NULL LIMIT 1`).get() as { ok: number } | undefined;
+  return Boolean(row);
+}
+
 export function releaseRunningJobs(db: Database.Database) {
   db.prepare(`UPDATE detect_jobs SET status = 'failed', message = ?, finished_at = ? WHERE status = 'running'`).run(
     "Stopped because Metarr restarted. On a small machine this usually means it ran out of memory.",
@@ -183,8 +198,12 @@ export function releaseRunningJobs(db: Database.Database) {
   );
 }
 
+export function clearJobs(db: Database.Database, status: DetectJobStatus): number {
+  return db.prepare(`DELETE FROM detect_jobs WHERE status = ?`).run(status).changes;
+}
+
 export function clearPendingJobs(db: Database.Database): number {
-  return db.prepare(`DELETE FROM detect_jobs WHERE status = 'pending'`).run().changes;
+  return clearJobs(db, "pending");
 }
 
 export function jobTotals(db: Database.Database): { pending: number; running: number; done: number; failed: number; skipped: number } {
@@ -213,16 +232,29 @@ export function detectCounts(db: Database.Database): { immediate: number; window
 
 export function listJobs(
   db: Database.Database,
-  query: { status: DetectJobStatus; page: number; pageSize: number },
+  query: { status?: DetectJobStatus | null; page: number; pageSize: number },
 ): { jobs: DetectJob[]; total: number } {
   const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 50));
   const page = Math.max(1, Math.trunc(query.page) || 1);
+  const offset = (page - 1) * pageSize;
+  if (!query.status) {
+    const total = (db.prepare(`SELECT COUNT(*) AS count FROM detect_jobs`).get() as { count: number }).count;
+    const rows = db
+      .prepare(
+        `SELECT * FROM detect_jobs
+         ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
+           COALESCE(finished_at, started_at, created_at) DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(pageSize, offset) as JobRow[];
+    return { jobs: rows.map(mapJob), total };
+  }
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM detect_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
       ? `SELECT * FROM detect_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM detect_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
-  const rows = db.prepare(sql).all(query.status, pageSize, (page - 1) * pageSize) as JobRow[];
+  const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
   return { jobs: rows.map(mapJob), total };
 }
 

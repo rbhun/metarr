@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detect3d, detectHdr, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
+import { detect3d, detectHdr, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -141,4 +141,11 @@ test("a sample name and a tiny extra file are marked, a feature is not", () => {
   assert.deepEqual(versions.find((version) => version.name === "Sample.mkv")?.flags, ["sample", "short"]);
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("sample"));
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("short"));
+});
+
+test("a language name maps to the tag stored in a media file", () => {
+  assert.equal(languageCode("Hungarian"), "hun");
+  assert.equal(languageCode("hu"), "hun");
+  assert.equal(languageCode("English"), "eng");
+  assert.equal(languageCode("und"), null);
 });

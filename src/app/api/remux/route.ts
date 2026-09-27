@@ -50,6 +50,7 @@ function pathList(value: unknown): Array<{ path: string; label?: string }> {
 
 function publicSettings(settings: ReturnType<typeof readRemuxSettings>) {
   return {
+    enabled: settings.enabled,
     startHour: settings.startHour,
     endHour: settings.endHour,
     binary: settings.binary,
@@ -132,6 +133,7 @@ export async function PUT(request: Request) {
   if (record.licenseKey && !licenseKey) return NextResponse.json({ error: "That MakeMKV key is not usable." }, { status: 400 });
   const db = getDb();
   writeRemuxSettings(db, {
+    enabled: record.enabled === true,
     startHour,
     endHour,
     binary,

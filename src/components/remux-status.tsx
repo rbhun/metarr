@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type RemuxStatusBody = {
-  settings: { startHour: number; endHour: number };
+  settings: { enabled: boolean; startHour: number; endHour: number };
   counts: { waiting: number; running: number };
   active: { label: string; progress: number | null; message: string | null } | null;
-  pause: "window" | "plex" | "detect" | null;
+  pause: "window" | "plex" | "detect" | "off" | null;
   latest: { label: string; status: "done" | "failed"; message: string | null } | null;
 };
 
@@ -44,7 +44,8 @@ export function RemuxStatus() {
       : null,
     !active && pause === "plex" && waiting ? `${waiting} waiting · Plex is busy` : null,
     !active && pause === "detect" && waiting ? `${waiting} waiting · language detection is using the disk` : null,
-    !active && waiting && pause !== "plex" && pause !== "detect"
+    !active && pause === "off" && waiting ? `${waiting} waiting · disc remux is off` : null,
+    !active && waiting && pause !== "plex" && pause !== "detect" && pause !== "off"
       ? `${waiting} waiting for ${hourLabel(settings.startHour)}–${hourLabel(settings.endHour)}`
       : null,
     idle && latest?.status === "failed" ? `Last remux failed: ${latest.label}${latest.message ? `. ${latest.message}` : ""}` : null,

@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import { applyNextSaved, writeFinding } from "@/lib/detect/apply";
 import { filesForLibrary } from "@/lib/detect/files";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
+import { notifyPlayers } from "@/lib/detect/publish";
 import { detectTrack } from "@/lib/detect/run";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import {
@@ -9,6 +11,8 @@ import {
   detectCounts,
   enqueueTargets,
   finishJob,
+  hasUnwritten,
+  markWritten,
   readDetectSettings,
   readWindowId,
   releaseRunningJobs,
@@ -21,6 +25,10 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { getDb } from "@/lib/db";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
+
+export function finishedStatus(outcome: { language: string | null; message?: string | null }): "done" | "failed" {
+  return outcome.language ? "done" : "failed";
+}
 
 function state() {
   if (!globalForDetect.__metarrDetect) globalForDetect.__metarrDetect = { timer: null, working: false };
@@ -42,9 +50,11 @@ async function step() {
   }
   const counts = detectCounts(db);
   const waiting = counts.immediate > 0 || (open && counts.window > 0);
-  if (!waiting) return;
+  if (!waiting && !hasUnwritten(db)) return;
   if (await plexIsBusy(db)) return;
   if (remuxIsRunning(db)) return;
+  if (counts.immediate === 0 && (await applyNextSaved(db, settings.pathMaps))) return;
+  if (!waiting) return;
   const job = claimNextJob(db, open);
   if (!job) return;
   try {
@@ -60,9 +70,27 @@ async function step() {
       return;
     }
     const outcome = await detectTrack(job, local);
-    saveDetection(db, job, outcome);
-    const note = outcome.language ? [outcome.language, outcome.role].filter(Boolean).join(" ") : outcome.message;
-    finishJob(db, job.id, "done", note);
+    let stored = job;
+    let note = outcome.language ? [outcome.language, outcome.role].filter(Boolean).join(" ") : outcome.message;
+    let settled = false;
+    if (outcome.language) {
+      const written = await writeFinding(db, job, local, outcome.language, outcome.role);
+      stored = { ...job, path: written.storedPath };
+      settled = written.settled;
+      let players = "";
+      if (written.changed) {
+        try {
+          players = await notifyPlayers(db, written.videoPaths, job.kind === "subtitle");
+        } catch {
+          players = "The players could not be asked to re-read the file.";
+        }
+      }
+      const name = outcome.role === "commentary" ? `${outcome.language} commentary.` : `${outcome.language}.`;
+      note = [name, written.sentence, players].filter(Boolean).join(" ");
+    }
+    saveDetection(db, stored, outcome);
+    if (settled) markWritten(db, stored, stored.path);
+    finishJob(db, job.id, finishedStatus(outcome), note?.slice(0, 500) ?? null);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Detection failed.";
     finishJob(db, job.id, "failed", message.slice(0, 500));
@@ -81,7 +109,7 @@ async function loop() {
     current.working = false;
   }
   const counts = detectCounts(getDb());
-  const delay = counts.immediate > 0 || counts.running > 0 ? 1_000 : 15_000;
+  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) ? 1_000 : 15_000;
   current.timer = setTimeout(() => {
     void loop();
   }, delay);

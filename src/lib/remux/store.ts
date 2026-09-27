@@ -7,9 +7,10 @@ import { discsFromFile } from "@/lib/remux/discs";
 
 export const KEEP_ALL_SELECTION = "+sel:all,-sel:mvcvideo";
 
-export type RemuxPause = "window" | "plex" | "detect";
+export type RemuxPause = "window" | "plex" | "detect" | "off";
 
 export type RemuxSettings = {
+  enabled: boolean;
   startHour: number;
   endHour: number;
   binary: string;
@@ -65,6 +66,7 @@ export function parseLicenseKey(value: unknown): string | null {
 
 export function readRemuxSettings(db: Database.Database): RemuxSettings {
   return {
+    enabled: meta(db, "remux_schedule_enabled") !== "0",
     startHour: clampHour(meta(db, "remux_schedule_start"), 1),
     endHour: clampHour(meta(db, "remux_schedule_end"), 7),
     binary: meta(db, "remux_binary") || "makemkvcon",
@@ -74,8 +76,9 @@ export function readRemuxSettings(db: Database.Database): RemuxSettings {
 
 export function writeRemuxSettings(
   db: Database.Database,
-  settings: { startHour: number; endHour: number; binary: string; licenseKey?: string | null; clearKey?: boolean },
+  settings: { enabled?: boolean; startHour: number; endHour: number; binary: string; licenseKey?: string | null; clearKey?: boolean },
 ) {
+  if (settings.enabled != null) setMetaValue(db, "remux_schedule_enabled", settings.enabled ? "1" : "0");
   setMetaValue(db, "remux_schedule_start", String(settings.startHour));
   setMetaValue(db, "remux_schedule_end", String(settings.endHour));
   setMetaValue(db, "remux_binary", settings.binary);
@@ -87,7 +90,7 @@ export function writeRemuxSettings(
 
 export function readRemuxPause(db: Database.Database): RemuxPause | null {
   const value = meta(db, "remux_pause");
-  if (value === "window" || value === "plex" || value === "detect") return value;
+  if (value === "window" || value === "plex" || value === "detect" || value === "off") return value;
   return null;
 }
 
@@ -210,8 +213,12 @@ export function remuxTotals(db: Database.Database): { pending: number; running: 
   return totals;
 }
 
+export function clearRemuxJobs(db: Database.Database, status: RemuxJobStatus): number {
+  return db.prepare(`DELETE FROM remux_jobs WHERE status = ?`).run(status).changes;
+}
+
 export function clearPendingRemux(db: Database.Database): number {
-  return db.prepare(`DELETE FROM remux_jobs WHERE status = 'pending'`).run().changes;
+  return clearRemuxJobs(db, "pending");
 }
 
 export function listRemuxJobs(

@@ -101,6 +101,21 @@ function failureText(job: TaskJob): string {
   return "Language check failed with no further detail.";
 }
 
+function rowTone(status: JobStatus): string {
+  if (status === "failed") return "border-rose-500/40 bg-rose-500/10";
+  if (status === "running") return "border-amber-500/40 bg-amber-500/10";
+  if (status === "done") return "border-emerald-500/30 bg-emerald-500/10";
+  if (status === "skipped") return "bg-muted/40";
+  return "";
+}
+
+function stateTone(status: JobStatus): string {
+  if (status === "failed") return "text-rose-700 dark:text-rose-300";
+  if (status === "running") return "text-amber-800 dark:text-amber-200";
+  if (status === "done") return "text-emerald-700 dark:text-emerald-300";
+  return "text-muted-foreground";
+}
+
 export function TasksView() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -165,20 +180,22 @@ export function TasksView() {
     if (page > pages) writeQuery({ page: pages });
   }, [error, loading, page, total, writeQuery]);
 
-  async function clearQueue() {
-    if (totals.pending < 1 || clearing) return;
-    const waiting = totals.pending.toLocaleString("en");
-    const what = queue === "remux" ? "discs" : queue === "language" ? "tracks" : "jobs";
-    if (!window.confirm(`Remove ${waiting} waiting ${what}? Anything already running will finish.`)) return;
+  async function clearFiltered() {
+    const count = tabCount(totals, status);
+    if (count < 1 || clearing || status === "running") return;
+    const name = (TABS.find(([value]) => value === status)?.[1] ?? status).toLowerCase();
+    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
+    const shown = count.toLocaleString("en");
+    if (!window.confirm(`Remove ${shown} ${name} ${noun} from the list? Languages already found stay. A job that is already running will finish.`)) return;
     setClearing(true);
     try {
-      const response = await fetch(`/api/tasks?queue=${queue}`, { method: "DELETE" });
+      const response = await fetch(`/api/tasks?queue=${queue}&status=${status}`, { method: "DELETE" });
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) throw new Error(body?.error || "The queue could not be cleared.");
-      toast.success("Queue cleared.");
+      if (!response.ok) throw new Error(body?.error || "Those jobs could not be cleared.");
+      toast.success(`${shown} ${name} ${noun} removed.`);
       await load();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "The queue could not be cleared.");
+      toast.error(caught instanceof Error ? caught.message : "Those jobs could not be cleared.");
     } finally {
       setClearing(false);
     }
@@ -201,9 +218,9 @@ export function TasksView() {
                 Language checks and disc remuxes share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
-            {totals.pending > 0 ? (
-              <Button size="sm" variant="outline" onClick={() => void clearQueue()} disabled={clearing}>
-                Clear queue
+            {status !== "running" && tabCount(totals, status) > 0 ? (
+              <Button size="sm" variant="outline" onClick={() => void clearFiltered()} disabled={clearing}>
+                Clear
               </Button>
             ) : null}
           </div>
@@ -239,10 +256,7 @@ export function TasksView() {
           ) : null}
           <div className="flex flex-col gap-3">
             {jobs.map((job) => (
-              <article
-                key={job.key}
-                className={cn("space-y-1.5 rounded-lg border px-3 py-3", job.status === "failed" && "border-destructive/40 bg-destructive/5")}
-              >
+              <article key={job.key} className={cn("space-y-1.5 rounded-lg border px-3 py-3", rowTone(job.status))}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="min-w-0 text-sm font-medium">{job.label}</h2>
@@ -251,10 +265,10 @@ export function TasksView() {
                       {job.detail ? ` · ${job.detail}` : ""}
                     </p>
                   </div>
-                  <span className={cn("shrink-0 text-xs", job.status === "failed" ? "text-destructive" : "text-muted-foreground")}>{taskState(job)}</span>
+                  <span className={cn("shrink-0 text-xs", stateTone(job.status))}>{taskState(job)}</span>
                 </div>
                 {job.status === "failed" ? (
-                  <p className="text-sm leading-6 text-destructive">{failureText(job)}</p>
+                  <p className="text-sm leading-6">{failureText(job)}</p>
                 ) : job.message ? (
                   <p className="text-sm leading-6">{job.message}</p>
                 ) : null}

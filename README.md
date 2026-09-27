@@ -62,7 +62,17 @@ Filters: movies, series, missing, not in Plex, disc / not playable, missing Engl
 
 Missing English subtitles matches a movie file whose subtitle list does not include English, a series episode file in the same state, or any row where Bazarr wants English. Titles with no file stay out of that filter unless Bazarr lists English as wanted. Hungarian matches audio, existing subtitles, or a Bazarr wanted language on the title or an episode. 3D only uses the 3D flag already stored from media info or the title.
 
-Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Sync, test, and the library page do not rename, delete, move, or update files on Plex or the *arr apps. **Queue disc remux** (and the **Rips** page) is the exception: it asks MakeMKV, on this machine, to write an MKV next to the selected disc.
+Checkboxes select titles on the current page and individual episode files. **Copy titles and paths** copies that list in the browser. Sync reads metadata from each app. **Queue disc remux** (and the **Rips** page) asks MakeMKV, on this machine, to write an MKV next to the selected disc.
+
+## Language detection
+
+Unknown audio is sampled with Whisper. Unknown subtitles are read as text, or as pictures when they are PGS or VobSub. When a language is recognized, it is written into the file:
+
+- Matroska (MKV and WebM) is tagged in place with `mkvpropedit`. A commentary track also gets the commentary flag.
+- MP4 and MOV are copied with the same video and audio so the language tag can be set. This needs free space for a second copy of the file.
+- A subtitle file beside the video is renamed so the language code is in the name, for example `Film.hun.srt`.
+
+Plex is then asked to analyze the file, which is how the new language gets into Plex’s database. Radarr and Sonarr are asked to rescan, which updates their media info. Bazarr is asked to scan the disk when the track was a subtitle. Plex and the *arr apps take the language from the file when they re-read it.
 
 ## Disc remux
 
@@ -82,4 +92,4 @@ In Settings, add a TMDB key, an OMDb key, or both, and turn **Use when looking u
 
 ## Out of scope
 
-TVDB keys, Lidarr, Readarr, Prowlarr, downloading media, writing metadata back to Plex or the *arr apps, user accounts, and Plex OAuth.
+TVDB keys, Lidarr, Readarr, Prowlarr, downloading media, writing posters or ratings back to Plex or the *arr apps, user accounts, and Plex OAuth. Recognized track languages are written into the media file, and those apps are asked to re-read the file.

@@ -1,7 +1,13 @@
-/** One window just after the opening. A closer one is only used when that clip is empty. */
+const CLIP_SECONDS = 20;
+const TEN_MINUTES = 10 * 60;
+const TWENTY_MINUTES = 20 * 60;
+
+/** Titles and the opening scene are skipped. A short file is sampled at its middle instead. */
 export function sampleOffsets(duration: number | null): number[] {
-  if (duration != null && duration < 60) return [Math.max(1, Math.floor(duration / 3))];
-  return [45, 12];
+  const fits = (offset: number) => duration == null || duration > offset + CLIP_SECONDS;
+  const marks = [TEN_MINUTES, TWENTY_MINUTES].filter(fits);
+  if (marks.length > 0) return marks;
+  return [Math.max(1, Math.floor((duration ?? CLIP_SECONDS) / 2))];
 }
 
 const CENTERED = /^(?:3\.0|4\.0|5\.0|5\.1|6\.0|6\.1|7\.0|7\.1)(?:\(|$)/;

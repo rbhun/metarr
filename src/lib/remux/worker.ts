@@ -38,6 +38,10 @@ function existsMedia(candidate: string): boolean {
 async function step() {
   const db = getDb();
   const settings = readRemuxSettings(db);
+  if (!settings.enabled) {
+    writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "off" : null);
+    return;
+  }
   const open = inDetectWindow(new Date().getHours(), settings.startHour, settings.endHour);
   if (!open) {
     writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "window" : null);

@@ -1,5 +1,41 @@
 # Changes
 
+## 0.0.33
+
+- Keep the movie's file type when saving a language into an MP4, so the new file can be written.
+
+## 0.0.32
+
+- Copy a short piece of a PGS subtitle at 10 and 20 minutes, so a Blu-ray file is not read until ffmpeg gives up.
+
+## 0.0.31
+
+- Write a recognized language into the movie file, then ask Plex and the *arr apps to re-read it.
+
+## 0.0.30
+
+- Listen at 10 and 20 minutes, past the titles and the opening scene, when guessing an unknown audio track.
+
+## 0.0.29
+
+- Add a switch so disc remux can be turned off. Queued discs wait until it is on again.
+
+## 0.0.28
+
+- Clear a Tasks filter only after you confirm, and only the tracks in that filter.
+
+## 0.0.27
+
+- Mark a language check as failed when it does not name a language, including when the text was never read.
+
+## 0.0.26
+
+- Mark a subtitle that Plex did not name as failed, because the video was never read as text.
+
+## 0.0.25
+
+- Show every language check in one Tasks list, colored by what it is doing, with filters when you want only one state.
+
 ## 0.0.24
 
 - Show disc remux jobs on Tasks with the failure reason, and keep Rips for sending discs.

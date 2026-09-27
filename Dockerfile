@@ -24,6 +24,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     ffmpeg \
+    mkvtoolnix \
     python3 \
     python3-venv \
     tesseract-ocr \

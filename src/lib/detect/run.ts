@@ -165,8 +165,8 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
     const samples: Array<{ language: string; probability: number }> = [];
     const transcript: string[] = [];
     let agreed = { language: null as string | null, confidence: 0 };
-    for (const [index, offset] of sampleOffsets(null).entries()) {
-      const wav = path.join(directory, `clip-${index}.wav`);
+    const listen = async (offset: number, name: string): Promise<void> => {
+      const wav = path.join(directory, name);
       let extracted = false;
       for (const filter of mix ? [mix, null] : [null]) {
         try {
@@ -175,33 +175,19 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
           break;
         } catch (caught) {
           const timedOut = caught instanceof Error && /timed out/.test(caught.message);
-          if (timedOut) break;
+          if (timedOut) return;
         }
       }
-      if (!extracted || !fs.existsSync(wav) || fs.statSync(wav).size < 8_000) continue;
+      if (!extracted || !fs.existsSync(wav) || fs.statSync(wav).size < 8_000) return;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
       if (speech.text) transcript.push(speech.text);
       agreed = agreeLanguage(samples);
-      if (agreed.language) break;
-    }
-    if (agreed.language && transcript.join(" ").trim().length < 80) {
-      const wav = path.join(directory, "clip-later.wav");
-      let extracted = false;
-      for (const filter of mix ? [mix, null] : [null]) {
-        try {
-          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, 180, wav, filter), 30_000);
-          extracted = true;
-          break;
-        } catch (caught) {
-          const timedOut = caught instanceof Error && /timed out/.test(caught.message);
-          if (timedOut) break;
-        }
-      }
-      if (extracted && fs.existsSync(wav) && fs.statSync(wav).size >= 8_000) {
-        const speech = await transcribe(wav);
-        if (speech.text) transcript.push(speech.text);
-      }
+    };
+    const duration = await durationSeconds(file);
+    for (const [index, offset] of sampleOffsets(duration).entries()) {
+      await listen(offset, `clip-${index}.wav`);
+      if (agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
     if (samples.length === 0) return { language: null, role: null, confidence: 0, message: "No speech found in the sample." };
     const language = agreed.language ? languageName(agreed.language) : null;
@@ -237,25 +223,27 @@ function clearDirectory(directory: string) {
 
 async function pgsFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
   const duration = await durationSeconds(file);
-  const starts = duration && duration > 900
-    ? [0.2, 0.4, 0.6, 0.8].map((ratio) => Math.round(Math.min(duration * ratio, Math.max(duration - 200, 0))))
-    : [600, 1800, 3000];
+  const starts = sampleOffsets(duration);
   const sup = path.join(directory, "track.sup");
   const bitmaps = [];
+  let timedOut = false;
   for (const start of starts) {
     clearDirectory(directory);
+    timedOut = false;
     try {
       await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup), 90_000);
     } catch (error) {
       const failed = error instanceof Error ? error : new Error(String(error));
-      if (!/empty|nothing was written/i.test(failed.message)) throw failed;
-      continue;
+      timedOut = /timed out/i.test(failed.message);
+      if (!timedOut && !/empty|nothing was written/i.test(failed.message)) throw failed;
     }
-    if (!fs.existsSync(sup) || fs.statSync(sup).size < 32) continue;
-    bitmaps.push(...readPgsImages(fs.readFileSync(sup), 12));
-    fs.rmSync(sup, { force: true });
-    if (bitmaps.length >= 24) break;
+    if (fs.existsSync(sup) && fs.statSync(sup).size >= 32) {
+      bitmaps.push(...readPgsImages(fs.readFileSync(sup), 12));
+      fs.rmSync(sup, { force: true });
+    }
+    if (bitmaps.length >= 4 || timedOut) break;
   }
+  if (bitmaps.length === 0 && timedOut) throw new Error("ffmpeg timed out.");
   const frames = spread(bitmaps, 8).map((bitmap) => scaleBitmap(bitmap, 3));
   frames.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
   return frames.length ? fs.readdirSync(directory).filter((name) => name.endsWith(".png")) : [];

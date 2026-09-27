@@ -67,7 +67,7 @@ export function DetectSettingsCard() {
       <CardHeader>
         <CardTitle>Language detection</CardTitle>
         <CardDescription>
-          Listens to unknown audio with Whisper and reads unknown subtitles. Start now runs immediately. Queued tracks and the daily library scan run only between the start and end hour, and wait while Plex is scanning or transcoding. Results stay in Metarr.
+          Listens to unknown audio with Whisper and reads unknown subtitles. A recognized language is written into the file. Plex, Radarr, and Sonarr are asked to re-read it, and Bazarr is asked when the track is a subtitle. Start now runs immediately. Queued tracks and the daily library scan run only between the start and end hour, and wait while Plex is scanning or transcoding.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -115,7 +115,7 @@ export function DetectSettingsCard() {
           <div>
             <p className="text-sm font-medium">Path mapping</p>
             <p className="text-xs leading-5 text-muted-foreground">
-              When a Plex path is not a file on this machine, map its prefix to the local prefix. Audio needs ffmpeg and faster-whisper. Text subtitles are read directly. Picture subtitles (PGS, VobSub) need tesseract.
+              When a Plex path is not a file on this machine, map its prefix to the local prefix. Audio needs ffmpeg and faster-whisper. Text subtitles are read directly. Picture subtitles (PGS, VobSub) need tesseract. Writing the language into a Matroska file needs mkvpropedit.
             </p>
           </div>
           {settings.pathMaps.map((map, index) => (

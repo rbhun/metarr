@@ -238,6 +238,16 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_remux_jobs_status ON remux_jobs(status, id);
   `);
+  db.prepare(
+    `UPDATE detect_jobs SET status = 'failed'
+     WHERE status = 'done' AND (
+       message LIKE 'Plex did not name this subtitle file%'
+       OR message LIKE 'The subtitle file is not readable text.%'
+       OR message LIKE 'No subtitle images could be read.%'
+       OR message LIKE 'No speech found in the sample.%'
+       OR message LIKE 'This language cannot be reliably recognized%'
+     )`,
+  ).run();
 
   const titleColumns = db.prepare(`PRAGMA table_info(catalog_titles)`).all() as Array<{ name: string }>;
   if (!titleColumns.some((column) => column.name === "match_key")) {
@@ -263,6 +273,7 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_hdrs", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);

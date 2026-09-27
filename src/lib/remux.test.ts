@@ -117,11 +117,14 @@ test("only disc images join the queue, one after another", () => {
 test("the queue keeps every track except 3D video, and the key stays out of the response settings", () => {
   const db = new Database(":memory:");
   migrate(db);
+  assert.equal(readRemuxSettings(db).enabled, true);
   assert.equal(readRemuxSettings(db).startHour, 1);
   assert.equal(readRemuxSettings(db).endHour, 7);
-  writeRemuxSettings(db, { startHour: 1, endHour: 7, binary: "makemkvcon", licenseKey: "beta-key" });
+  writeRemuxSettings(db, { enabled: false, startHour: 1, endHour: 7, binary: "makemkvcon", licenseKey: "beta-key" });
+  assert.equal(readRemuxSettings(db).enabled, false);
   assert.equal(readRemuxSettings(db).licenseKey, "beta-key");
   writeRemuxSettings(db, { startHour: 2, endHour: 8, binary: "/usr/bin/makemkvcon" });
+  assert.equal(readRemuxSettings(db).enabled, false);
   assert.equal(readRemuxSettings(db).licenseKey, "beta-key");
   assert.equal(readRemuxSettings(db).binary, "/usr/bin/makemkvcon");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-makemkv-"));
