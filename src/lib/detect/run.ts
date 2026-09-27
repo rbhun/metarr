@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { audioClipArgs, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
+import { audioClipArgs, audioCopyArgs, audioDecodeArgs, clipStart, dialogueMix, sampleOffsets } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueText } from "@/lib/detect/cues";
@@ -48,31 +48,39 @@ function runCommand(command: string, args: string[], timeout = 120_000): Promise
   });
 }
 
-async function durationSeconds(file: string): Promise<number | null> {
-  try {
-    const { stdout } = await runCommand("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file], 30_000);
-    const duration = Number(stdout.trim());
-    return Number.isFinite(duration) && duration > 0 ? duration : null;
-  } catch {
-    return null;
-  }
+function secondsOf(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function streamLayout(file: string, ordinal: number): Promise<{ layout: string | null; channels: number | null }> {
+async function probeAudio(file: string, ordinal: number): Promise<{ duration: number | null; start: number | null; layout: string | null; channels: number | null }> {
+  const empty = { duration: null, start: null, layout: null, channels: null };
   try {
     const { stdout } = await runCommand(
       "ffprobe",
-      ["-v", "error", "-select_streams", `a:${ordinal}`, "-show_entries", "stream=channel_layout,channels", "-of", "json", file],
+      ["-v", "error", "-show_entries", "format=duration,start_time:stream=codec_type,start_time,channel_layout,channels", "-of", "json", file],
       30_000,
     );
-    const body = JSON.parse(stdout) as { streams?: Array<{ channel_layout?: unknown; channels?: unknown }> };
-    const stream = body.streams?.[0];
-    const layout = typeof stream?.channel_layout === "string" ? stream.channel_layout : null;
-    const channels = typeof stream?.channels === "number" ? stream.channels : null;
-    return { layout, channels };
+    const body = JSON.parse(stdout) as {
+      format?: { duration?: unknown; start_time?: unknown };
+      streams?: Array<{ codec_type?: unknown; start_time?: unknown; channel_layout?: unknown; channels?: unknown }>;
+    };
+    const audio = (body.streams ?? []).filter((stream) => stream.codec_type === "audio")[ordinal];
+    const duration = secondsOf(body.format?.duration);
+    return {
+      duration: duration != null && duration > 0 ? duration : null,
+      start: secondsOf(audio?.start_time) ?? secondsOf(body.format?.start_time),
+      layout: typeof audio?.channel_layout === "string" ? audio.channel_layout : null,
+      channels: typeof audio?.channels === "number" ? audio.channels : null,
+    };
   } catch {
-    return { layout: null, channels: null };
+    return empty;
   }
+}
+
+async function durationSeconds(file: string): Promise<number | null> {
+  const probed = await probeAudio(file, 0);
+  return probed.duration;
 }
 
 type Speech = { language: string; probability: number; text: string };
@@ -160,36 +168,54 @@ function transcribe(wav: string): Promise<Speech> {
 async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutcome> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
   try {
-    const heard = await streamLayout(file, job.ordinal);
+    const heard = await probeAudio(file, job.ordinal);
     const mix = dialogueMix(heard.layout, heard.channels);
     const samples: Array<{ language: string; probability: number }> = [];
     const transcript: string[] = [];
     let agreed = { language: null as string | null, confidence: 0 };
-    const listen = async (offset: number, name: string): Promise<void> => {
-      const wav = path.join(directory, name);
-      let extracted = false;
+    let readSample = false;
+    const listen = async (offset: number, index: number): Promise<"timeout" | "heard"> => {
+      const copied = path.join(directory, `clip-${index}.mka`);
+      const wav = path.join(directory, `clip-${index}.wav`);
+      const present = (target: string, minimum: number) => fs.existsSync(target) && fs.statSync(target).size >= minimum;
+      try {
+        await runCommand("ffmpeg", audioCopyArgs(file, job.ordinal, offset, copied), 45_000);
+      } catch (caught) {
+        if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
+      }
+      const source = present(copied, 1_000) ? copied : null;
       for (const filter of mix ? [mix, null] : [null]) {
         try {
-          await runCommand("ffmpeg", audioClipArgs(file, job.ordinal, offset, wav, filter), 30_000);
-          extracted = true;
+          const args = source
+            ? audioDecodeArgs(source, wav, filter)
+            : audioClipArgs(file, job.ordinal, offset, wav, filter);
+          await runCommand("ffmpeg", args, source ? 20_000 : 45_000);
           break;
         } catch (caught) {
-          const timedOut = caught instanceof Error && /timed out/.test(caught.message);
-          if (timedOut) return;
+          if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
         }
       }
-      if (!extracted || !fs.existsSync(wav) || fs.statSync(wav).size < 8_000) return;
+      if (!present(wav, 8_000)) return "heard";
+      readSample = true;
       const speech = await transcribe(wav);
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
       if (speech.text) transcript.push(speech.text);
       agreed = agreeLanguage(samples);
+      return "heard";
     };
-    const duration = await durationSeconds(file);
-    for (const [index, offset] of sampleOffsets(duration).entries()) {
-      await listen(offset, `clip-${index}.wav`);
+    for (const [index, offset] of sampleOffsets(heard.duration).entries()) {
+      const outcome = await listen(clipStart(offset, heard.start), index);
+      if (outcome === "timeout") break;
       if (agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
-    if (samples.length === 0) return { language: null, role: null, confidence: 0, message: "No speech found in the sample." };
+    if (samples.length === 0) {
+      return {
+        language: null,
+        role: null,
+        confidence: 0,
+        message: readSample ? "No speech found in the sample." : "The audio sample could not be read in time.",
+      };
+    }
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));
     return {

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.42
+
+- Read a 4K disc's audio from where the stream starts, instead of reporting that the sample had no speech.
+
 ## 0.0.41
 
 - Redo a failed task from Tasks, and put language detection and disc remux in half-width settings cards.
