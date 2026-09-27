@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.58
+
+- Mount `/mnt/media` the same plain way as other containers, take the user from `.env`, and drop the NFS volume switching from deploy.
+
 ## 0.0.57
 
 - Let deploy reset its generated docker-compose.media.yml before git pull so a prior NFS rewrite cannot block updates.
