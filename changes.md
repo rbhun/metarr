@@ -1,8 +1,12 @@
 # Changes
 
-## 0.0.35
+## 0.0.36
 
 - Fix the Docker image build after the remux path check failed TypeScript.
+
+## 0.0.35
+
+- Start a track as soon as you click Unknown, even when the overnight queue already has it.
 
 ## 0.0.34
 

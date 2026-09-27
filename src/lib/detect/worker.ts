@@ -51,9 +51,11 @@ async function step() {
   const counts = detectCounts(db);
   const waiting = counts.immediate > 0 || (open && counts.window > 0);
   if (!waiting && !hasUnwritten(db)) return;
-  if (await plexIsBusy(db)) return;
-  if (remuxIsRunning(db)) return;
-  if (counts.immediate === 0 && (await applyNextSaved(db, settings.pathMaps))) return;
+  if (counts.immediate === 0) {
+    if (await plexIsBusy(db)) return;
+    if (remuxIsRunning(db)) return;
+    if (await applyNextSaved(db, settings.pathMaps)) return;
+  }
   if (!waiting) return;
   const job = claimNextJob(db, open);
   if (!job) return;

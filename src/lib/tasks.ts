@@ -13,6 +13,7 @@ export type TaskJob = {
   label: string;
   status: TaskStatus;
   message: string | null;
+  priority: "immediate" | "window" | null;
   detail: string;
   progress: number | null;
   createdAt: string;
@@ -71,6 +72,7 @@ function mapDetect(status: DetectJobStatus, page: number, pageSize: number, db: 
       label: job.label,
       status: job.status,
       message: job.message,
+      priority: job.priority,
       detail: [job.kind === "audio" ? "Audio" : "Subtitle", job.format, job.placement, `track ${job.ordinal + 1}`, job.streamLabel]
         .filter(Boolean)
         .join(" · "),
@@ -94,6 +96,7 @@ function mapRemux(status: RemuxJobStatus, page: number, pageSize: number, db: Da
       label: job.label,
       status: job.status,
       message: job.status === "failed" && !job.message ? "Remux failed with no further detail from MakeMKV." : job.message,
+      priority: null,
       detail: job.extras ? "Disc remux · longest title and extras" : "Disc remux · longest title only",
       progress: job.progress,
       createdAt: job.createdAt,
