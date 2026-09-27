@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.47
+
+- When touch fails with EROFS even though findmnt shows rw, say the NFS/ZFS share is read-only on the NAS — UID/GID cannot fix that.
+
 ## 0.0.46
 
 - Make clear that mount rw is not the same as Unix write permission, and that deploy only samples a folder — remux uses METARR_UID/GID for every disc.

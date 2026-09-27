@@ -31,14 +31,16 @@ docker compose up --build
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
-**Mount `rw` vs write permission:** `findmnt` showing `rw` only means the share is not read-only (not EROFS). Each title folder still has a Unix owner/group/mode. Remux creates the MKV **inside that title folder**, and the container runs as one `METARR_UID`/`METARR_GID` for **every** job. Deploy may sample any existing title (or a temporary folder) as a canary — it is not limited to one movie.
+**Mount `rw` vs write permission:** `findmnt` showing `rw` means the *client* did not request a read-only mount. Each title folder still has a Unix owner/group/mode. Remux creates the MKV **inside that title folder**, and the container runs as one `METARR_UID`/`METARR_GID` for **every** job. Deploy may sample any existing title (or a temporary folder) as a canary — it is not limited to one movie.
 
-If remux fails with **EROFS**, remount the share read-write:
+If touch fails with **Read-only file system (EROFS)**, the NAS is refusing writes — even when `findmnt` lists `rw`. On TrueNAS (or your NFS server): turn off the share’s Read Only option, ensure the dataset is not `readonly=on` (`zfs get readonly tank/media`), then remount on the Plex host:
 
 ```bash
 findmnt /mnt/media
 sudo mount -o remount,rw /mnt/media
 ```
+
+`METARR_UID` / `METARR_GID` cannot fix EROFS.
 
 If it fails with a permission error (**EACCES**), the container user cannot write that folder. On **NFS**, `root_squash` maps uid 0 to nobody, so do not run as root even when folders show owner `0`. Set a non-root uid and the media group (used for all remuxes):
 

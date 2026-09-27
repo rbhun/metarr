@@ -46,10 +46,12 @@ export function writeAccessDeniedMessage(directory: string, detail?: string): st
   const why = detail ? ` (${detail})` : "";
   if (detail === "EROFS") {
     return (
-      `Cannot write next to the disc at ${directory}: the filesystem is mounted read-only (EROFS). ` +
+      `Cannot write next to the disc at ${directory}: the kernel returned read-only filesystem (EROFS). ` +
       `${who}; ${folder}. ` +
-      `On the Plex host, remount the media share read-write (for example findmnt /mnt/media, then mount -o remount,rw /mnt/media), ` +
-      `and make sure docker-compose mounts it as :rw — Docker cannot write if the host mount is read-only.`
+      `findmnt can still show rw when the NFS server rejects writes — check the share/dataset on the NAS ` +
+      `(not Read Only; ZFS readonly=off), remount if the client mount is actually ro ` +
+      `(findmnt /mnt/media; mount -o remount,rw /mnt/media), and keep the Docker volume as :rw. ` +
+      `METARR_UID/METARR_GID cannot fix EROFS.`
     );
   }
   const uid = process.getuid?.();
