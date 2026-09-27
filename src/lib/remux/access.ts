@@ -48,10 +48,10 @@ export function writeAccessDeniedMessage(directory: string, detail?: string): st
     return (
       `Cannot write next to the disc at ${directory}: the kernel returned read-only filesystem (EROFS). ` +
       `${who}; ${folder}. ` +
-      `findmnt can still show rw when the NFS server rejects writes — check the share/dataset on the NAS ` +
-      `(not Read Only; ZFS readonly=off), remount if the client mount is actually ro ` +
-      `(findmnt /mnt/media; mount -o remount,rw /mnt/media), and keep the Docker volume as :rw. ` +
-      `METARR_UID/METARR_GID cannot fix EROFS.`
+      `If other NFS clients (laptop) or Plex can write the same share, this host's /mnt/media mount is the problem ` +
+      `(often autofs/NFS) — not folder mode or METARR_UID. Redeploy with a direct NFS mount into Docker: ` +
+      `export METARR_NFS_ADDR=<server> METARR_NFS_EXPORT=<export-path> and run deploy.sh ` +
+      `(or let deploy auto-detect from findmnt after EROFS). METARR_UID/METARR_GID cannot fix EROFS.`
     );
   }
   const uid = process.getuid?.();

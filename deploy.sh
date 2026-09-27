@@ -7,18 +7,67 @@
 #   export METARR_GID=$(stat -c %g /mnt/media/Movies)
 # On NFS, avoid METARR_UID=0 (root_squash maps root to nobody).
 #
-# A mount showing "rw" means the filesystem is not read-only. Unix mode/owner
-# still decide who can create files. Remux writes inside each title folder, and
-# runs as METARR_UID/METARR_GID for every job — deploy only samples one folder.
+# If this host's /mnt/media returns EROFS but other NFS clients (laptop, Plex
+# with its own mount) can write, mount NFS directly into Docker instead:
+#   export METARR_NFS_ADDR=192.168.20.2
+#   export METARR_NFS_EXPORT=/tank/media
+# Or let deploy auto-detect addr/export from findmnt after an EROFS failure.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 if [ "$(id -u)" -ne 0 ]; then
-  exec sudo --preserve-env=METARR_UID,METARR_GID -- "$root/$(basename "$0")" "$@"
+  exec sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT -- "$root/$(basename "$0")" "$@"
 fi
 
 cd "$root"
 git pull --ff-only
+
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.media.yml"
+
+write_media_bind() {
+  cat > docker-compose.media.yml <<'EOF'
+# Host bind of /mnt/media (default).
+volumes:
+  media:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/media
+EOF
+}
+
+write_media_nfs() {
+  addr=$1
+  export_path=$2
+  cat > docker-compose.media.yml <<EOF
+# Direct NFS mount into the container (bypasses a host/autofs mount that returns EROFS).
+volumes:
+  media:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${addr},rw,nfsvers=4.2,hard,timeo=600,retrans=2
+      device: ":${export_path}"
+EOF
+  echo "Using direct NFS mount ${addr}:${export_path} -> /mnt/media in the container."
+}
+
+nfs_source_from_host() {
+  # Prefer the real nfs/nfs4 line under /mnt/media (autofs parent is not useful).
+  src=$(findmnt -no SOURCE -t nfs,nfs4 /mnt/media 2>/dev/null | tail -n 1 || true)
+  if [ -z "$src" ]; then
+    src=$(findmnt -no SOURCE /mnt/media 2>/dev/null | grep -E ':/' | tail -n 1 || true)
+  fi
+  echo "$src"
+}
+
+# Choose media volume backing before the first compose up.
+if [ -n "${METARR_NFS_ADDR:-}" ] && [ -n "${METARR_NFS_EXPORT:-}" ]; then
+  write_media_nfs "$METARR_NFS_ADDR" "$METARR_NFS_EXPORT"
+elif [ ! -f docker-compose.media.yml ]; then
+  write_media_bind
+fi
 
 library_dir=""
 sample_title=""
@@ -26,15 +75,14 @@ if [ -d /mnt/media ]; then
   opts=$(findmnt -no OPTIONS /mnt/media 2>/dev/null || true)
   case ",$opts," in
     *,ro,*)
-      echo "Warning: /mnt/media is mounted read-only on the host ($opts). Disc remux cannot write MKVs until you remount it read-write." >&2
-      echo "  findmnt /mnt/media" >&2
-      echo "  mount -o remount,rw /mnt/media" >&2
+      echo "Warning: /mnt/media is mounted read-only on the host ($opts)." >&2
+      echo "  findmnt /mnt/media; mount -o remount,rw /mnt/media" >&2
+      echo "  Or set METARR_NFS_ADDR / METARR_NFS_EXPORT so Docker mounts NFS itself." >&2
       ;;
   esac
   for library in /mnt/media/Movies /mnt/media/TV; do
     if [ -d "$library" ]; then
       library_dir=$library
-      # Any title folder is enough — same METARR_UID/GID is used for every remux.
       sample_title=$(find "$library" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1 || true)
       [ -n "$sample_title" ] && break
     fi
@@ -58,7 +106,6 @@ pick_non_root_uid() {
 }
 
 if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; then
-  # Prefer library group (applies to the whole library), fall back to a title folder.
   ownership_dir=${library_dir:-}
   if [ -z "$ownership_dir" ] || [ ! -d "$ownership_dir" ]; then
     ownership_dir=$sample_title
@@ -66,7 +113,6 @@ if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; th
   if [ -n "$ownership_dir" ] && [ -d "$ownership_dir" ]; then
     METARR_UID=$(stat -c %u "$ownership_dir")
     METARR_GID=$(stat -c %g "$ownership_dir")
-    # Title folders often carry the media group more accurately than Movies/ itself.
     if [ -n "$sample_title" ] && [ -d "$sample_title" ]; then
       METARR_GID=$(stat -c %g "$sample_title")
       title_uid=$(stat -c %u "$sample_title")
@@ -85,7 +131,7 @@ if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; th
   fi
 fi
 
-docker compose up --build -d
+$COMPOSE up --build -d
 
 host_touch_as() {
   dir=$1
@@ -103,6 +149,43 @@ host_touch_as() {
   return 0
 }
 
+print_mount_diagnostics() {
+  echo "--- mount diagnostics ---" >&2
+  findmnt -R /mnt/media 2>/dev/null || findmnt /mnt/media 2>/dev/null || true
+  echo "--- /proc/mounts (media) ---" >&2
+  grep -E '[[:space:]]/mnt/media|/tank/media' /proc/mounts 2>/dev/null || true
+  if [ -n "${1:-}" ]; then
+    echo "--- mountpoint? $1 ---" >&2
+    mountpoint "$1" 2>/dev/null || true
+    findmnt "$1" 2>/dev/null || true
+  fi
+}
+
+switch_to_direct_nfs_and_retry() {
+  src=$(nfs_source_from_host)
+  addr=${METARR_NFS_ADDR:-}
+  export_path=${METARR_NFS_EXPORT:-}
+  if [ -z "$addr" ] || [ -z "$export_path" ]; then
+    case "$src" in
+      *:*)
+        addr=${src%%:*}
+        export_path=${src#*:}
+        ;;
+    esac
+  fi
+  if [ -z "$addr" ] || [ -z "$export_path" ]; then
+    echo "Could not detect NFS server:export from findmnt." >&2
+    echo "If other machines can write this share, mount it in Docker directly:" >&2
+    echo "  export METARR_NFS_ADDR=<nfs-server-ip>" >&2
+    echo "  export METARR_NFS_EXPORT=/tank/media   # path on the server" >&2
+    echo "  sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT /opt/metarr/deploy.sh" >&2
+    return 1
+  fi
+  write_media_nfs "$addr" "$export_path"
+  $COMPOSE up -d
+  return 0
+}
+
 i=0
 while [ "$i" -lt 30 ]; do
   if curl -4 -fsS -m 3 -o /dev/null http://127.0.0.1:4317/; then
@@ -110,7 +193,6 @@ while [ "$i" -lt 30 ]; do
     probe_uid=${METARR_UID:-0}
     probe_gid=${METARR_GID:-0}
 
-    # Sample any existing title. Remux itself checks the target disc folder per job.
     probe_dir=$sample_title
     created_probe=0
     if [ -z "$probe_dir" ] && [ -n "$library_dir" ] && [ -d "$library_dir" ]; then
@@ -132,32 +214,31 @@ while [ "$i" -lt 30 ]; do
     fi
 
     if [ -z "$probe_dir" ] || [ ! -d "$probe_dir" ]; then
-      echo "No title folder to sample for a write check (and cannot create one under ${library_dir:-/mnt/media})."
-      echo "Metarr will still run as ${probe_uid}:${probe_gid} and verify write access for each disc when you queue a remux."
-      echo "Mount rw only means the share is not read-only; each title folder still needs group/owner write for that user."
-      exit 0
-    fi
-
-    if [ "$created_probe" -eq 1 ]; then
-      echo "No title folders yet — sampling temporary $probe_dir as ${probe_uid}:${probe_gid}."
+      # Still probe inside the container — host bind may be EROFS while a direct NFS volume works.
+      probe_dir=${library_dir:-/mnt/media/Movies}
+      echo "No host-writable sample folder; will probe $probe_dir inside the container only."
     else
-      echo "Sampling write access in $probe_dir as ${probe_uid}:${probe_gid}."
-      echo "This is only a canary: the same uid/gid is used for every remux; each job checks its own disc folder."
+      if [ "$created_probe" -eq 1 ]; then
+        echo "No title folders yet — sampling temporary $probe_dir as ${probe_uid}:${probe_gid}."
+      else
+        echo "Sampling write access in $probe_dir as ${probe_uid}:${probe_gid}."
+        echo "This is only a canary: the same uid/gid is used for every remux; each job checks its own disc folder."
+      fi
+      ls -ld /mnt/media ${library_dir:+"$library_dir"} "$probe_dir" 2>/dev/null || true
     fi
-    ls -ld /mnt/media ${library_dir:+"$library_dir"} "$probe_dir" 2>/dev/null || true
 
     host_ok=0
     host_err=""
-    if host_err=$(host_touch_as "$probe_dir" "$probe_uid" "$probe_gid" 2>&1); then
+    if [ -d "$probe_dir" ] && host_err=$(host_touch_as "$probe_dir" "$probe_uid" "$probe_gid" 2>&1); then
       host_ok=1
       echo "Host write as ${probe_uid}:${probe_gid} is OK."
-    else
-      echo "Host write failed as ${probe_uid}:${probe_gid}: ${host_err:-unknown error}" >&2
+    elif [ -n "$host_err" ]; then
+      echo "Host write failed as ${probe_uid}:${probe_gid}: ${host_err}" >&2
     fi
 
     container_ok=0
     container_err=""
-    if container_err=$(docker compose exec -T -u "${probe_uid}:${probe_gid}" metarr \
+    if container_err=$($COMPOSE exec -T -u "${probe_uid}:${probe_gid}" metarr \
       sh -c "touch \"$probe_dir/.metarr-write-test\" && rm -f \"$probe_dir/.metarr-write-test\"" 2>&1); then
       container_ok=1
       echo "Container write as ${probe_uid}:${probe_gid} is OK."
@@ -169,24 +250,34 @@ while [ "$i" -lt 30 ]; do
     combined_err="$host_err $container_err"
     case "$combined_err" in
       *"Read-only file system"*|*"EROFS"*)
-        echo "EROFS: the kernel refused the write as a read-only filesystem." >&2
-        echo "Client findmnt can still list rw when the NFS server (or ZFS dataset) is read-only." >&2
-        findmnt /mnt/media 2>/dev/null || true
-        echo "On the NAS (source of /mnt/media), fix write access — METARR_UID/GID cannot fix EROFS:" >&2
-        echo "  - NFS share: disable Read Only / remove 'ro' from export options" >&2
-        echo "  - ZFS: zfs get readonly tank/media   (must be off)" >&2
-        echo "  - Then on this host: mount -o remount,rw /mnt/media && sudo /opt/metarr/deploy.sh" >&2
+        echo "EROFS on this host/container path — not a Metarr UID/GID issue." >&2
+        echo "Other NFS clients can write while this machine's /mnt/media path returns EROFS;" >&2
+        echo "often the host autofs/NFS client mount is broken or ro, while Plex uses its own mount." >&2
+        print_mount_diagnostics "$probe_dir"
+        if [ "$container_ok" -eq 0 ]; then
+          echo "Retrying with a direct NFS mount inside Docker (same share your laptop uses)..." >&2
+          if switch_to_direct_nfs_and_retry; then
+            sleep 2
+            if container_err=$($COMPOSE exec -T -u "${probe_uid}:${probe_gid}" metarr \
+              sh -c "touch \"$probe_dir/.metarr-write-test\" && rm -f \"$probe_dir/.metarr-write-test\"" 2>&1); then
+              echo "Container write as ${probe_uid}:${probe_gid} is OK after direct NFS mount."
+              container_ok=1
+            else
+              echo "Still cannot write after direct NFS mount: ${container_err:-failed}" >&2
+              echo "Check that this host's IP is allowed read-write on the NFS export (laptop/Plex may use a different client IP)." >&2
+            fi
+          fi
+        fi
         ;;
       *)
         if [ "$container_ok" -eq 0 ]; then
-          echo "  findmnt rw means the share is not flagged ro locally; Unix mode/owner still apply." >&2
+          echo "  Unix mode/owner still apply when the mount is rw." >&2
           if [ "$host_ok" -eq 0 ]; then
             echo "  Host also cannot write as ${probe_uid}:${probe_gid}." >&2
-            echo "  On the NFS server, title folders need group write for gid ${probe_gid} (or ownership matching METARR_UID)." >&2
             echo "    export METARR_UID=<writable-uid> METARR_GID=${probe_gid}" >&2
             echo "    sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh" >&2
           else
-            echo "  Host can write, but the container cannot — check the Docker volume mount for /mnt/media." >&2
+            echo "  Host can write, but the container cannot — check the Docker media volume." >&2
           fi
         fi
         ;;
@@ -202,6 +293,6 @@ while [ "$i" -lt 30 ]; do
 done
 
 echo "The container started, but http://127.0.0.1:4317/ did not answer." >&2
-docker compose ps
-docker compose logs --tail 40
+$COMPOSE ps
+$COMPOSE logs --tail 40
 exit 1

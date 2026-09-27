@@ -1,0 +1,11 @@
+# Default: bind the host media path (same path Plex often uses).
+# deploy.sh may rewrite this file to mount NFS directly when the host bind
+# returns EROFS (common with a broken autofs/NFS client mount) while other
+# NFS clients can still write.
+volumes:
+  media:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/media
