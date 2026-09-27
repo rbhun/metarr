@@ -147,6 +147,7 @@ while [ "$i" -lt 30 ]; do
     ls -ld /mnt/media ${library_dir:+"$library_dir"} "$probe_dir" 2>/dev/null || true
 
     host_ok=0
+    host_err=""
     if host_err=$(host_touch_as "$probe_dir" "$probe_uid" "$probe_gid" 2>&1); then
       host_ok=1
       echo "Host write as ${probe_uid}:${probe_gid} is OK."
@@ -154,22 +155,42 @@ while [ "$i" -lt 30 ]; do
       echo "Host write failed as ${probe_uid}:${probe_gid}: ${host_err:-unknown error}" >&2
     fi
 
+    container_ok=0
+    container_err=""
     if container_err=$(docker compose exec -T -u "${probe_uid}:${probe_gid}" metarr \
       sh -c "touch \"$probe_dir/.metarr-write-test\" && rm -f \"$probe_dir/.metarr-write-test\"" 2>&1); then
+      container_ok=1
       echo "Container write as ${probe_uid}:${probe_gid} is OK."
     else
       echo "Warning: Metarr container cannot write as uid ${probe_uid} gid ${probe_gid}." >&2
       echo "  ${container_err:-touch failed}" >&2
-      echo "  findmnt rw means the share is not read-only; Unix mode/owner still apply." >&2
-      if [ "$host_ok" -eq 0 ]; then
-        echo "  Host also cannot write as ${probe_uid}:${probe_gid}." >&2
-        echo "  On the NFS server, title folders need group write for gid ${probe_gid} (or ownership matching METARR_UID)." >&2
-        echo "    export METARR_UID=<writable-uid> METARR_GID=${probe_gid}" >&2
-        echo "    sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh" >&2
-      else
-        echo "  Host can write, but the container cannot — check the Docker volume mount for /mnt/media." >&2
-      fi
     fi
+
+    combined_err="$host_err $container_err"
+    case "$combined_err" in
+      *"Read-only file system"*|*"EROFS"*)
+        echo "EROFS: the kernel refused the write as a read-only filesystem." >&2
+        echo "Client findmnt can still list rw when the NFS server (or ZFS dataset) is read-only." >&2
+        findmnt /mnt/media 2>/dev/null || true
+        echo "On the NAS (source of /mnt/media), fix write access — METARR_UID/GID cannot fix EROFS:" >&2
+        echo "  - NFS share: disable Read Only / remove 'ro' from export options" >&2
+        echo "  - ZFS: zfs get readonly tank/media   (must be off)" >&2
+        echo "  - Then on this host: mount -o remount,rw /mnt/media && sudo /opt/metarr/deploy.sh" >&2
+        ;;
+      *)
+        if [ "$container_ok" -eq 0 ]; then
+          echo "  findmnt rw means the share is not flagged ro locally; Unix mode/owner still apply." >&2
+          if [ "$host_ok" -eq 0 ]; then
+            echo "  Host also cannot write as ${probe_uid}:${probe_gid}." >&2
+            echo "  On the NFS server, title folders need group write for gid ${probe_gid} (or ownership matching METARR_UID)." >&2
+            echo "    export METARR_UID=<writable-uid> METARR_GID=${probe_gid}" >&2
+            echo "    sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh" >&2
+          else
+            echo "  Host can write, but the container cannot — check the Docker volume mount for /mnt/media." >&2
+          fi
+        fi
+        ;;
+    esac
 
     if [ "$created_probe" -eq 1 ]; then
       rm -rf "$probe_dir" 2>/dev/null || true
