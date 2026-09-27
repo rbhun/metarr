@@ -38,13 +38,22 @@ findmnt /mnt/media
 sudo mount -o remount,rw /mnt/media
 ```
 
-If it fails with a permission error instead, the container user cannot write the media files. On **NFS**, `root_squash` maps uid 0 to nobody, so Metarr must not run as root even when folders show owner `0`. `deploy.sh` picks a non-root uid and the media group when it sees that, or set them yourself:
+If it fails with a permission error instead, the container user cannot write the media files. On **NFS**, `root_squash` maps uid 0 to nobody, so Metarr must not run as root even when folders show owner `0`. `deploy.sh` picks a non-root uid and the media group, then probes a **title folder** under Movies/TV (not Movies itself, which is often not group-writable). Or set them yourself:
 
 ```bash
 export METARR_UID=1000
 export METARR_GID=$(stat -c %g /mnt/media/Movies)
 sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh
 ```
+
+If deploy still reports no write access, check a title folder on the Plex host:
+
+```bash
+ls -ld /mnt/media/Movies "/mnt/media/Movies/50 First Dates (2004)"
+setpriv --reuid=1000 --regid=1002 --clear-groups -- touch "/mnt/media/Movies/50 First Dates (2004)/.write-test" && rm -f "/mnt/media/Movies/50 First Dates (2004)/.write-test"
+```
+
+When that host touch fails, fix ownership/mode on the NFS server (TrueNAS `192.168.20.2`), then redeploy.
 
 On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
 

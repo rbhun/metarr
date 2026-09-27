@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.45
+
+- Probe remux write access inside a movie title folder (not Movies/), and show host vs container errors when NFS still denies writes.
+
 ## 0.0.44
 
 - On NFS media shares, avoid running remux as root (root_squash) and probe write access in the Movies folder as the app user.
