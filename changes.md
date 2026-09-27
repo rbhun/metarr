@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.39
+
+- Add an All filter on Tasks that shows waiting, running, done, and failed jobs in one list.
+
 ## 0.0.38
 
 - Install util-linux in the image so remux can drop to the media owner with setpriv.

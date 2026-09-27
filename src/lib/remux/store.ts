@@ -221,33 +221,47 @@ export function clearPendingRemux(db: Database.Database): number {
   return clearRemuxJobs(db, "pending");
 }
 
+function mapRemuxRow(row: JobRow): RemuxJobView {
+  return {
+    id: row.id,
+    path: row.path,
+    label: row.label,
+    extras: row.extras === 1,
+    status: row.status as RemuxJobStatus,
+    message: row.message,
+    progress: row.progress,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 export function listRemuxJobs(
   db: Database.Database,
-  query: { status: RemuxJobStatus; page: number; pageSize: number },
+  query: { status?: RemuxJobStatus | null; page: number; pageSize: number },
 ): { jobs: RemuxJobView[]; total: number } {
   const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 50));
   const page = Math.max(1, Math.trunc(query.page) || 1);
+  const offset = (page - 1) * pageSize;
+  if (!query.status) {
+    const total = (db.prepare(`SELECT COUNT(*) AS count FROM remux_jobs`).get() as { count: number }).count;
+    const rows = db
+      .prepare(
+        `SELECT * FROM remux_jobs
+         ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+           COALESCE(finished_at, started_at, created_at) DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(pageSize, offset) as JobRow[];
+    return { jobs: rows.map(mapRemuxRow), total };
+  }
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM remux_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
       ? `SELECT * FROM remux_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM remux_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
-  const rows = db.prepare(sql).all(query.status, pageSize, (page - 1) * pageSize) as JobRow[];
-  return {
-    jobs: rows.map((row) => ({
-      id: row.id,
-      path: row.path,
-      label: row.label,
-      extras: row.extras === 1,
-      status: row.status as RemuxJobStatus,
-      message: row.message,
-      progress: row.progress,
-      createdAt: row.created_at,
-      startedAt: row.started_at,
-      finishedAt: row.finished_at,
-    })),
-    total,
-  };
+  const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
+  return { jobs: rows.map(mapRemuxRow), total };
 }
 
 export function enqueuePaths(

@@ -4,6 +4,7 @@ import { listRemuxJobs, remuxTotals, type RemuxJobStatus } from "@/lib/remux/sto
 
 export type TaskQueue = "language" | "remux";
 export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
+export type TaskStatusFilter = TaskStatus | "all";
 
 export type TaskJob = {
   key: string;
@@ -54,13 +55,23 @@ export function taskTotalsFor(db: Database.Database, queue: TaskQueue | "all"): 
   );
 }
 
+export function taskTotalsSum(totals: TaskTotals): number {
+  return totals.pending + totals.running + totals.done + totals.failed + totals.skipped;
+}
+
 function stamp(job: TaskJob): number {
   const value = job.finishedAt ?? job.startedAt ?? job.createdAt;
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
 
-function mapDetect(status: DetectJobStatus, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
+function statusRank(status: TaskStatus): number {
+  if (status === "running") return 0;
+  if (status === "pending") return 1;
+  return 2;
+}
+
+function mapDetect(status: DetectJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listDetectJobs(db, { status, page, pageSize });
   return {
     total: list.total,
@@ -84,7 +95,7 @@ function mapDetect(status: DetectJobStatus, page: number, pageSize: number, db: 
   };
 }
 
-function mapRemux(status: RemuxJobStatus, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
+function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listRemuxJobs(db, { status, page, pageSize });
   return {
     total: list.total,
@@ -106,36 +117,45 @@ function mapRemux(status: RemuxJobStatus, page: number, pageSize: number, db: Da
   };
 }
 
+function mergeJobs(language: TaskJob[], remux: TaskJob[], status: TaskStatusFilter): TaskJob[] {
+  const merged = [...language, ...remux];
+  if (status === "pending") return merged.sort((a, b) => a.id - b.id || a.key.localeCompare(b.key));
+  if (status === "all") {
+    return merged.sort(
+      (a, b) => statusRank(a.status) - statusRank(b.status) || stamp(b) - stamp(a) || b.id - a.id || a.key.localeCompare(b.key),
+    );
+  }
+  return merged.sort((a, b) => stamp(b) - stamp(a) || b.id - a.id || a.key.localeCompare(b.key));
+}
+
 /** List language and remux jobs for the Tasks page. */
 export function listTaskJobs(
   db: Database.Database,
-  query: { queue: TaskQueue | "all"; status: TaskStatus; page: number; pageSize: number },
+  query: { queue: TaskQueue | "all"; status: TaskStatusFilter; page: number; pageSize: number },
 ): { jobs: TaskJob[]; total: number } {
   const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 50));
   const page = Math.max(1, Math.trunc(query.page) || 1);
+  const status = query.status === "all" ? null : query.status;
 
   if (query.queue === "language") {
-    if (query.status !== "pending" && query.status !== "running" && query.status !== "done" && query.status !== "failed" && query.status !== "skipped") {
+    if (status && status !== "pending" && status !== "running" && status !== "done" && status !== "failed" && status !== "skipped") {
       return { jobs: [], total: 0 };
     }
-    return mapDetect(query.status, page, pageSize, db);
+    return mapDetect(status, page, pageSize, db);
   }
 
   if (query.queue === "remux") {
-    if (query.status === "skipped") return { jobs: [], total: 0 };
-    return mapRemux(query.status, page, pageSize, db);
+    if (status === "skipped") return { jobs: [], total: 0 };
+    return mapRemux(status, page, pageSize, db);
   }
 
-  if (query.status === "skipped") return mapDetect("skipped", page, pageSize, db);
+  if (status === "skipped") return mapDetect("skipped", page, pageSize, db);
 
   // Pull enough from each side to page correctly after a merged sort.
   const need = page * pageSize;
-  const language = mapDetect(query.status, 1, need, db);
-  const remux = mapRemux(query.status, 1, need, db);
-  const merged =
-    query.status === "pending"
-      ? [...language.jobs, ...remux.jobs].sort((a, b) => a.id - b.id || a.key.localeCompare(b.key))
-      : [...language.jobs, ...remux.jobs].sort((a, b) => stamp(b) - stamp(a) || b.id - a.id || a.key.localeCompare(b.key));
+  const language = mapDetect(status, 1, need, db);
+  const remux = mapRemux(status, 1, need, db);
+  const merged = mergeJobs(language.jobs, remux.jobs, query.status);
   const total = language.total + remux.total;
   const start = (page - 1) * pageSize;
   return { jobs: merged.slice(start, start + pageSize), total };
