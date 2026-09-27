@@ -31,14 +31,16 @@ docker compose up --build
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
-If remux fails with **EROFS**, `/mnt/media` is mounted read-only on the host. Docker cannot override that:
+**Mount `rw` vs write permission:** `findmnt` showing `rw` only means the share is not read-only (not EROFS). Each title folder still has a Unix owner/group/mode. Remux creates the MKV **inside that title folder**, and the container runs as one `METARR_UID`/`METARR_GID` for **every** job. Deploy may sample any existing title (or a temporary folder) as a canary — it is not limited to one movie.
+
+If remux fails with **EROFS**, remount the share read-write:
 
 ```bash
 findmnt /mnt/media
 sudo mount -o remount,rw /mnt/media
 ```
 
-If it fails with a permission error instead, the container user cannot write the media files. On **NFS**, `root_squash` maps uid 0 to nobody, so Metarr must not run as root even when folders show owner `0`. `deploy.sh` picks a non-root uid and the media group, then probes a **title folder** under Movies/TV (not Movies itself, which is often not group-writable). Or set them yourself:
+If it fails with a permission error (**EACCES**), the container user cannot write that folder. On **NFS**, `root_squash` maps uid 0 to nobody, so do not run as root even when folders show owner `0`. Set a non-root uid and the media group (used for all remuxes):
 
 ```bash
 export METARR_UID=1000
@@ -46,14 +48,15 @@ export METARR_GID=$(stat -c %g /mnt/media/Movies)
 sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh
 ```
 
-If deploy still reports no write access, check a title folder on the Plex host:
+If deploy still reports no write access, pick any title folder on the Plex host (name does not matter):
 
 ```bash
-ls -ld /mnt/media/Movies "/mnt/media/Movies/50 First Dates (2004)"
-setpriv --reuid=1000 --regid=1002 --clear-groups -- touch "/mnt/media/Movies/50 First Dates (2004)/.write-test" && rm -f "/mnt/media/Movies/50 First Dates (2004)/.write-test"
+title=$(find /mnt/media/Movies -mindepth 1 -maxdepth 1 -type d | head -n 1)
+ls -ld /mnt/media/Movies "$title"
+setpriv --reuid=1000 --regid="$(stat -c %g "$title")" --clear-groups -- touch "$title/.write-test" && rm -f "$title/.write-test"
 ```
 
-When that host touch fails, fix ownership/mode on the NFS server (TrueNAS `192.168.20.2`), then redeploy.
+When that host touch fails, fix ownership/mode on the NFS server, then redeploy.
 
 On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
 
