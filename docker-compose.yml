@@ -16,9 +16,11 @@ services:
       METARR_GID: "${METARR_GID:-0}"
     volumes:
       - metarr-data:/app/data
-      # Same path as on the Plex host so disc remux can read ISOs/DVDs and write MKVs beside them.
-      - /mnt/media:/mnt/media:rw
+      # Backing store for /mnt/media is defined in docker-compose.media.yml
+      # (host bind by default, or a direct NFS mount when the host path is EROFS).
+      - media:/mnt/media
     restart: unless-stopped
 
 volumes:
   metarr-data:
+  media:

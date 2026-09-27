@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.48
+
+- If this host's /mnt/media returns EROFS while other NFS clients can write, mount the share directly into Docker (auto-detect or METARR_NFS_ADDR/EXPORT).
+
 ## 0.0.47
 
 - When touch fails with EROFS even though findmnt shows rw, say the NFS/ZFS share is read-only on the NAS — UID/GID cannot fix that.
