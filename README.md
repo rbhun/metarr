@@ -69,6 +69,12 @@ On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
 sudo /opt/metarr/deploy.sh
 ```
 
+If pull fails because `docker-compose.media.yml` was rewritten by an older deploy:
+
+```bash
+cd /opt/metarr && sudo git checkout -- docker-compose.media.yml && sudo /opt/metarr/deploy.sh
+```
+
 From another computer: `ssh <plex-vm> sudo /opt/metarr/deploy.sh`.
 
 ## Settings
