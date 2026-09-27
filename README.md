@@ -31,48 +31,12 @@ docker compose up --build
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
-**Mount `rw` vs write permission:** `findmnt` showing `rw` means the *client* did not request a read-only mount. Each title folder still has a Unix owner/group/mode. Remux creates the MKV **inside that title folder**, and the container runs as one `METARR_UID`/`METARR_GID` for **every** job. Deploy may sample any existing title (or a temporary folder) as a canary — it is not limited to one movie.
+The container runs as `METARR_UID` / `METARR_GID` from `/opt/metarr/.env`, the same idea as `PUID` / `PGID` on other containers. The first deploy writes that file; edit it to match the user your other media apps run as. Remux never deletes or overwrites anything in the library: MakeMKV writes to `/app/data/remux-work`, and the finished MKV is moved next to the disc only if no file with that name exists.
 
-If touch fails with **Read-only file system (EROFS)** on this host while your laptop or Plex can write the same share, the problem is this machine’s `/mnt/media` mount (often autofs/NFS), not Metarr UIDs. `deploy.sh` can attach the same NFS export **directly into Docker** using a separate volume name (`media_nfs`). That is mount-only: it does **not** delete library files, and it never runs `docker volume rm` on media.
-
-```bash
-export METARR_NFS_ADDR=192.168.20.2
-export METARR_NFS_EXPORT=/tank/media
-export METARR_UID=1000
-export METARR_GID=$(stat -c %g /mnt/media/Movies)
-sudo --preserve-env=METARR_UID,METARR_GID,METARR_NFS_ADDR,METARR_NFS_EXPORT /opt/metarr/deploy.sh
-```
-
-If an older deploy is stuck on `Recreate (data will be lost)? (y/N)`, prefer **N** or Ctrl+C, then pull 0.0.56+ and redeploy (no volume recreate). `METARR_UID` / `METARR_GID` cannot fix EROFS.
-
-If it fails with a permission error (**EACCES**), the container user cannot write that folder. On **NFS**, `root_squash` maps uid 0 to nobody, so do not run as root even when folders show owner `0`. Set a non-root uid and the media group (used for all remuxes):
-
-```bash
-export METARR_UID=1000
-export METARR_GID=$(stat -c %g /mnt/media/Movies)
-sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh
-```
-
-If deploy still reports no write access, pick any title folder on the Plex host (name does not matter):
-
-```bash
-title=$(find /mnt/media/Movies -mindepth 1 -maxdepth 1 -type d | head -n 1)
-ls -ld /mnt/media/Movies "$title"
-setpriv --reuid=1000 --regid="$(stat -c %g "$title")" --clear-groups -- touch "$title/.write-test" && rm -f "$title/.write-test"
-```
-
-When that host touch fails, fix ownership/mode on the NFS server, then redeploy.
-
-On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
+On the machine that already has the checkout, `deploy.sh` pulls, rebuilds, and checks that the container can write one test file in a movie folder:
 
 ```bash
 sudo /opt/metarr/deploy.sh
-```
-
-If pull fails because `docker-compose.media.yml` was rewritten by an older deploy:
-
-```bash
-cd /opt/metarr && sudo git checkout -- docker-compose.media.yml && sudo /opt/metarr/deploy.sh
 ```
 
 From another computer: `ssh <plex-vm> sudo /opt/metarr/deploy.sh`.

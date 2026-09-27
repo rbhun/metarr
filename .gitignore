@@ -20,10 +20,6 @@ yarn-error.log*
 # env files
 .env*
 !.env.example
-
-# local deploy choice for direct NFS media mount (no secrets)
-.metarr-nfs.env
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
