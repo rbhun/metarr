@@ -20,7 +20,7 @@ export function toastRemux(message: string) {
   toast.success(
     <span>
       {message.slice(0, index)}
-      <Link href="/tasks?queue=remux&status=pending" className="underline underline-offset-2">
+      <Link href="/tasks?queue=remux&status=all" className="underline underline-offset-2">
         Tasks
       </Link>
       {message.slice(index + "Tasks".length)}
