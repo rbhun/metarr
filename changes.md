@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.46
+
+- Make clear that mount rw is not the same as Unix write permission, and that deploy only samples a folder — remux uses METARR_UID/GID for every disc.
+
 ## 0.0.45
 
 - Probe remux write access inside a movie title folder (not Movies/), and show host vs container errors when NFS still denies writes.
