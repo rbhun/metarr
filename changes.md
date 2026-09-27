@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.53
+
+- Call a disc track silent when it only holds a blank moment at the start, instead of saying the sample could not be read.
+
 ## 0.0.52
 
 - Mark a subtitle as forced when a long film only has a few cues, the signs and titles rather than the dialogue.
