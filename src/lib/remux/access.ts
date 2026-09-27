@@ -44,6 +44,14 @@ export function writeAccessDeniedMessage(directory: string, detail?: string): st
   const who = `Metarr runs as uid ${process.getuid?.() ?? "unknown"}, gid ${process.getgid?.() ?? "unknown"}`;
   const folder = folderModeOwner(directory);
   const why = detail ? ` (${detail})` : "";
+  if (detail === "EROFS") {
+    return (
+      `Cannot write next to the disc at ${directory}: the filesystem is mounted read-only (EROFS). ` +
+      `${who}; ${folder}. ` +
+      `On the Plex host, remount the media share read-write (for example findmnt /mnt/media, then mount -o remount,rw /mnt/media), ` +
+      `and make sure docker-compose mounts it as :rw — Docker cannot write if the host mount is read-only.`
+    );
+  }
   return (
     `Cannot write next to the disc at ${directory}${why}. ${who}; ${folder}. ` +
     `On the host, either give that user write access to the movie folder, or set METARR_UID/METARR_GID in docker-compose to the owner of /mnt/media and redeploy. ` +

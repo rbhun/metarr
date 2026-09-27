@@ -15,6 +15,17 @@ fi
 cd "$root"
 git pull --ff-only
 
+if [ -d /mnt/media ]; then
+  opts=$(findmnt -no OPTIONS /mnt/media 2>/dev/null || true)
+  case ",$opts," in
+    *,ro,*)
+      echo "Warning: /mnt/media is mounted read-only on the host ($opts). Disc remux cannot write MKVs until you remount it read-write." >&2
+      echo "  findmnt /mnt/media" >&2
+      echo "  mount -o remount,rw /mnt/media" >&2
+      ;;
+  esac
+fi
+
 if [ -d /mnt/media ] && [ -z "${METARR_UID:-}" ] && [ -z "${METARR_GID:-}" ]; then
   sample=$(find /mnt/media -mindepth 1 -maxdepth 2 -type d 2>/dev/null | head -n 1 || true)
   if [ -n "$sample" ]; then
@@ -34,7 +45,9 @@ while [ "$i" -lt 30 ]; do
     if docker compose exec -T metarr sh -c 'test -d /mnt/media && touch /mnt/media/.metarr-write-test && rm -f /mnt/media/.metarr-write-test' 2>/dev/null; then
       echo "Write access to /mnt/media is OK."
     else
-      echo "Warning: Metarr cannot write to /mnt/media. Set METARR_UID/METARR_GID to the media owner and redeploy." >&2
+      echo "Warning: Metarr cannot write to /mnt/media." >&2
+      echo "  If findmnt shows ro, remount: mount -o remount,rw /mnt/media" >&2
+      echo "  Otherwise set METARR_UID/METARR_GID to the media owner and redeploy." >&2
     fi
     exit 0
   fi

@@ -31,7 +31,14 @@ docker compose up --build
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
-If remux fails with “Cannot write next to the disc”, the container user does not own the media files. `deploy.sh` tries to set `METARR_UID` / `METARR_GID` from `/mnt/media`, or you can set them yourself before deploy:
+If remux fails with **EROFS**, `/mnt/media` is mounted read-only on the host. Docker cannot override that:
+
+```bash
+findmnt /mnt/media
+sudo mount -o remount,rw /mnt/media
+```
+
+If it fails with a permission error instead, the container user does not own the media files. `deploy.sh` tries to set `METARR_UID` / `METARR_GID` from `/mnt/media`, or you can set them yourself before deploy:
 
 ```bash
 export METARR_UID=$(stat -c %u /mnt/media/Movies)

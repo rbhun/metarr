@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.43
+
+- Say clearly when disc remux fails because `/mnt/media` is mounted read-only (EROFS).
+
 ## 0.0.42
 
 - Read a 4K disc's audio from where the stream starts, instead of reporting that the sample had no speech.
