@@ -9,7 +9,7 @@ import { plexSessionBusy } from "@/lib/detect/plex";
 import type { ScanFile } from "@/lib/detect/targets";
 import { insertSourceRecords, migrate } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
-import { friendlyFsError, missingPathMessage, remuxWorkDirectory } from "@/lib/remux/access";
+import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWorkDirectory, writeAccessDeniedMessage } from "@/lib/remux/access";
 import { listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
@@ -156,6 +156,13 @@ test("remux work folders stay under the database directory and missing media pat
     code: "ENOENT",
   });
   assert.match(friendlyFsError(error, "Remux failed."), /mount the host media folder|Missing path component|\/mnt\/media/);
+  assert.match(writeAccessDeniedMessage("/mnt/media/Movies/Film"), /METARR_UID/);
+  const writable = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-write-"));
+  try {
+    assert.doesNotThrow(() => assertWritableDiscFolder(writable));
+  } finally {
+    fs.rmSync(writable, { recursive: true, force: true });
+  }
 });
 
 test("paths and library discs feed the remux queue and history list", () => {

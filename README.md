@@ -29,7 +29,15 @@ The database file is `data/library.db` unless `DATABASE_PATH` is set. See `.env.
 docker compose up --build
 ```
 
-The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
+The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
+
+If remux fails with “Cannot write next to the disc”, the container user does not own the media files. `deploy.sh` tries to set `METARR_UID` / `METARR_GID` from `/mnt/media`, or you can set them yourself before deploy:
+
+```bash
+export METARR_UID=$(stat -c %u /mnt/media/Movies)
+export METARR_GID=$(stat -c %g /mnt/media/Movies)
+sudo --preserve-env=METARR_UID,METARR_GID /opt/metarr/deploy.sh
+```
 
 On the machine that already has the checkout, `deploy.sh` pulls and rebuilds:
 
