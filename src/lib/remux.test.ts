@@ -10,7 +10,7 @@ import type { ScanFile } from "@/lib/detect/targets";
 import { insertSourceRecords, migrate } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWorkDirectory, writeAccessDeniedMessage } from "@/lib/remux/access";
-import { listDiscCandidates } from "@/lib/remux/candidates";
+import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
@@ -52,6 +52,16 @@ function scan(label: string, filePath: string | null, container: string | null):
     versions: [],
   };
 }
+
+test("a disc counts as converted only when the title also has a playable video file", () => {
+  const disc = "/movies/Film (1999)/VIDEO_TS/VIDEO_TS.VOB";
+  const mkv = "/movies/Film (1999)/Film (1999).mkv";
+  const dvd = { path: disc, container: "vob", playableLabel: "dvd" as const };
+  const video = { path: mkv, container: "mkv", playableLabel: "video" as const };
+  assert.equal(convertedFileFor({ ...dvd, versions: [dvd] }), null);
+  assert.equal(convertedFileFor({ ...video, versions: [video, dvd] }), mkv);
+  assert.equal(convertedFileFor({ ...dvd, versions: [dvd, { path: "/movies/Film (1999)/Film.iso", container: "iso", playableLabel: "video" }] }), null);
+});
 
 test("robot info keeps the longest title and reads progress", () => {
   const titles = parseDiscTitles(INFO);

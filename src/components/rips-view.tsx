@@ -14,7 +14,13 @@ type DiscCandidate = {
   label: string;
   kind: string;
   kindLabel: string;
+  converted?: boolean;
+  convertedPath?: string | null;
 };
+
+function fileName(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
 
 type JobTotals = { pending: number; running: number; done: number; failed: number };
 
@@ -105,13 +111,15 @@ export function RipsView() {
     };
   }, [load]);
 
-  const filteredDiscs = useMemo(() => {
+  const matchingDiscs = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return discs;
     return discs.filter(
       (disc) => disc.label.toLowerCase().includes(needle) || disc.path.toLowerCase().includes(needle) || disc.kindLabel.toLowerCase().includes(needle),
     );
   }, [discs, search]);
+  const filteredDiscs = useMemo(() => matchingDiscs.filter((disc) => !disc.converted), [matchingDiscs]);
+  const convertedDiscs = useMemo(() => matchingDiscs.filter((disc) => disc.converted), [matchingDiscs]);
 
   function toggle(path: string) {
     setSelected((previous) => {
@@ -271,8 +279,11 @@ export function RipsView() {
                 No ISO or DVD images in the library yet. Sync metadata, or paste a path on this machine below.
               </p>
             ) : null}
-            {!loading && discs.length > 0 && filteredDiscs.length === 0 ? (
+            {!loading && discs.length > 0 && matchingDiscs.length === 0 ? (
               <p className="text-sm text-muted-foreground">No discs match that search.</p>
+            ) : null}
+            {!loading && matchingDiscs.length > 0 && filteredDiscs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Every disc here already has a converted file.</p>
             ) : null}
             {filteredDiscs.length > 0 ? (
               <div className="overflow-hidden rounded-lg border">
@@ -301,6 +312,30 @@ export function RipsView() {
                           <span className="mt-1 block text-xs leading-5 break-all text-muted-foreground">{disc.path}</span>
                         </span>
                       </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {convertedDiscs.length > 0 ? (
+              <div className="space-y-2 pt-2">
+                <div>
+                  <h2 className="text-sm font-medium">Already converted</h2>
+                  <p className="text-xs text-muted-foreground">
+                    These titles already have a playable file next to the disc. The disc is still there until you remove it.
+                  </p>
+                </div>
+                <ul className="divide-y overflow-hidden rounded-lg border">
+                  {convertedDiscs.map((disc) => (
+                    <li key={disc.path} className="px-3 py-3">
+                      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="text-sm font-medium">{disc.label}</span>
+                        <span className="text-xs text-muted-foreground">{disc.kindLabel}</span>
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                          {disc.convertedPath ? `Converted to ${fileName(disc.convertedPath)}` : "Remux finished"}
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 break-all text-muted-foreground">{disc.path}</span>
                     </li>
                   ))}
                 </ul>

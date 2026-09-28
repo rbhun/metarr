@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.87
+
+- Move a disc that already has a converted file to an "Already converted" list on Rips, so the disc list only shows what still needs a remux.
+
 ## 0.0.86
 
 - Read the language Radarr stores on the movie file when its audio field is blank, so that label is not treated as missing.
