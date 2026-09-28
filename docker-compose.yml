@@ -10,12 +10,16 @@ services:
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
-      # Same idea as PUID/PGID on other containers. Set in /opt/metarr/.env.
-      METARR_UID: "${METARR_UID:-0}"
-      METARR_GID: "${METARR_GID:-0}"
+      # Dedicated media user and group; see metarr.env.example.
+      METARR_UID: "${METARR_UID:-1500}"
+      METARR_GID: "${METARR_GID:-1002}"
+      UMASK: "${UMASK:-002}"
+      METARR_DRY_RUN: "${METARR_DRY_RUN:-0}"
+    # Low CPU weight so Plex playback transcodes always win; tools also run under ionice -c3 / nice 19.
+    cpu_shares: 128
     volumes:
+      # App database and all scratch (remux-work, retag-work) live on local VM disk, never on /mnt/media.
       - metarr-data:/app/data
-      # Same bind as the host path, like other containers on this VM.
       - /mnt/media:/mnt/media
     restart: unless-stopped
 

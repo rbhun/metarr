@@ -31,7 +31,22 @@ docker compose up --build
 
 The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. `docker-compose.yml` also mounts `/mnt/media` read-write so disc remux can read ISO/DVD folders and write the MKV beside them. Change that volume if your library lives elsewhere.
 
-The container runs as `METARR_UID` / `METARR_GID` from `/opt/metarr/.env`, the same idea as `PUID` / `PGID` on other containers. The first deploy writes that file; edit it to match the user your other media apps run as. Remux never deletes or overwrites anything in the library: MakeMKV writes to `/app/data/remux-work`, and the finished MKV is moved next to the disc only if no file with that name exists.
+Settings live in `/opt/metarr/.env`; the first deploy copies it from `metarr.env.example`:
+
+| Setting | Default | Why |
+| --- | --- | --- |
+| `METARR_UID` | `1500` | Dedicated media user. Not 1000, which maps to a restricted account on the NFS server. |
+| `METARR_GID` | `1002` | Group `media`, which gives write access to `/mnt/media`. |
+| `UMASK` | `002` | New files stay group-writable, so Radarr and Sonarr can manage them. |
+| `METARR_DRY_RUN` | `0` | `1` makes remux and file tagging report what they would change without writing to media. |
+
+How Metarr treats the library:
+
+- **Scratch stays on local disk.** MakeMKV and MP4 retagging write to `/app/data` (a Docker volume on the VM disk), never to `/mnt/media`.
+- **Files are delivered in two steps.** A finished file is copied to `<target>.partial` in the destination folder, flushed, then renamed to its final name, so Plex and the *arr apps never see half-written files. An existing file is never overwritten, and the disc it came from is left in place.
+- **Plex keeps priority.** Tools run under `ionice -c3` and `nice -n 19`, the container has a low CPU weight, and jobs run one at a time.
+- **Every track is kept.** Remux keeps every audio and subtitle track in disc order, including Hungarian, with their language tags. The only thing dropped is the 3D video layer.
+- **Plex, Radarr and Sonarr are told about new files through their APIs.** After a remux, Metarr asks Plex for a partial scan of that folder only, and asks Radarr or Sonarr to rescan the movie or series that owns the folder. Plex's database and Application Support folder are never touched.
 
 On the machine that already has the checkout, `deploy.sh` pulls, rebuilds, and checks that the container can write one test file in a movie folder:
 

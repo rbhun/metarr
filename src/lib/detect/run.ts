@@ -16,6 +16,7 @@ import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { detectTextLanguage } from "@/lib/detect/text-language";
+import { idle } from "@/lib/idle";
 import { languageName } from "@/lib/media";
 
 export type DetectionOutcome = {
@@ -29,7 +30,8 @@ const limitedEnv = { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS:
 
 function runCommand(command: string, args: string[], timeout = 120_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile("nice", ["-n", "15", command, ...args], { timeout, maxBuffer: 2 * 1024 * 1024, env: limitedEnv }, (error, stdout, stderr) => {
+    const low = idle(command, args);
+    execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024, env: limitedEnv }, (error, stdout, stderr) => {
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       if (error) {
@@ -120,7 +122,8 @@ function ensureWhisper(): ChildProcessWithoutNullStreams {
   const script = whisperScript();
   if (!fs.existsSync(script)) throw new Error("Whisper script is missing.");
   const command = process.env.WHISPER_PYTHON || "python3";
-  const child = spawn("nice", ["-n", "15", command, script], { stdio: ["pipe", "pipe", "pipe"], env: limitedEnv });
+  const low = idle(command, [script]);
+  const child = spawn(low.command, low.args, { stdio: ["pipe", "pipe", "pipe"], env: limitedEnv });
   child.on("error", (error) => {
     resetWhisper(error);
   });
@@ -165,7 +168,8 @@ function ensureWhisper(): ChildProcessWithoutNullStreams {
 
 function ffmpegSlice(file: string, start: number, end: number, args: string[], timeout: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child: ChildProcess = spawn("nice", ["-n", "15", "ffmpeg", ...args], {
+    const low = idle("ffmpeg", args);
+    const child: ChildProcess = spawn(low.command, low.args, {
       stdio: ["pipe", "ignore", "pipe"],
       env: limitedEnv,
     });

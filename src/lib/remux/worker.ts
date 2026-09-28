@@ -4,7 +4,9 @@ import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
-import { assertWritableDiscFolder, friendlyFsError, remuxWorkDirectory } from "@/lib/remux/access";
+import { announceFolder } from "@/lib/announce";
+import { dryRun } from "@/lib/dry-run";
+import { assertWritableDiscFolder, discFolderProblem, friendlyFsError, remuxWorkDirectory } from "@/lib/remux/access";
 import { safeBaseName } from "@/lib/remux/place";
 import { outputDirectory, makemkvSource } from "@/lib/remux/source";
 import { ripDisc } from "@/lib/remux/run";
@@ -75,7 +77,16 @@ async function step() {
       finishRemux(db, job.id, "failed", "This path is not a disc image MakeMKV can open.");
       return;
     }
-    assertWritableDiscFolder(directory);
+    const rehearsal = dryRun();
+    if (rehearsal) {
+      const problem = discFolderProblem(directory);
+      if (problem) {
+        finishRemux(db, job.id, "failed", `Dry run: ${problem}`);
+        return;
+      }
+    } else {
+      assertWritableDiscFolder(directory);
+    }
     const mainName = `${safeBaseName(job.label)}.mkv`;
     if (fs.existsSync(path.join(directory, mainName))) {
       finishRemux(db, job.id, "failed", `${mainName} already exists next to the disc.`);
@@ -91,9 +102,18 @@ async function step() {
       label: job.label,
       extras: job.extras,
       home,
+      dryRun: rehearsal,
       onProgress: (percent, text) => updateRemuxProgress(db, job.id, percent, text),
     });
-    finishRemux(db, job.id, "done", message);
+    let told = "";
+    if (!rehearsal) {
+      try {
+        told = await announceFolder(db, [outputDirectory(job.path) ?? "", directory]);
+      } catch {
+        told = "Plex and the *arr apps could not be asked to rescan.";
+      }
+    }
+    finishRemux(db, job.id, "done", [message, told].filter(Boolean).join(" "));
   } catch (caught) {
     if (workDir.current) fs.rmSync(workDir.current, { recursive: true, force: true });
     finishRemux(db, job.id, "failed", friendlyFsError(caught, "Remux failed."));

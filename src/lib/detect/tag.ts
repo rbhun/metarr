@@ -71,12 +71,6 @@ export function planTag(
   return { action: "skip", reason: "container" };
 }
 
-/** A copy used while retagging. The original extension stays, so ffmpeg can tell it is an MP4. */
-export function retagTempPath(file: string): string {
-  const ext = path.extname(file);
-  if (!ext) return `${file}.metarr-writing`;
-  return `${file.slice(0, -ext.length)}.metarr-writing${ext}`;
-}
 export function retargetPath(storedPath: string, localFrom: string, localTo: string): string {
   const stored = storedPath.replace(/\\/g, "/");
   const from = localFrom.replace(/\\/g, "/");

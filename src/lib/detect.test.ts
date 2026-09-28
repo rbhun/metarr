@@ -19,7 +19,7 @@ import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioSliceArgs, clipStart, dialogueMix, openingWindow, pcmIsSilent, sampleOffsets, tsWindow } from "@/lib/detect/audio";
-import { planTag, retagTempPath, retargetPath } from "@/lib/detect/tag";
+import { planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
 import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
@@ -563,10 +563,6 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
   assert.deepEqual(planTag("/movies/Dune.eng.srt", "subtitle", 0, "Hungarian", null), { action: "skip", reason: "already-named" });
   assert.deepEqual(planTag("/movies/Dune.avi", "audio", 0, "Hungarian", null), { action: "skip", reason: "container" });
   assert.equal(retargetPath("/mnt/media/Dune.srt", "/Volumes/media/Dune.srt", "/Volumes/media/Dune.hun.srt"), "/mnt/media/Dune.hun.srt");
-  assert.equal(
-    retagTempPath("/movies/Breakfast.at.Tiffany's.1961.mp4"),
-    "/movies/Breakfast.at.Tiffany's.1961.metarr-writing.mp4",
-  );
 });
 
 test("a recognized language is saved on the library row that owns the file", () => {
