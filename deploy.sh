@@ -2,9 +2,9 @@
 # Pull the latest main branch and rebuild the Metarr container.
 # On the Plex machine: sudo /opt/metarr/deploy.sh
 #
-# The container runs as METARR_UID/METARR_GID from /opt/metarr/.env
-# (like PUID/PGID). Deploy never deletes or moves anything under /mnt/media;
-# the write check creates one empty marker file and removes only that file.
+# Settings live in /opt/metarr/.env (template: metarr.env.example).
+# Deploy never deletes or moves anything under /mnt/media; the write check
+# creates one empty marker file and removes only that file.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -25,12 +25,17 @@ if [ "$(git rev-parse HEAD)" != "$before" ] && [ -z "${METARR_DEPLOY_REEXEC:-}" 
 fi
 
 if [ ! -f .env ]; then
-  uid=${SUDO_UID:-1000}
-  gid=$(stat -c %g /mnt/media/Movies 2>/dev/null || stat -c %g /mnt/media 2>/dev/null || echo 0)
-  printf 'METARR_UID=%s\nMETARR_GID=%s\n' "$uid" "$gid" > .env
-  echo "Wrote $root/.env with METARR_UID=$uid METARR_GID=$gid. Edit it to match the user your other media apps use."
+  cp metarr.env.example .env
+  echo "Wrote $root/.env from metarr.env.example."
+fi
+if grep -q '^METARR_UID=1000$' .env; then
+  sed -i 's/^METARR_UID=1000$/METARR_UID=1500/' .env
+  echo "Changed METARR_UID from 1000 to 1500 in .env: uid 1000 maps to a restricted account on the NFS server."
 fi
 . ./.env
+METARR_UID=${METARR_UID:-1500}
+METARR_GID=${METARR_GID:-1002}
+echo "Running as ${METARR_UID}:${METARR_GID}, umask ${UMASK:-002}$( [ "${METARR_DRY_RUN:-0}" = "1" ] && echo ', dry run (nothing is written to /mnt/media)')."
 
 docker compose up --build -d
 
@@ -47,20 +52,19 @@ until curl -4 -fsS -m 3 -o /dev/null http://127.0.0.1:4317/; do
 done
 echo "Metarr is up at http://127.0.0.1:4317/"
 
+if [ "${METARR_DRY_RUN:-0}" = "1" ]; then
+  echo "Dry run: skipped the write check."
+  exit 0
+fi
+
 folder=$(find /mnt/media/Movies -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1 || true)
 [ -n "$folder" ] || folder=/mnt/media
-marker="$folder/.metarr-write-test"
+marker="$folder/.metarr-write-test-$$"
 
-echo "Write check in $folder as ${METARR_UID}:${METARR_GID}:"
-if host_err=$(setpriv --reuid="$METARR_UID" --regid="$METARR_GID" --clear-groups -- touch "$marker" 2>&1); then
-  rm -f "$marker"
-  echo "  host:      OK"
+echo "Write check in $folder:"
+if container_err=$(docker compose exec -T metarr setpriv --reuid="$METARR_UID" --regid="$METARR_GID" --clear-groups \
+  sh -c 'umask "${UMASK:-002}" && touch "$1" && rm "$1"' sh "$marker" 2>&1); then
+  echo "  OK"
 else
-  echo "  host:      $host_err"
-fi
-if container_err=$(docker compose exec -T -u "${METARR_UID}:${METARR_GID}" metarr touch "$marker" 2>&1); then
-  docker compose exec -T -u "${METARR_UID}:${METARR_GID}" metarr rm -f "$marker"
-  echo "  container: OK"
-else
-  echo "  container: $container_err"
+  echo "  $container_err"
 fi

@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { stampLanguage } from "@/lib/detect/stamp";
-import { planTag, retagTempPath, retargetPath } from "@/lib/detect/tag";
+import { planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
+import { deliverFile } from "@/lib/deliver";
+import { dryRun } from "@/lib/dry-run";
+import { idle } from "@/lib/idle";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { notifyPlayers } from "@/lib/detect/publish";
@@ -28,7 +31,8 @@ type WriteJob = {
 
 function runTool(command: string, args: string[], timeout: number, allowWarning = false): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile("nice", ["-n", "15", command, ...args], { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const low = idle(command, args);
+    execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       const code = error ? (error as { code?: string | number }).code : undefined;
@@ -73,14 +77,27 @@ async function existingLanguage(file: string, kind: "audio" | "subtitle", ordina
   }
 }
 
-function roomForCopy(file: string): boolean {
+function roomForCopy(file: string, scratch: string): boolean {
   try {
-    const size = fs.statSync(file).size;
-    const space = fs.statfsSync(path.dirname(file));
-    return Number(space.bavail) * Number(space.bsize) > size + 512 * 1024 * 1024;
+    const needed = fs.statSync(file).size + 512 * 1024 * 1024;
+    fs.mkdirSync(scratch, { recursive: true });
+    return [path.dirname(file), scratch].every((directory) => {
+      const space = fs.statfsSync(directory);
+      return Number(space.bavail) * Number(space.bsize) > needed;
+    });
   } catch {
     return true;
   }
+}
+
+function retagScratch(db: Database.Database): string {
+  return path.join(path.dirname(db.name), "retag-work");
+}
+
+function dryRunSentence(plan: Exclude<TagPlan, { action: "skip" }>, kind: "audio" | "subtitle", localFile: string): string {
+  if (plan.action === "rename") return `Dry run: would rename ${path.basename(localFile)} to ${path.basename(plan.to)}. Nothing was written.`;
+  const how = plan.action === "matroska" ? "set it in place with mkvpropedit" : "write a retagged copy and swap it in";
+  return `Dry run: would tag the ${kind} track as ${plan.language} (${how}). Nothing was written.`;
 }
 
 function videoPathsFor(job: WriteJob, stamped: string[]): string[] {
@@ -92,30 +109,22 @@ function unchanged(job: WriteJob, sentence: string, settled = true): WriteResult
   return { storedPath: job.path, sentence, changed: false, settled, videoPaths: [] };
 }
 
-async function replaceMp4(file: string, args: string[]) {
-  const temp = retagTempPath(file);
+/** ffmpeg writes to local scratch; the copy reaches the media folder as `<file>.partial` and is renamed over the original. */
+async function replaceMp4(file: string, scratchRoot: string, args: (output: string) => string[]) {
   const backup = `${file}.metarr-bak`;
   if (!fs.existsSync(file) && fs.existsSync(backup)) fs.renameSync(backup, file);
-  fs.rmSync(temp, { force: true });
+  fs.mkdirSync(scratchRoot, { recursive: true });
+  const scratch = fs.mkdtempSync(path.join(scratchRoot, "job-"));
   try {
-    await runTool("ffmpeg", args, 3 * 60 * 60 * 1000);
-  } catch (error) {
-    fs.rmSync(temp, { force: true });
-    throw error;
+    const temp = path.join(scratch, path.basename(file));
+    await runTool("ffmpeg", args(temp), 3 * 60 * 60 * 1000);
+    if (!fs.existsSync(temp) || fs.statSync(temp).size < 1024) {
+      throw new Error("ffmpeg did not write a retagged file, so the original was left unchanged.");
+    }
+    deliverFile(temp, file, { replace: true, mode: (fs.statSync(file).mode & 0o777) | 0o660 });
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
-  if (!fs.existsSync(temp) || fs.statSync(temp).size < 1024) {
-    fs.rmSync(temp, { force: true });
-    throw new Error("ffmpeg did not write a retagged file, so the original was left unchanged.");
-  }
-  await fs.promises.rename(file, backup);
-  try {
-    await fs.promises.rename(temp, file);
-  } catch (error) {
-    if (!fs.existsSync(file) && fs.existsSync(backup)) fs.renameSync(backup, file);
-    fs.rmSync(temp, { force: true });
-    throw error;
-  }
-  fs.rmSync(backup, { force: true });
 }
 
 export async function writeFinding(
@@ -146,6 +155,8 @@ export async function writeFinding(
       }
     }
 
+    if (dryRun()) return unchanged(job, dryRunSentence(plan, job.kind, localFile), false);
+
     if (plan.action === "matroska") {
       const args = [localFile, "--edit", plan.selector, "--set", `language=${plan.language}`];
       if (plan.commentary) args.push("--set", "flag-commentary=1");
@@ -156,7 +167,8 @@ export async function writeFinding(
       if (fs.statSync(localFile).nlink > 1) {
         return unchanged(job, "This file is linked from more than one folder, so retagging it would leave the other link unchanged.");
       }
-      if (!roomForCopy(localFile)) {
+      const scratch = retagScratch(db);
+      if (!roomForCopy(localFile, scratch)) {
         return unchanged(job, "There is not enough free disk space to retag this file, so it was left unchanged.", false);
       }
       const args = [
@@ -175,8 +187,7 @@ export async function writeFinding(
       ];
       if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push(`-metadata:${plan.specifier}`, "title=Commentary");
       if (plan.forced) args.push(`-disposition:s:${job.ordinal}`, "forced");
-      args.push(retagTempPath(localFile));
-      await replaceMp4(localFile, args);
+      await replaceMp4(localFile, scratch, (output) => [...args, output]);
     } else {
       if (fs.existsSync(plan.to)) {
         return unchanged(job, "A subtitle file with that language in its name already exists, so this file was left unchanged.");

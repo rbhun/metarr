@@ -63,6 +63,19 @@ export function writeAccessDeniedMessage(directory: string, detail?: string): st
   );
 }
 
+/** Dry-run check that never writes: null when this user may create files in the folder. */
+export function discFolderProblem(directory: string): string | null {
+  try {
+    if (!fs.statSync(/*turbopackIgnore: true*/ directory).isDirectory()) return `${directory} is not a folder.`;
+    fs.accessSync(/*turbopackIgnore: true*/ directory, fs.constants.W_OK);
+    return null;
+  } catch (caught) {
+    const code = (caught as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return missingPathMessage(directory);
+    return writeAccessDeniedMessage(directory, code);
+  }
+}
+
 /** Fail early when the disc folder cannot receive the MKV. Probes with a real create+delete. */
 export function assertWritableDiscFolder(directory: string) {
   let stat: fs.Stats;

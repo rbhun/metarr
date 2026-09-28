@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.59
+
+- Follow the host rules for media: run as 1500:1002 with umask 002, deliver files through `.partial`, keep scratch local, ask Plex and Radarr/Sonarr to rescan, and add a dry-run mode.
+
 ## 0.0.58
 
 - Mount `/mnt/media` the same plain way as other containers, take the user from `.env`, and drop the NFS volume switching from deploy.
