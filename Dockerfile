@@ -1,10 +1,10 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/* \
-  && npm ci
+# better-sqlite3 already contains a Linux binary. npm still compiles it when
+# binding.gyp is present, and that compile downloads Node headers from
+# nodejs.org. Skip install scripts so the shipped binary is used as-is.
+RUN npm ci --ignore-scripts
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app

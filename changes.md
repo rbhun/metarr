@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.94
+
+- Use the SQLite build shipped with the package, so deploy does not download Node headers from nodejs.org.
+
 ## 0.0.93
 
 - Leave the npm install in place across deploys. A version bump was changing package.json, so every deploy downloaded the packages again and the install could fail.
