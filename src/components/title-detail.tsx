@@ -15,6 +15,8 @@ import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes,
 import { isDiscImage, multiPartLabel } from "@/lib/media";
 import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
+import { rewrapNow } from "@/components/rewrap-actions";
+import { isAvi, rewrappedPathFor } from "@/lib/rewrap/source";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
@@ -133,6 +135,24 @@ export function TitleDetail({
     ? isDiscImage(file.container, file.path) || file.versions.some((version) => isDiscImage(version.container, version.path))
     : false;
   const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
+  const aviPaths = file
+    ? [file.path, ...file.versions.map((version) => version.path)].filter((item): item is string => Boolean(item) && isAvi(null, item))
+    : [];
+  const knownPaths = file ? [file.path, ...file.versions.map((version) => version.path)] : [];
+  const canRewrap = Boolean(title && (episode || title.kind === "movie") && aviPaths.some((item) => !rewrappedPathFor(item, knownPaths)));
+  async function rewrapFile() {
+    if (!title) return;
+    setConvertBusy(true);
+    try {
+      toast.success(await rewrapNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
+        action: { label: "Tasks", onClick: () => router.push("/tasks?queue=rewrap&status=all") },
+      });
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
+    } finally {
+      setConvertBusy(false);
+    }
+  }
   async function convertDisc() {
     if (!title) return;
     setConvertBusy(true);
@@ -180,6 +200,11 @@ export function TitleDetail({
                 {canConvert ? (
                   <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void convertDisc()} title="Remux the disc to MKV now, without waiting for the overnight window">
                     {convertBusy ? "Starting…" : "Convert"}
+                  </Button>
+                ) : null}
+                {canRewrap ? (
+                  <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void rewrapFile()} title="Copy the AVI into an MKV beside it now, without re-encoding">
+                    {convertBusy ? "Starting…" : "Rewrap to MKV"}
                   </Button>
                 ) : null}
               </div>

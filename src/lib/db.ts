@@ -241,6 +241,22 @@ export function migrate(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_remux_jobs_status ON remux_jobs(status, id);
+
+    CREATE TABLE IF NOT EXISTS rewrap_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL,
+      label TEXT NOT NULL,
+      languages TEXT NOT NULL DEFAULT '[]',
+      immediate INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      message TEXT,
+      progress INTEGER,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rewrap_jobs_status ON rewrap_jobs(status, id);
   `);
   db.prepare(
     `UPDATE detect_jobs SET status = 'failed'

@@ -13,6 +13,7 @@ const QUEUES = [
   ["all", "All"],
   ["language", "Languages"],
   ["remux", "Rips"],
+  ["rewrap", "Rewraps"],
 ] as const;
 
 const TABS = [
@@ -30,7 +31,7 @@ type StatusFilter = (typeof TABS)[number][0];
 
 type TaskJob = {
   key: string;
-  queue: "language" | "remux";
+  queue: "language" | "remux" | "rewrap";
   id: number;
   path: string;
   label: string;
@@ -84,12 +85,16 @@ function taskState(job: TaskJob): string {
       if (job.progress != null && job.progress > 0) return `Remuxing ${job.progress}%`;
       return job.message || "Remuxing";
     }
+    if (job.queue === "rewrap") {
+      if (job.progress != null && job.progress > 0) return `Rewrapping ${job.progress}%`;
+      return job.message || "Rewrapping";
+    }
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
   if (job.status === "pending") return job.priority === "window" ? "Waiting for the window" : "Starting";
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
-  if (job.queue === "remux") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
+  if (job.queue === "remux" || job.queue === "rewrap") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 
@@ -109,6 +114,7 @@ function tabCount(totals: JobTotals, status: StatusFilter): number {
 function failureText(job: TaskJob): string {
   if (job.message?.trim()) return job.message;
   if (job.queue === "remux") return "Remux failed with no further detail from MakeMKV.";
+  if (job.queue === "rewrap") return "Rewrap failed with no further detail from ffmpeg.";
   return "Language check failed with no further detail.";
 }
 
@@ -216,7 +222,7 @@ export function TasksView() {
     const count = tabCount(totals, status);
     if (count < 1 || clearing || status === "running" || status === "all") return;
     const name = (TABS.find(([value]) => value === status)?.[1] ?? status).toLowerCase();
-    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
+    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "AVI" : "AVIs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
     if (!window.confirm(`Remove ${shown} ${name} ${noun} from the list? Languages already found stay. A job that is already running will finish.`)) return;
     setClearing(true);
@@ -247,7 +253,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Language checks and disc remuxes share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
+                Language checks, disc remuxes, and AVI rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
             {status !== "running" && status !== "all" && tabCount(totals, status) > 0 ? (
@@ -303,7 +309,7 @@ export function TasksView() {
                       )}
                     </h2>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {job.queue === "remux" ? "Rip" : "Language"}
+                      {job.queue === "remux" ? "Rip" : job.queue === "rewrap" ? "AVI rewrap" : "Language"}
                       {job.detail ? ` · ${job.detail}` : ""}
                     </p>
                   </div>
@@ -324,7 +330,7 @@ export function TasksView() {
                 <p className="text-xs leading-5 break-all text-muted-foreground">{job.path}</p>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>{when(job)}</span>
-                  {job.queue === "remux" ? (
+                  {job.queue === "remux" || job.queue === "rewrap" ? (
                     <Link href="/rips" className="underline underline-offset-2">
                       Open Rips
                     </Link>

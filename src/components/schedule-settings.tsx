@@ -50,6 +50,7 @@ export function ScheduleSettings() {
   const [sync, setSync] = useState<SyncSchedule | null>(null);
   const [detect, setDetect] = useState<Hours | null>(null);
   const [remux, setRemux] = useState<Hours | null>(null);
+  const [rewrap, setRewrap] = useState<Hours | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -70,12 +71,17 @@ export function ScheduleSettings() {
           const body = (await response.json()) as { settings?: Hours };
           if (body.settings) setRemux({ enabled: body.settings.enabled, startHour: body.settings.startHour, endHour: body.settings.endHour });
         }),
+        fetch("/api/rewrap", { cache: "no-store" }).then(async (response) => {
+          if (!response.ok) return;
+          const body = (await response.json()) as { settings?: Hours };
+          if (body.settings) setRewrap({ enabled: body.settings.enabled, startHour: body.settings.startHour, endHour: body.settings.endHour });
+        }),
       ]).catch(() => undefined);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
-  if (!sync || !detect || !remux) return null;
+  if (!sync || !detect || !remux || !rewrap) return null;
 
   async function saveOne(request: Promise<Response>, saved: string) {
     setBusy(true);
@@ -235,6 +241,49 @@ export function ScheduleSettings() {
                   body: JSON.stringify(remux),
                 }),
                 "Disc remux hours saved on this machine.",
+              )
+            }
+          >
+            Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Run queued AVI rewraps</CardTitle>
+          <CardDescription>
+            A separate queue from the discs. It runs from the start hour until the end hour, and waits while a disc remux runs, Plex is playing, or
+            language detection is using a file. Rewrap now in Rips or the library starts one right away.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+            <Label htmlFor="schedule-rewrap">Run queued AVI rewraps</Label>
+            <Switch id="schedule-rewrap" checked={rewrap.enabled} onCheckedChange={(value) => setRewrap({ ...rewrap, enabled: value === true })} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-rewrap-start">Start hour</Label>
+              <HourSelect id="schedule-rewrap-start" value={rewrap.startHour} onChange={(startHour) => setRewrap({ ...rewrap, startHour })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-rewrap-end">End hour</Label>
+              <HourSelect id="schedule-rewrap-end" value={rewrap.endHour} onChange={(endHour) => setRewrap({ ...rewrap, endHour })} />
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void saveOne(
+                fetch("/api/rewrap", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(rewrap),
+                }),
+                "AVI rewrap hours saved on this machine.",
               )
             }
           >
