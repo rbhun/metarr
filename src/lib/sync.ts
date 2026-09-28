@@ -119,7 +119,7 @@ async function runSync(only?: ConnectorId) {
     if (!slot) continue;
     if (connector.id === "files") {
       const scan = readFolderScan(db);
-      if (!scan.enabled) {
+      if (!scan.enabled && !only) {
         slot.state = "skipped";
         slot.message = "Folder scan is off.";
         continue;

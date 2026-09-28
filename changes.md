@@ -1,5 +1,25 @@
 # Changes
 
+## 0.0.79
+
+- A numbered disc stream such as 00000.m2ts takes the movie folder it is in, and the other streams in that folder stay with that movie.
+
+## 0.0.78
+
+- Copy an AVI into an MKV when a track language is recognized, because an AVI cannot store one and Plex would keep showing unknown.
+
+## 0.0.77
+
+- Match a scanned file to the movie or episode that already owns its folder, so a disc stream or a differently named episode is not listed as its own movie.
+
+## 0.0.76
+
+- Put a Sync button on folder scan, in the source cards, so those folders can be read on their own.
+
+## 0.0.75
+
+- Show each video file's length, even when two copies of the same title match.
+
 ## 0.0.74
 
 - Fill an empty folder scan list from the movie and show folders Plex is already watching.

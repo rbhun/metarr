@@ -31,16 +31,6 @@ export function formatBitrate(kbps: number | null | undefined): string {
   return `${Math.round(kbps)} kbps`;
 }
 
-export function differingLength(
-  versions: Array<{ durationMinutes?: number | null; fileBytes?: number | null }>,
-): "runtime" | "size" | null {
-  const minutes = versions.map((version) => version.durationMinutes ?? null);
-  if (minutes.length > 1 && minutes.every((value) => value != null) && new Set(minutes).size > 1) return "runtime";
-  const sizes = versions.map((version) => version.fileBytes ?? null);
-  if (sizes.filter((value) => value != null && value > 0).length > 1 && new Set(sizes).size > 1) return "size";
-  return null;
-}
-
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || bytes <= 0) return "—";
   const gb = bytes / 1024 ** 3;

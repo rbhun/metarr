@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { announceFolder } from "@/lib/announce";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
 import { deliverFile } from "@/lib/deliver";
@@ -97,6 +98,7 @@ function retagScratch(db: Database.Database): string {
 
 function dryRunSentence(plan: Exclude<TagPlan, { action: "skip" }>, kind: "audio" | "subtitle", localFile: string): string {
   if (plan.action === "rename") return `Dry run: would rename ${path.basename(localFile)} to ${path.basename(plan.to)}. Nothing was written.`;
+  if (plan.action === "remux") return `Dry run: would copy this into ${path.basename(plan.to)} and tag the ${kind} track as ${plan.language}. Nothing was written.`;
   const how = plan.action === "matroska" ? "set it in place with mkvpropedit" : "write a retagged copy and swap it in";
   return `Dry run: would tag the ${kind} track as ${plan.language} (${how}). Nothing was written.`;
 }
@@ -110,19 +112,20 @@ function unchanged(job: WriteJob, sentence: string, settled = true): WriteResult
   return { storedPath: job.path, sentence, changed: false, settled, videoPaths: [] };
 }
 
-/** ffmpeg writes to local scratch; the copy reaches the media folder as `<file>.partial` and is renamed over the original. */
-async function replaceMp4(file: string, scratchRoot: string, args: (output: string) => string[]) {
-  const backup = `${file}.metarr-bak`;
-  if (!fs.existsSync(file) && fs.existsSync(backup)) fs.renameSync(backup, file);
+/** ffmpeg writes to local scratch; the copy reaches the media folder as `<file>.partial` and is renamed into place. */
+async function deliverCopy(source: string, target: string, scratchRoot: string, args: (output: string) => string[], removeSource: boolean) {
+  const backup = `${source}.metarr-bak`;
+  if (!fs.existsSync(source) && fs.existsSync(backup)) fs.renameSync(backup, source);
   fs.mkdirSync(scratchRoot, { recursive: true });
   const scratch = fs.mkdtempSync(path.join(scratchRoot, "job-"));
   try {
-    const temp = path.join(scratch, path.basename(file));
+    const temp = path.join(scratch, path.basename(target));
     await runTool("ffmpeg", args(temp), 3 * 60 * 60 * 1000);
     if (!fs.existsSync(temp) || fs.statSync(temp).size < 1024) {
       throw new Error("ffmpeg did not write a retagged file, so the original was left unchanged.");
     }
-    deliverFile(temp, file, { replace: true, mode: (fs.statSync(file).mode & 0o777) | 0o660 });
+    deliverFile(temp, target, { replace: target === source, mode: (fs.statSync(source).mode & 0o777) | 0o660 });
+    if (removeSource && target !== source) fs.rmSync(source, { force: true });
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -203,7 +206,36 @@ export async function writeFinding(
       ];
       if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push(`-metadata:${plan.specifier}`, "title=Commentary");
       if (plan.forced) args.push(`-disposition:s:${job.ordinal}`, "forced");
-      await replaceMp4(localFile, scratch, (output) => [...args, output]);
+      await deliverCopy(localFile, localFile, scratch, (output) => [...args, output], false);
+    } else if (plan.action === "remux") {
+      if (fs.existsSync(plan.to)) {
+        return unchanged(job, "An MKV with this name already exists, so the original was left unchanged.");
+      }
+      if (fs.statSync(localFile).nlink > 1) {
+        return unchanged(job, "This file is linked from more than one folder, so replacing it would leave the other link unchanged.");
+      }
+      const scratch = retagScratch(db);
+      if (!roomForCopy(localFile, scratch)) {
+        return unchanged(job, "There is not enough free disk space to copy this into an MKV, so it was left unchanged.", false);
+      }
+      const args = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        localFile,
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-map_metadata",
+        "0",
+        `-metadata:${plan.specifier}`,
+        `language=${plan.language}`,
+      ];
+      if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push(`-metadata:${plan.specifier}`, "title=Commentary");
+      await deliverCopy(localFile, plan.to, scratch, (output) => [...args, output], true);
     } else {
       if (fs.existsSync(plan.to)) {
         return unchanged(job, "A subtitle file with that language in its name already exists, so this file was left unchanged.");
@@ -222,9 +254,22 @@ export async function writeFinding(
     return unchanged(job, sentence.endsWith(".") ? sentence : `${sentence}.`, false);
   }
 
-  const renamedTo = plan.action === "rename" ? retargetPath(job.path, localFile, plan.to) : null;
+  const renamedTo = plan.action === "rename" || plan.action === "remux" ? retargetPath(job.path, localFile, plan.to) : null;
   const stamped = stampLanguage(db, { path: job.path, kind: job.kind, ordinal: job.ordinal, language, role, renamedTo });
-  const sentence = plan.action === "rename" ? "The subtitle file was renamed so the language is in its name." : "Written into the file.";
+  let told = "";
+  if (plan.action === "remux") {
+    try {
+      told = await announceFolder(db, [path.dirname(plan.to)]);
+    } catch {
+      told = "";
+    }
+  }
+  const sentence =
+    plan.action === "rename"
+      ? "The subtitle file was renamed so the language is in its name."
+      : plan.action === "remux"
+        ? ["Copied into an MKV, because this container cannot store a track language.", told].filter(Boolean).join(" ")
+        : "Written into the file.";
   return {
     storedPath: renamedTo ?? job.path,
     sentence,

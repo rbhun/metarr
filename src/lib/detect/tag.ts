@@ -4,12 +4,15 @@ import { fileExtension, languageCode } from "@/lib/media";
 
 const MATROSKA = new Set(["mkv", "mka", "mks", "mk3d", "webm"]);
 const ISO_BMFF = new Set(["mp4", "m4v", "mov", "m4p"]);
+/** These can play, but they have no track-language field Plex will read. */
+const REMUX = new Set(["avi", "divx", "wmv", "asf", "flv", "ogm"]);
 const SIDECAR = new Set(["srt", "ass", "ssa", "vtt", "sub", "idx"]);
 const FLAG = /[._-](forced|sdh|cc|hi)$/i;
 
 export type TagPlan =
   | { action: "matroska"; selector: string; language: string; commentary: boolean; forced: boolean }
   | { action: "mp4"; specifier: string; language: string; commentary: boolean; forced: boolean }
+  | { action: "remux"; to: string; specifier: string; language: string; commentary: boolean }
   | { action: "rename"; to: string; pairFrom: string | null; pairTo: string | null }
   | { action: "skip"; reason: "unknown-language" | "container" | "already-named" };
 
@@ -58,6 +61,11 @@ export function planTag(
   if (ext && ISO_BMFF.has(ext)) {
     const track = kind === "audio" ? "a" : "s";
     return { action: "mp4", specifier: `s:${track}:${ordinal}`, language: code, commentary, forced };
+  }
+  if (ext && REMUX.has(ext)) {
+    const track = kind === "audio" ? "a" : "s";
+    const dot = file.lastIndexOf(".");
+    return { action: "remux", to: `${dot > 0 ? file.slice(0, dot) : file}.mkv`, specifier: `s:${track}:${ordinal}`, language: code, commentary };
   }
   if (ext && SIDECAR.has(ext) && kind === "subtitle") {
     const named = renamedSidecar(file, code);

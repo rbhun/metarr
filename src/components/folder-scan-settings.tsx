@@ -1,5 +1,6 @@
 "use client";
 
+import { useShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,7 @@ type FolderScanSettings = {
 type PlexFolder = { path: string; library: string };
 
 export function FolderScanCard() {
+  const { startSync, status } = useShell();
   const [settings, setSettings] = useState<FolderScanSettings | null>(null);
   const [roots, setRoots] = useState("");
   const [plexFolders, setPlexFolders] = useState<PlexFolder[]>([]);
@@ -118,6 +120,14 @@ export function FolderScanCard() {
             }}
           >
             Use Plex folders
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || status?.running || settings.roots.length === 0}
+            onClick={() => void startSync("files")}
+          >
+            Sync
           </Button>
         </div>
       </CardContent>

@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { arrPresence, differingLength, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
+import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
 import { multiPartLabel } from "@/lib/media";
 import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
@@ -150,9 +150,9 @@ function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () 
   );
 }
 
-function lengthText(version: MediaVersion, kind: "runtime" | "size" | null): string | null {
-  if (kind === "runtime") return formatRuntime(version.durationMinutes);
-  if (kind === "size") return formatBytes(version.fileBytes);
+function lengthText(version: MediaVersion): string | null {
+  if (version.durationMinutes) return formatRuntime(version.durationMinutes);
+  if (version.fileBytes) return formatBytes(version.fileBytes);
   return null;
 }
 
@@ -211,7 +211,6 @@ function VersionBands({
   wanted: string[];
   sourcesFor?: (version: MediaVersion) => FileSources;
 }) {
-  const length = differingLength(versions);
   return (
     <div className="divide-y">
       {versions.map((version, index) => (
@@ -226,7 +225,7 @@ function VersionBands({
             playableLabel={version.playableLabel}
             missing={version.missing}
             flags={version.flags}
-            length={lengthText(version, length)}
+            length={lengthText(version)}
             part={multiPartLabel(version.path, version.name)}
             sources={sourcesFor?.(version)}
           />
@@ -757,7 +756,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   bitrateKbps={version.bitrateKbps}
                                   playableLabel={version.playableLabel}
                                   missing={version.missing}
-                                  length={lengthText(version, differingLength(title.versions))}
+                                  length={lengthText(version)}
                                   part={multiPartLabel(version.path, version.name, title.title)}
                                   sources={fileHoverSources(title, data?.configured ?? [], version.presence)}
                                 />
@@ -1091,7 +1090,7 @@ function EpisodeRows({
                                 playableLabel={version.playableLabel}
                                 missing={version.missing}
                                 flags={version.flags}
-                                length={lengthText(version, differingLength(episode.versions))}
+                                length={lengthText(version)}
                                 part={multiPartLabel(version.path, version.name)}
                                 sources={fileHoverSources(
                                   { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },

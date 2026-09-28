@@ -12,6 +12,7 @@ type StampInput = {
 type CatalogRow = {
   id: number;
   path: string | null;
+  container: string | null;
   audio_tracks: string | null;
   subtitle_tracks: string | null;
   versions_json: string | null;
@@ -77,7 +78,12 @@ function stampTracks(value: unknown, videoPath: string | null, input: StampInput
   return changed;
 }
 
-function stampRow(row: CatalogRow, input: StampInput, videos: Set<string>): { audioTracks: string; subtitleTracks: string; versions: string; audioLanguages: string; subtitleLanguages: string } | null {
+function baseName(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
+}
+
+function stampRow(row: CatalogRow, input: StampInput, videos: Set<string>): { path: string | null; container: string | null; audioTracks: string; subtitleTracks: string; versions: string; audioLanguages: string; subtitleLanguages: string } | null {
   const audioTracks = parseJson(row.audio_tracks);
   const subtitleTracks = parseJson(row.subtitle_tracks);
   const versions = parseJson(row.versions_json);
@@ -99,7 +105,14 @@ function stampRow(row: CatalogRow, input: StampInput, videos: Set<string>): { au
       const versionPath = typeof version.path === "string" ? version.path : null;
       const tracks = input.kind === "audio" ? version.audioTracks : version.subtitleTracks;
       const changed = stampTracks(tracks, versionPath, input);
-      if (!changed) continue;
+      const moved = Boolean(input.renamedTo && versionPath && samePath(versionPath, input.path));
+      if (!changed && !moved) continue;
+      if (moved && input.renamedTo) {
+        version.path = input.renamedTo;
+        version.name = baseName(input.renamedTo);
+        version.container = "mkv";
+        videos.add(input.renamedTo);
+      }
       if (versionPath) videos.add(versionPath);
       if (input.kind === "audio") {
         version.audioLanguages = addLanguage(version.audioLanguages, input.language);
@@ -111,8 +124,16 @@ function stampRow(row: CatalogRow, input: StampInput, videos: Set<string>): { au
     }
   }
 
+  const moved = Boolean(input.renamedTo && row.path && samePath(row.path, input.path));
+  if (moved) {
+    if (input.kind === "audio") audioChanged = true;
+    else subtitleChanged = true;
+    if (input.renamedTo) videos.add(input.renamedTo);
+  }
   if (!audioChanged && !subtitleChanged) return null;
   return {
+    path: moved && input.renamedTo ? input.renamedTo : row.path,
+    container: moved ? "mkv" : row.container,
     audioTracks: JSON.stringify(audioTracks ?? []),
     subtitleTracks: JSON.stringify(subtitleTracks ?? []),
     versions: JSON.stringify(versions ?? []),
@@ -124,7 +145,7 @@ function stampRow(row: CatalogRow, input: StampInput, videos: Set<string>): { au
 function matchingRows(db: Database.Database, table: "catalog_titles" | "catalog_episodes", filePath: string): CatalogRow[] {
   return db
     .prepare(
-      `SELECT id, path, audio_tracks, subtitle_tracks, versions_json, audio_languages, subtitle_languages
+      `SELECT id, path, container, audio_tracks, subtitle_tracks, versions_json, audio_languages, subtitle_languages
        FROM ${table}
        WHERE path = ?
           OR instr(ifnull(audio_tracks, ''), ?) > 0
@@ -141,13 +162,13 @@ export function stampLanguage(db: Database.Database, input: StampInput): string[
   for (const table of tables) {
     const update = db.prepare(
       `UPDATE ${table}
-       SET audio_tracks = ?, subtitle_tracks = ?, versions_json = ?, audio_languages = ?, subtitle_languages = ?
+       SET path = ?, container = ?, audio_tracks = ?, subtitle_tracks = ?, versions_json = ?, audio_languages = ?, subtitle_languages = ?
        WHERE id = ?`,
     );
     for (const row of matchingRows(db, table, input.path)) {
       const next = stampRow(row, input, videos);
       if (!next) continue;
-      update.run(next.audioTracks, next.subtitleTracks, next.versions, next.audioLanguages, next.subtitleLanguages, row.id);
+      update.run(next.path, next.container, next.audioTracks, next.subtitleTracks, next.versions, next.audioLanguages, next.subtitleLanguages, row.id);
     }
   }
   return [...videos];

@@ -6,7 +6,7 @@ import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
-import { fileExtension, uniqueLanguages } from "@/lib/media";
+import { fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
@@ -15,6 +15,7 @@ import type Database from "better-sqlite3";
 const ROOTS_KEY = "folder_roots";
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "mov", "webm"]);
 const SKIP_DIR = new Set([".git", "node_modules", ".metarr-work", "#recycle", "@eadir"]);
+const STRUCTURAL = new Set(["bdmv", "stream", "certificate", "video_ts", "audio_ts", "backup"]);
 const FILE_LIMIT = 20_000;
 
 export type FolderScanSettings = {
@@ -114,29 +115,82 @@ export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtit
   return { audio, subtitles };
 }
 
-export function chooseMatch(records: SourceDraft[], filePath: string): SourceDraft | null {
-  const key = pathKey(filePath);
-  if (!key) return null;
-  const hits = records.filter((record) => record.connector !== "files" && recordPaths(record).some((item) => pathKey(item) === key));
-  hits.sort((left, right) => matchRank(right) - matchRank(left));
-  return hits[0] ?? null;
+type EpisodeCode = { season: number; episode: number };
+
+type KnownIndex = {
+  roots: string[];
+  records: SourceDraft[];
+  byFolder: Map<string, SourceDraft[]>;
+  episodes: SourceDraft[];
+  movies: SourceDraft[];
+};
+
+export function episodeInName(name: string): EpisodeCode | null {
+  const patterns = [
+    /(?:^|[^a-z0-9])s(\d{1,2})[ ._-]*e(\d{1,3})(?:[^a-z0-9]|$)/i,
+    /(?:^|[^a-z0-9])(\d{1,2})x(\d{1,3})(?:[^a-z0-9]|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const found = name.match(pattern);
+    if (!found) continue;
+    const season = Number(found[1]);
+    const episode = Number(found[2]);
+    if (Number.isFinite(season) && Number.isFinite(episode)) return { season, episode };
+  }
+  return null;
+}
+
+export function chooseMatch(records: SourceDraft[], filePath: string, roots: string[] = []): SourceDraft | null {
+  return pickMatch(indexKnown(records, roots), filePath);
+}
+
+/** Disc playlists are named 00000.m2ts, 00366.m2ts, and similar. The folder around them is the title. */
+export function isStreamFile(filePath: string): boolean {
+  const stem = path.basename(filePath).replace(/\.[^.]+$/, "");
+  return /^0\d{3,}$/.test(stem) || /^\d{5,}$/.test(stem);
+}
+
+/** One file per movie folder for numbered streams. Other videos stay as they are. A stream Plex or Radarr already points at wins over 00000.m2ts. */
+export function filesRepresentingFolders(files: string[], known: SourceDraft[]): string[] {
+  const keep: string[] = [];
+  const streams = new Map<string, string[]>();
+  for (const file of files) {
+    if (!isStreamFile(file)) {
+      keep.push(file);
+      continue;
+    }
+    const folder = titleFromAncestors(file)?.directory ?? path.dirname(file);
+    const key = pathKey(folder) ?? folder;
+    const list = streams.get(key) ?? [];
+    list.push(file);
+    streams.set(key, list);
+  }
+  for (const list of streams.values()) {
+    const knownFile = list.find((file) => exactMatch(known, file));
+    keep.push(knownFile ?? [...list].sort((left, right) => path.basename(left).localeCompare(path.basename(right), undefined, { numeric: true }))[0]!);
+  }
+  return keep;
 }
 
 export function folderDraft(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }, match: SourceDraft | null): SourceDraft {
   const base = path.basename(filePath);
-  const title = match?.title ?? titleFromName(base);
-  const year = match?.year ?? yearInName(base);
+  const named = match?.kind === "episode" ? null : titleFromAncestors(filePath);
+  const loose = match ? null : episodeInName(base);
+  const guess = loose ? seriesGuess(base) : null;
+  const stream = isStreamFile(filePath);
+  const title = match?.title ?? (loose && guess ? guess : null) ?? named?.title ?? (stream ? "Untitled" : titleFromName(base));
+  const year = match?.year ?? named?.year ?? (stream ? null : yearInName(base));
   const audioLanguages = uniqueLanguages(probed.audio.map((track) => track.language));
   const subtitleLanguages = uniqueLanguages(probed.subtitles.map((track) => track.language));
   const draft = sourceDraft({
     connector: "files",
-    kind: match?.kind === "episode" ? "episode" : "movie",
+    kind: match?.kind === "episode" || loose ? "episode" : "movie",
     externalKey: `path:${pathKey(filePath) ?? filePath}`,
     title,
-    seriesTitle: match?.seriesTitle ?? null,
+    seriesTitle: match?.kind === "episode" ? (match.seriesTitle ?? guess) : guess,
     year,
-    season: match?.season ?? null,
-    episode: match?.episode ?? null,
+    season: match?.season ?? loose?.season ?? null,
+    episode: match?.episode ?? loose?.episode ?? null,
     imdbId: match?.imdbId ?? null,
     tmdbId: match?.tmdbId ?? null,
     tvdbId: match?.tvdbId ?? null,
@@ -195,14 +249,15 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
   const present = roots.filter((root) => fs.existsSync(root));
   const missing = roots.filter((root) => !fs.existsSync(root));
   if (!present.length) throw new Error(`Folder not found: ${missing[0] ?? "the scan folder"}`);
-  const files = present.flatMap((root) => listVideos(root));
+  const files = filesRepresentingFolders(present.flatMap((root) => listVideos(root)), known);
+  const indexed = indexKnown(known, present);
   const drafts: SourceDraft[] = [];
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]!;
     onProgress({ message: `Files · ${index + 1}/${files.length} ${path.basename(file)}`, fetched: index, total: files.length });
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
-    drafts.push(folderDraft(file, probed, chooseMatch(known, file)));
+    drafts.push(folderDraft(file, probed, pickMatch(indexed, file)));
   }
   onProgress({
     message: missing.length ? `Scanned ${drafts.length} files. Missing folder: ${missing[0]}` : `Scanned ${drafts.length} files.`,
@@ -219,6 +274,197 @@ function recordPaths(record: SourceDraft): string[] {
 
 function matchRank(record: SourceDraft): number {
   return (record.imdbId || record.tmdbId || record.tvdbId ? 2 : 0) + (record.connector === "radarr" || record.connector === "sonarr" ? 1 : 0);
+}
+
+function indexKnown(records: SourceDraft[], roots: string[]): KnownIndex {
+  const known = records.filter((record) => record.connector !== "files");
+  const byFolder = new Map<string, SourceDraft[]>();
+  for (const record of known) {
+    for (const item of recordPaths(record)) {
+      const folder = mediaFolder(item, roots);
+      if (!folder) continue;
+      const list = byFolder.get(folder) ?? [];
+      list.push(record);
+      byFolder.set(folder, list);
+    }
+  }
+  return {
+    roots,
+    records: known,
+    byFolder,
+    episodes: known.filter((record) => record.kind === "episode" || record.kind === "series"),
+    movies: known.filter((record) => record.kind === "movie"),
+  };
+}
+
+function pickMatch(index: KnownIndex, filePath: string): SourceDraft | null {
+  return exactMatch(index.records, filePath) ?? matchByFolder(index, filePath) ?? matchEpisodeByName(index, filePath) ?? matchByFolderName(index, filePath);
+}
+
+function exactMatch(records: SourceDraft[], filePath: string): SourceDraft | null {
+  const key = pathKey(filePath);
+  if (!key) return null;
+  const hits = records.filter((record) => recordPaths(record).some((item) => pathKey(item) === key));
+  hits.sort((left, right) => matchRank(right) - matchRank(left));
+  return hits[0] ?? null;
+}
+
+/** The first directory under the scan root. That is the movie or series folder. */
+function mediaFolder(filePath: string, roots: string[]): string | null {
+  const file = pathKey(filePath);
+  if (!file || !roots.length) return null;
+  let bestRoot = -1;
+  let chosen: string | null = null;
+  for (const root of roots) {
+    const key = pathKey(root);
+    if (!key || key.length < bestRoot) continue;
+    const prefix = `${key}/`;
+    if (file !== key && !file.startsWith(prefix)) continue;
+    const rest = file.startsWith(prefix) ? file.slice(prefix.length) : "";
+    const segment = rest.split("/").find(Boolean);
+    bestRoot = key.length;
+    chosen = segment ? `${prefix}${segment}` : key;
+  }
+  return chosen;
+}
+
+function matchByFolder(index: KnownIndex, filePath: string): SourceDraft | null {
+  const folder = mediaFolder(filePath, index.roots);
+  if (!folder) return null;
+  const records = uniqueRecords(index.byFolder.get(folder) ?? []);
+  if (!records.length) return null;
+  const code = episodeInName(path.basename(filePath)) ?? episodeInName(path.basename(path.dirname(filePath)));
+  const seriesIds = [...new Set(records.map(seriesId).filter((item): item is string => Boolean(item)))];
+  if (code && seriesIds.length === 1) {
+    const id = seriesIds[0]!;
+    const picked = pickEpisode(
+      index.episodes.filter((record) => seriesId(record) === id),
+      code,
+      filePath,
+    );
+    if (picked) return picked;
+  }
+  const movieIds = [...new Set(records.map(movieId).filter((item): item is string => Boolean(item)))];
+  if (movieIds.length !== 1) return null;
+  const movies = records.filter((record) => movieId(record) === movieIds[0]);
+  movies.sort((left, right) => matchRank(right) - matchRank(left));
+  return movies[0] ?? null;
+}
+
+function matchEpisodeByName(index: KnownIndex, filePath: string): SourceDraft | null {
+  const base = path.basename(filePath);
+  const code = episodeInName(base);
+  const guess = seriesGuess(base);
+  if (!code || !guess) return null;
+  const normalized = normalizeTitle(guess);
+  if (!normalized) return null;
+  const candidates = index.episodes.filter((record) => {
+    const name = record.kind === "series" ? record.title : record.seriesTitle;
+    return name != null && normalizeTitle(name) === normalized;
+  });
+  return pickEpisode(candidates, code, filePath);
+}
+
+function matchByFolderName(index: KnownIndex, filePath: string): SourceDraft | null {
+  const named = titleFromAncestors(filePath);
+  if (!named) return null;
+  const title = normalizeTitle(named.title);
+  if (!title) return null;
+  const movies = index.movies.filter((record) => normalizeTitle(record.title) === title);
+  const yearMatches = named.year ? movies.filter((record) => record.year == null || record.year === named.year) : movies;
+  const ids = [...new Set(yearMatches.map(movieId).filter((item): item is string => Boolean(item)))];
+  if (ids.length !== 1) return null;
+  const hits = yearMatches.filter((record) => movieId(record) === ids[0]);
+  hits.sort((left, right) => matchRank(right) - matchRank(left));
+  return hits[0] ?? null;
+}
+
+function pickEpisode(candidates: SourceDraft[], code: EpisodeCode, filePath: string): SourceDraft | null {
+  const episodes = candidates.filter((record) => record.kind === "episode" && record.season === code.season && record.episode === code.episode);
+  if (episodes.length) {
+    episodes.sort((left, right) => matchRank(right) - matchRank(left));
+    return episodes[0] ?? null;
+  }
+  const series = candidates.find((record) => record.kind === "series") ?? candidates.find((record) => record.kind === "episode");
+  return series ? episodeShell(series, code, filePath) : null;
+}
+
+function episodeShell(source: SourceDraft, code: EpisodeCode, filePath: string): SourceDraft {
+  const seriesTitle = source.kind === "series" ? source.title : source.seriesTitle;
+  return sourceDraft({
+    connector: source.connector,
+    kind: "episode",
+    externalKey: source.externalKey,
+    title: seriesTitle || titleFromName(path.basename(filePath)),
+    seriesTitle,
+    year: source.year,
+    season: code.season,
+    episode: code.episode,
+    imdbId: source.imdbId,
+    tmdbId: source.tmdbId,
+    tvdbId: source.tvdbId,
+    parentKey: source.parentKey,
+  });
+}
+
+function seriesId(record: SourceDraft): string | null {
+  if (record.kind !== "episode" && record.kind !== "series") return null;
+  const tvdb = normalizeNumericId(record.tvdbId);
+  if (tvdb) return `tvdb:${tvdb}`;
+  if (record.parentKey) return `parent:${record.parentKey}`;
+  const name = record.kind === "series" ? record.title : record.seriesTitle;
+  const normalized = name ? normalizeTitle(name) : "";
+  return normalized ? `title:${normalized}` : null;
+}
+
+function movieId(record: SourceDraft): string | null {
+  if (record.kind !== "movie") return null;
+  const imdb = normalizeImdb(record.imdbId);
+  if (imdb) return `imdb:${imdb}`;
+  const title = normalizeTitle(record.title);
+  return title ? `title:${title}|${record.year ?? ""}` : null;
+}
+
+function uniqueRecords(records: SourceDraft[]): SourceDraft[] {
+  const seen = new Set<SourceDraft>();
+  const unique: SourceDraft[] = [];
+  for (const record of records) {
+    if (seen.has(record)) continue;
+    seen.add(record);
+    unique.push(record);
+  }
+  return unique;
+}
+
+function seriesGuess(name: string): string | null {
+  const stem = name.replace(/\.[^.]+$/, "");
+  const found = stem.match(/^(.*?)(?:[ ._-]+s\d{1,2}[ ._-]*e\d{1,3}|[ ._-]+\d{1,2}x\d{1,3})(?:[^a-z0-9]|$)/i);
+  if (!found?.[1]) return null;
+  const text = found[1].replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+  return text.length >= 2 ? text : null;
+}
+
+function titleFromAncestors(filePath: string): { title: string; year: number | null; directory: string } | null {
+  const found: Array<{ title: string; year: number | null; yearly: boolean; directory: string }> = [];
+  let dir = path.dirname(filePath);
+  for (let depth = 0; depth < 8; depth += 1) {
+    const base = path.basename(dir);
+    const parent = path.dirname(dir);
+    if (!base || base === dir || base === "." || base === "/") break;
+    const yearly = /[\(\[](?:19|20)\d{2}[\)\]]$/.test(base.trim());
+    if (!STRUCTURAL.has(base.toLowerCase()) && !/^\d+$/.test(base)) {
+      const title = base
+        .replace(/\s*[\(\[](?:19|20)\d{2}[\)\]]\s*$/, "")
+        .replace(/[._]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (title && !/^\d+$/.test(title)) found.push({ title, year: yearInName(base), yearly, directory: dir });
+    }
+    if (yearly) break;
+    dir = parent;
+  }
+  const preferred = found.find((item) => item.yearly) ?? found[0];
+  return preferred ? { title: preferred.title, year: preferred.year, directory: preferred.directory } : null;
 }
 
 function yearInName(name: string): number | null {

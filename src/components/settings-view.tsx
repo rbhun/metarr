@@ -466,6 +466,7 @@ export function SettingsView() {
               </Card>
             );
           })}
+          <FolderScanCard />
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -576,7 +577,6 @@ export function SettingsView() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <FolderScanCard />
           <DetectSettingsCard />
           <RemuxSettingsCard />
         </div>
