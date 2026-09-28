@@ -41,19 +41,27 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
         resolve({ stdout: out, stderr: err });
         return;
       }
-      const missing = code === "ENOENT" || /No such file or directory|not found/i.test(`${err}\n${error?.message ?? ""}`);
+      const blob = `${out}\n${err}\n${error?.message ?? ""}`;
+      const missing = code === "ENOENT" || /No such file or directory|not found/i.test(blob);
       const timedOut = Boolean(error && "killed" in error && error.killed);
-      const detail = err
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("_STATISTICS_"))
-        .slice(-3)
-        .join(" ");
       if (missing) reject(new Error(`${command} is not installed, so the file was left unchanged.`));
       else if (timedOut) reject(new Error(`${command} timed out, so the file was left unchanged.`));
-      else reject(new Error(detail || `${command} could not change the file.`));
+      else reject(new Error(commandFailureText(command, out, err)));
     });
   });
+}
+
+const TOOL_NOISE = /^(The file is being analyzed\.?|The changes are written to the file\.?|Done\.?)$/i;
+
+/** mkvpropedit writes its reason to standard output, so a failed edit has to be read from both streams. */
+export function commandFailureText(command: string, stdout: string, stderr: string): string {
+  const detail = `${stdout}\n${stderr}`
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("_STATISTICS_") && !TOOL_NOISE.test(line))
+    .slice(-3)
+    .join(" ");
+  return detail || `${command} could not change the file.`;
 }
 
 function skipSentence(reason: "unknown-language" | "container" | "already-named"): string {
@@ -144,6 +152,43 @@ async function deliverCopy(
   }
 }
 
+/** Stream-copy the language into the same file when mkvpropedit cannot open it for writing. */
+async function copyLanguage(
+  localFile: string,
+  scratch: string,
+  specifier: string,
+  code: string,
+  language: string,
+  options: { commentary: boolean; disposition: string | null; dispositionName: string | null },
+) {
+  const kind = specifier.includes(":a:") ? "audio" : "subtitle";
+  const ordinal = Number(specifier.slice(specifier.lastIndexOf(":") + 1));
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    localFile,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    "-map_metadata",
+    "0",
+    `-metadata:${specifier}`,
+    `language=${code}`,
+  ];
+  if (options.commentary) args.push(`-metadata:${specifier}`, "title=Commentary");
+  if (options.disposition && options.dispositionName) args.push(`-disposition:${options.disposition}`, options.dispositionName);
+  await deliverCopy(localFile, localFile, scratch, (output) => [...args, output], false, async (temp) => {
+    const named = await existingLanguage(temp, kind, ordinal);
+    if (named?.toLowerCase() !== language.toLowerCase()) {
+      throw new Error("The language did not stay in the file, so the original was left unchanged.");
+    }
+  });
+}
+
 export async function writeFinding(
   db: Database.Database,
   job: WriteJob,
@@ -194,7 +239,24 @@ export async function writeFinding(
       if (plan.commentary) args.push("--set", "flag-commentary=1");
       if (plan.forced) args.push("--set", "flag-forced=1");
       if (plan.commentary && !/commentary/i.test(job.streamLabel ?? "")) args.push("--set", "name=Commentary");
-      await runTool("mkvpropedit", args, 60_000, true);
+      try {
+        await runTool("mkvpropedit", args, 60_000, true);
+      } catch (caught) {
+        const reason = caught instanceof Error ? caught.message : "mkvpropedit could not change the file.";
+        if (fs.statSync(localFile).nlink > 1) {
+          return unchanged(job, `${reason} This file is linked from more than one folder, so retagging it would leave the other link unchanged.`);
+        }
+        const scratch = retagScratch(db);
+        if (!roomForCopy(localFile, scratch)) {
+          return unchanged(job, `${reason} There is not enough free disk space to retag this file, so it was left unchanged.`, false);
+        }
+        const track = job.kind === "audio" ? "a" : "s";
+        await copyLanguage(localFile, scratch, `s:${track}:${job.ordinal}`, plan.language, language, {
+          commentary: plan.commentary && !/commentary/i.test(job.streamLabel ?? ""),
+          disposition: plan.commentary ? `${track}:${job.ordinal}` : plan.forced ? `s:${job.ordinal}` : null,
+          dispositionName: plan.commentary ? "comment" : plan.forced ? "forced" : null,
+        });
+      }
     } else if (plan.action === "mp4") {
       if (fs.statSync(localFile).nlink > 1) {
         return unchanged(job, "This file is linked from more than one folder, so retagging it would leave the other link unchanged.");

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.82
+
+- When mkvpropedit cannot open an MKV, copy the streams back into that same file with the language set, and keep mkvpropedit's own reason if that also fails.
+
 ## 0.0.81
 
 - Keep the Syncing button clickable so a scan that is already running can be opened and watched.

@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { agreeLanguage } from "@/lib/detect/agree";
@@ -19,6 +23,7 @@ import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
+import { commandFailureText, writeFinding } from "@/lib/detect/apply";
 import { planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
@@ -591,6 +596,16 @@ test("plex background work and transcodes count as busy", () => {
   assert.equal(plexTranscodeBusy({ MediaContainer: { Metadata: [{ TranscodeSession: { throttled: false } }] } }), true);
 });
 
+test("mkvpropedit's own reason is the failure, because it writes that to standard output", () => {
+  const text = commandFailureText(
+    "mkvpropedit",
+    "The file is being analyzed.\nError: The file could not be opened for writing. Possible reasons are: the file is write-protected.\n",
+    "",
+  );
+  assert.match(text, /could not be opened for writing/);
+  assert.equal(commandFailureText("mkvpropedit", "The file is being analyzed.\nDone.\n", ""), "mkvpropedit could not change the file.");
+});
+
 test("a recognized language is planned as a file tag or a renamed subtitle", () => {
   assert.deepEqual(planTag("/movies/Dune.mkv", "audio", 1, "Hungarian", "commentary"), {
     action: "matroska",
@@ -721,4 +736,61 @@ test("player ids follow the video path", () => {
   assert.deepEqual(ids.sonarr, []);
   assert.deepEqual(ids.bazarrMovies, [7]);
   assert.deepEqual(ids.bazarrSeries, []);
+});
+
+test("a write-protected mkv still receives the language in the same file", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-mkv-"));
+  const file = path.join(dir, "episode.mkv");
+  const run = (command: string, args: string[]) =>
+    new Promise<string>((resolve, reject) => {
+      execFile(command, args, (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr?.toString() || error.message));
+        else resolve(stdout.toString().trim());
+      });
+    });
+  try {
+    await run("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:duration=1",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=160x120:d=1",
+      "-c:v",
+      "mpeg4",
+      "-c:a",
+      "ac3",
+      "-shortest",
+      file,
+    ]);
+    fs.chmodSync(file, 0o444);
+    const db = new Database(path.join(dir, "library.db"));
+    migrate(db);
+    const written = await writeFinding(
+      db,
+      { path: file, kind: "audio", ordinal: 0, placement: null, streamLabel: null },
+      file,
+      "Hungarian",
+      null,
+    );
+    db.close();
+    assert.equal(written.changed, true);
+    assert.equal(written.sentence, "Written into the file.");
+    assert.equal(fs.existsSync(file), true);
+    const language = await run("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=language", "-of", "default=nw=1:nk=1", file]);
+    assert.equal(language, "hun");
+  } finally {
+    try {
+      fs.chmodSync(file, 0o644);
+    } catch {
+      // The sample was never created.
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
