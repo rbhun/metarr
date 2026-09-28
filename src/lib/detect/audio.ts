@@ -1,3 +1,5 @@
+import { languageName } from "@/lib/media";
+
 const CLIP_SECONDS = 20;
 const TEN_MINUTES = 10 * 60;
 const TWENTY_MINUTES = 20 * 60;
@@ -61,6 +63,13 @@ export function openingWindow(size: number, packet: number): { start: number; en
   const end = Math.min(size, OPENING_BYTES) - (Math.min(size, OPENING_BYTES) % packet);
   if (end < packet) return null;
   return { start: 0, end };
+}
+
+/** The language stored on the stream, which a player can show even when Plex left it blank. */
+export function languageFromProbeTags(tags: unknown): string | null {
+  if (!tags || typeof tags !== "object") return null;
+  const language = (tags as { language?: unknown }).language;
+  return typeof language === "string" ? languageName(language) : null;
 }
 
 /** A wav of digital silence, such as a disc track that only holds a blank second. */
@@ -167,6 +176,101 @@ export function audioDecodeArgs(source: string, wav: string, mix: string | null 
     "-vn",
     wav,
   ];
+}
+
+const SHORT_SECONDS = 15;
+const MARKER_BYTES = 2 * 1024 * 1024;
+
+/** A moment of audio on a long film, such as a disc dub that ends after the opening second. */
+export function isShortSpan(span: number | null, film: number | null): boolean {
+  if (span == null || !Number.isFinite(span) || span < 0 || span > SHORT_SECONDS) return false;
+  if (film != null && film < 120) return false;
+  return true;
+}
+
+/** Seconds of 16 kHz mono audio in a wav we decoded. A stub is about one second; a real sample is much longer. */
+export function wavSeconds(wav: Buffer): number {
+  const data = wav.length > 44 && wav.toString("ascii", 0, 4) === "RIFF" ? wav.subarray(44) : wav;
+  return data.length / 2 / 16000;
+}
+
+/** The decoded clip ran out almost immediately, so listening to it cannot identify the film. */
+export function isExceptionallyShortClip(seconds: number): boolean {
+  return Number.isFinite(seconds) && seconds > 0 && seconds <= 3;
+}
+
+/** The MPEG-TS packet id ffprobe stored on an audio stream. */
+export function audioPid(id: unknown): number | null {
+  const text = typeof id === "number" ? String(id) : typeof id === "string" ? id.trim() : "";
+  if (!text) return null;
+  const value = /^0x[0-9a-f]+$/i.test(text) ? Number.parseInt(text.slice(2), 16) : Number(text);
+  return Number.isInteger(value) && value >= 0 && value <= 0x1fff ? value : null;
+}
+
+export type PidActivity = { packets: number; span: number | null; ended: boolean };
+
+function readPts(buffer: Buffer, payload: number): number | null {
+  if (payload + 14 >= buffer.length) return null;
+  if (buffer[payload] !== 0 || buffer[payload + 1] !== 0 || buffer[payload + 2] !== 1) return null;
+  const id = buffer[payload + 3];
+  if (id === 0xbe || id === 0xbf || id === 0xf0 || id === 0xf1 || id === 0xff || id === 0xf2 || id === 0xf8) return null;
+  const flags = (buffer[payload + 7] >> 6) & 3;
+  if (flags !== 2 && flags !== 3) return null;
+  const point = payload + 9;
+  return (
+    ((buffer[point] ?? 0) & 0x0e) * 536870912 +
+    (buffer[point + 1] ?? 0) * 4194304 +
+    ((buffer[point + 2] ?? 0) & 0xfe) * 16384 +
+    (buffer[point + 3] ?? 0) * 128 +
+    ((buffer[point + 4] ?? 0) >> 1)
+  ) / 90000;
+}
+
+/** How far one audio packet id reaches inside an aligned slice, and whether it stops before the slice ends. */
+export function pidActivity(buffer: Buffer, packet: number, pid: number): PidActivity {
+  if (packet < 188 || pid < 0 || pid > 0x1fff) return { packets: 0, span: null, ended: false };
+  const prefix = packet >= 192 ? 4 : 0;
+  const packets = Math.floor(buffer.length / packet);
+  let count = 0;
+  let last = -1;
+  let firstPts: number | null = null;
+  let lastPts: number | null = null;
+  for (let index = 0; index < packets; index += 1) {
+    const origin = index * packet;
+    const sync = origin + prefix;
+    if (buffer[sync] !== 0x47) continue;
+    const found = ((buffer[sync + 1] & 0x1f) << 8) | buffer[sync + 2];
+    if (found !== pid) continue;
+    count += 1;
+    last = index;
+    if ((buffer[sync + 1] & 0x40) === 0) continue;
+    const adaptation = (buffer[sync + 3] >> 4) & 3;
+    if (adaptation === 2) continue;
+    let payload = sync + 4;
+    if (adaptation === 3) payload += 1 + (buffer[sync + 4] ?? 0);
+    const pts = readPts(buffer, payload);
+    if (pts == null) continue;
+    if (firstPts == null) firstPts = pts;
+    lastPts = pts;
+  }
+  const span = firstPts != null && lastPts != null ? lastPts - firstPts : null;
+  return { packets: count, span, ended: count > 0 && last + 32 < packets };
+}
+
+/** A small aligned slice at the same moment a full sample would use, only large enough to see whether the track is still present. */
+export function markerWindow(
+  size: number,
+  duration: number | null,
+  programOffset: number,
+  packet: number,
+): { start: number; end: number } | null {
+  const placed = tsWindow(size, duration, programOffset, packet);
+  if (!placed) return null;
+  const room = placed.end - placed.start;
+  const bytes = Math.min(room, MARKER_BYTES - (MARKER_BYTES % packet));
+  const end = placed.start + bytes - (bytes % packet);
+  if (end - placed.start < packet) return null;
+  return { start: placed.start, end };
 }
 
 export function audioClipArgs(file: string, ordinal: number, offset: number, wav: string, mix: string | null = null): string[] {

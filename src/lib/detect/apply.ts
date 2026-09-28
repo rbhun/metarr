@@ -133,10 +133,25 @@ export async function writeFinding(
   job: WriteJob,
   localFile: string,
   language: string,
-  role: "commentary" | "forced" | null,
+  role: "commentary" | "forced" | "short" | null,
 ): Promise<WriteResult> {
   const plan = planTag(localFile, job.kind, job.ordinal, language, role);
-  if (plan.action === "skip") return unchanged(job, skipSentence(plan.reason));
+  if (plan.action === "skip") {
+    if (plan.reason === "container") {
+      const existing = await existingLanguage(localFile, job.kind, job.ordinal);
+      if (existing && existing.toLowerCase() === language.toLowerCase()) {
+        const stamped = stampLanguage(db, { path: job.path, kind: job.kind, ordinal: job.ordinal, language, role, renamedTo: null });
+        return {
+          storedPath: job.path,
+          sentence: "The file already names this track.",
+          changed: true,
+          settled: true,
+          videoPaths: videoPathsFor(job, stamped),
+        };
+      }
+    }
+    return unchanged(job, skipSentence(plan.reason));
+  }
 
   try {
     if (plan.action === "matroska" || plan.action === "mp4") {

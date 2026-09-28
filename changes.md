@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.62
+
+- Read a language stored on an audio track when Plex left it blank, show that name in its own color, and mark a track that only lasts a moment before listening to it.
+
 ## 0.0.61
 
 - Build MakeMKV 2.0.0 into the Docker image, because remux failed with exit code 127 when makemkvcon only existed on the host, and say plainly when it cannot be found.

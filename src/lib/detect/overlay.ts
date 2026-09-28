@@ -10,10 +10,12 @@ export function overlayAudio(path: string | null, tracks: AudioTrack[], detectio
   return tracks.map((track, index) => {
     const found = detections.get(detectionKey(path, "audio", track.streamIndex ?? index));
     if (!found) return track;
+    const role = found.role === "commentary" || found.role === "short" ? found.role : null;
     return {
       ...track,
       ...(found.language ? { detectedLanguage: found.language } : {}),
-      ...(found.role === "commentary" ? { detectedRole: "commentary" as const } : {}),
+      ...(role ? { detectedRole: role } : {}),
+      ...(found.source === "file" ? { fromFile: true } : {}),
     };
   });
 }

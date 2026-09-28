@@ -72,11 +72,13 @@ async function step() {
       return;
     }
     const outcome = await detectTrack(job, local);
+    const named = job.placement === "named";
+    const finding = named ? { ...outcome, source: null } : outcome;
     let stored = job;
-    let note = outcome.language ? [outcome.language, outcome.role].filter(Boolean).join(" ") : outcome.message;
+    let note = finding.language ? [finding.language, finding.role].filter(Boolean).join(" ") : finding.message;
     let settled = false;
-    if (outcome.language) {
-      const written = await writeFinding(db, job, local, outcome.language, outcome.role);
+    if (finding.language && !named) {
+      const written = await writeFinding(db, job, local, finding.language, finding.role);
       stored = { ...job, path: written.storedPath };
       settled = written.settled;
       let players = "";
@@ -87,12 +89,21 @@ async function step() {
           players = "The players could not be asked to re-read the file.";
         }
       }
-      const name = outcome.role === "commentary" ? `${outcome.language} commentary.` : outcome.role === "forced" ? `${outcome.language} forced.` : `${outcome.language}.`;
+      const name =
+        finding.role === "commentary"
+          ? `${finding.language} commentary.`
+          : finding.role === "forced"
+            ? `${finding.language} forced.`
+            : finding.role === "short"
+              ? `${finding.language} short.`
+              : `${finding.language}.`;
       note = [name, written.sentence, players].filter(Boolean).join(" ");
     }
-    saveDetection(db, stored, outcome);
+    if (named && finding.role !== "short") note = "Already named.";
+    saveDetection(db, stored, finding);
     if (settled) markWritten(db, stored, stored.path);
-    finishJob(db, job.id, finishedStatus(outcome), note?.slice(0, 500) ?? null);
+    const status = named && finding.role !== "short" ? "skipped" : finishedStatus(finding);
+    finishJob(db, job.id, status, note?.slice(0, 500) ?? null);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Detection failed.";
     finishJob(db, job.id, "failed", message.slice(0, 500));

@@ -18,13 +18,13 @@ import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
-import { audioClipArgs, audioCopyArgs, audioSliceArgs, clipStart, dialogueMix, openingWindow, pcmIsSilent, sampleOffsets, tsWindow } from "@/lib/detect/audio";
+import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
 import { planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
 import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
-import { shownLanguage, subtitleNote } from "@/lib/format";
+import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
 import type { StoredDetection } from "@/lib/detect/store";
 
@@ -176,6 +176,8 @@ test("a detected stereo or mono track can be heard again until it is commentary"
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, detectedRole: "commentary" }, 3, "Alien").length, 0);
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, layout: "5.1" }, 0, "Alien").length, 0);
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, language: "English" }, 3, "Alien").length, 0);
+  assert.equal(audioTargets("/movies/Adjustment.m2ts", { ...stereo, detectedLanguage: "Portuguese", detectedRole: "short", fromFile: true }, 1, "Film").length, 0);
+  assert.equal(audioTargets("/movies/Adjustment.m2ts", { language: null, layout: "2.0", codec: "AC3", fromFile: true, detectedLanguage: "English" }, 9, "Film").length, 0);
 });
 
 test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packets", () => {
@@ -217,6 +219,50 @@ test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packet
   assert.ok(opening);
   assert.equal(opening.start, 0);
   assert.equal(opening.end % 192, 0);
+  assert.equal(languageFromProbeTags({ language: "por" }), "Portuguese");
+  assert.equal(languageFromProbeTags({ language: "hun" }), "Hungarian");
+  assert.equal(languageFromProbeTags({ language: "und" }), null);
+  assert.equal(audioPid("0x1101"), 0x1101);
+  assert.equal(isShortSpan(0.96, 6350), true);
+  assert.equal(isShortSpan(6345, 6350), false);
+  assert.equal(isShortSpan(0.96, 40), false);
+  const oneSecond = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(40), Buffer.alloc(16000 * 2)]);
+  const fullClip = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(40), Buffer.alloc(16000 * 2 * 20)]);
+  assert.ok(Math.abs(wavSeconds(oneSecond) - 1) < 0.01);
+  assert.equal(isExceptionallyShortClip(wavSeconds(oneSecond)), true);
+  assert.equal(isExceptionallyShortClip(wavSeconds(fullClip)), false);
+  const marker = markerWindow(23_516_110_848, 6350, 600, 192);
+  assert.ok(marker);
+  assert.equal(marker.start % 192, 0);
+  assert.ok(marker.end - marker.start <= 2 * 1024 * 1024);
+  const packet = (pid: number, pts: number | null) => {
+    const bytes = Buffer.alloc(192);
+    bytes[4] = 0x47;
+    bytes[5] = ((pid >> 8) & 0x1f) | (pts == null ? 0 : 0x40);
+    bytes[6] = pid & 0xff;
+    bytes[7] = 0x10;
+    if (pts == null) return bytes;
+    bytes[8] = 0;
+    bytes[9] = 0;
+    bytes[10] = 1;
+    bytes[11] = 0xbd;
+    bytes[15] = 0x80;
+    bytes[16] = 5;
+    const ticks = Math.round(pts * 90000);
+    bytes[17] = 0x21 | ((ticks >> 29) & 0x0e);
+    bytes[18] = (ticks >> 22) & 0xff;
+    bytes[19] = 0x01 | ((ticks >> 14) & 0xfe);
+    bytes[20] = (ticks >> 7) & 0xff;
+    bytes[21] = 0x01 | ((ticks << 1) & 0xfe);
+    return bytes;
+  };
+  const stub = pidActivity(Buffer.concat([packet(0x1101, 600), packet(0x1101, 600.96), ...Array.from({ length: 40 }, () => packet(0x1100, null))]), 192, 0x1101);
+  assert.equal(stub.packets, 2);
+  assert.equal(stub.ended, true);
+  assert.ok(stub.span != null && Math.abs(stub.span - 0.96) < 0.02);
+  const ongoing = pidActivity(Buffer.concat(Array.from({ length: 40 }, () => packet(0x1100, null))), 192, 0x1100);
+  assert.equal(ongoing.ended, false);
+  assert.equal(audioLines([{ language: null, layout: "2.0", codec: "AC3", detectedLanguage: "Portuguese", detectedRole: "short", fromFile: true }], [])[0], "Portuguese short 2.0 AC3");
   assert.equal(pcmIsSilent(Buffer.alloc(2000)), true);
   assert.equal(pcmIsSilent(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(40), Buffer.from([0, 40])])), false);
   const slice = audioSliceArgs(0, "/tmp/clip.wav", null);
@@ -369,6 +415,22 @@ test("unknown audio and subtitles are scanned, labeled tracks and discs are not"
   assert.equal(again.some((target) => target.kind === "audio"), false);
   const rescan = targetsFromFiles([file], true, scanned);
   assert.equal(rescan.some((target) => target.kind === "audio"), true);
+  const discAudio: ScanFile = {
+    label: "Adjustment",
+    path: "/movies/Adjustment.m2ts",
+    container: "m2ts",
+    playableLabel: "video",
+    audioTracks: [
+      { language: "English", layout: "5.1", codec: "DTS", streamIndex: 0 },
+      { language: "Polish", layout: "2.0", codec: "AC3", streamIndex: 5 },
+    ],
+    subtitleTracks: [],
+    versions: [],
+  };
+  assert.deepEqual(
+    targetsFromFiles([discAudio], false, new Set()).map((target) => `${target.placement}:${target.ordinal}`),
+    ["named:0", "named:5"],
+  );
 });
 
 test("detected languages replace unknown on the matching stream", () => {
@@ -380,6 +442,12 @@ test("detected languages replace unknown on the matching stream", () => {
   assert.equal(first?.detectedLanguage, undefined);
   assert.equal(second?.detectedLanguage, "Hungarian");
   assert.equal(second?.detectedRole, "commentary");
+  const [named] = overlayAudio("/movies/Adjustment.m2ts", [
+    { language: null, layout: "2.0", codec: "AC3", streamIndex: 1 },
+  ], new Map([["/movies/Adjustment.m2ts\0audio\0" + "1", { language: "Portuguese", role: "short", source: "file" }]]));
+  assert.equal(named?.detectedLanguage, "Portuguese");
+  assert.equal(named?.detectedRole, "short");
+  assert.equal(named?.fromFile, true);
   const [subtitle] = overlaySubtitles("/movies/Dune.mkv", [
     { language: null, placement: "external", format: "SRT", forced: false, file: "/movies/Dune.hu.srt" },
   ], new Map([[`/movies/Dune.hu.srt\0subtitle\0${0}`, { language: "Hungarian", role: null }]]));

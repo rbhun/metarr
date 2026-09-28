@@ -1,3 +1,4 @@
+import { isTransportStream } from "@/lib/detect/audio";
 import { isDiscImage } from "@/lib/media";
 import type { AudioTrack, MediaVersion, SubtitleTrack } from "@/lib/types";
 
@@ -58,7 +59,8 @@ function targetsOnFile(file: ScanFile, rescan: boolean, scanned: Set<string>): D
   for (const item of files) {
     if (item.playableLabel === "disc" || item.playableLabel === "missing" || isDiscImage(item.container, item.path)) continue;
     item.audioTracks.forEach((track, index) => {
-      if (track.language) return;
+      const named = Boolean(track.language);
+      if (named && !isTransportStream(item.path)) return;
       const ordinal = track.streamIndex ?? index;
       if (!rescan && scanned.has(keyOf(item.path, "audio", ordinal))) return;
       targets.push({
@@ -67,7 +69,7 @@ function targetsOnFile(file: ScanFile, rescan: boolean, scanned: Set<string>): D
         ordinal,
         label: item.label,
         format: track.codec,
-        placement: null,
+        placement: named ? "named" : null,
         streamLabel: track.label ?? null,
       });
     });

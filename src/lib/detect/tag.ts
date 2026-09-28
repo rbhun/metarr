@@ -44,7 +44,7 @@ export function planTag(
   kind: "audio" | "subtitle",
   ordinal: number,
   language: string,
-  role: "commentary" | "forced" | null,
+  role: "commentary" | "forced" | "short" | null,
 ): TagPlan {
   const code = languageCode(language);
   if (!code) return { action: "skip", reason: "unknown-language" };

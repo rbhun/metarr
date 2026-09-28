@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { audioClipArgs, audioCopyArgs, audioDecodeArgs, audioSliceArgs, clipStart, dialogueMix, isTransportStream, openingWindow, packetBytes, pcmIsSilent, sampleOffsets, tsWindow } from "@/lib/detect/audio";
+import { audioClipArgs, audioCopyArgs, audioDecodeArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, isTransportStream, languageFromProbeTags, markerWindow, openingWindow, packetBytes, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueCount, cueText } from "@/lib/detect/cues";
@@ -21,9 +21,10 @@ import { languageName } from "@/lib/media";
 
 export type DetectionOutcome = {
   language: string | null;
-  role: "commentary" | "forced" | null;
+  role: "commentary" | "forced" | "short" | null;
   confidence: number;
   message: string | null;
+  source?: "file" | null;
 };
 
 const limitedEnv = { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", MKL_NUM_THREADS: "1" };
@@ -56,8 +57,20 @@ function secondsOf(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function probeAudio(file: string, ordinal: number, quick = false): Promise<{ duration: number | null; start: number | null; layout: string | null; channels: number | null }> {
-  const empty = { duration: null, start: null, layout: null, channels: null };
+async function probeAudio(
+  file: string,
+  ordinal: number,
+  quick = false,
+): Promise<{
+  duration: number | null;
+  start: number | null;
+  layout: string | null;
+  channels: number | null;
+  language: string | null;
+  streamDuration: number | null;
+  pid: number | null;
+}> {
+  const empty = { duration: null, start: null, layout: null, channels: null, language: null, streamDuration: null, pid: null };
   try {
     const { stdout } = await runCommand(
       "ffprobe",
@@ -66,7 +79,7 @@ async function probeAudio(file: string, ordinal: number, quick = false): Promise
         "error",
         ...(quick ? ["-probesize", "8000000", "-analyzeduration", "2000000"] : []),
         "-show_entries",
-        "format=duration,start_time:stream=codec_type,start_time,channel_layout,channels",
+        "format=duration,start_time:stream=codec_type,start_time,duration,channel_layout,channels,id:stream_tags=language",
         "-of",
         "json",
         file,
@@ -75,7 +88,7 @@ async function probeAudio(file: string, ordinal: number, quick = false): Promise
     );
     const body = JSON.parse(stdout) as {
       format?: { duration?: unknown; start_time?: unknown };
-      streams?: Array<{ codec_type?: unknown; start_time?: unknown; channel_layout?: unknown; channels?: unknown }>;
+      streams?: Array<{ codec_type?: unknown; start_time?: unknown; duration?: unknown; channel_layout?: unknown; channels?: unknown; id?: unknown; tags?: unknown }>;
     };
     const audio = (body.streams ?? []).filter((stream) => stream.codec_type === "audio")[ordinal];
     const duration = secondsOf(body.format?.duration);
@@ -84,6 +97,9 @@ async function probeAudio(file: string, ordinal: number, quick = false): Promise
       start: secondsOf(audio?.start_time) ?? secondsOf(body.format?.start_time),
       layout: typeof audio?.channel_layout === "string" ? audio.channel_layout : null,
       channels: typeof audio?.channels === "number" ? audio.channels : null,
+      language: languageFromProbeTags(audio?.tags),
+      streamDuration: secondsOf(audio?.duration),
+      pid: audioPid(audio?.id),
     };
   } catch {
     return empty;
@@ -226,11 +242,57 @@ function transcribe(wav: string): Promise<Speech> {
   });
 }
 
+function readWindow(file: string, window: { start: number; end: number }): Buffer {
+  const length = window.end - window.start;
+  const buffer = Buffer.alloc(length);
+  const fd = fs.openSync(file, "r");
+  try {
+    const read = fs.readSync(fd, buffer, 0, length, window.start);
+    return read === length ? buffer : buffer.subarray(0, read);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function trackIsShort(
+  file: string,
+  heard: { duration: number | null; streamDuration: number | null; pid: number | null },
+): boolean {
+  if (!isTransportStream(file)) return isShortSpan(heard.streamDuration, heard.duration);
+  if (heard.pid == null) return false;
+  try {
+    const size = fs.statSync(file).size;
+    const packet = packetBytes(file);
+    const opening = openingWindow(size, packet);
+    if (!opening) return false;
+    const open = pidActivity(readWindow(file, opening), packet, heard.pid);
+    if (!open.ended) return false;
+    const laterAt = sampleOffsets(heard.duration)[0];
+    const later = laterAt == null ? null : markerWindow(size, heard.duration, laterAt, packet);
+    if (!later) return false;
+    if (pidActivity(readWindow(file, later), packet, heard.pid).packets > 0) return false;
+    if (open.span != null) return isShortSpan(open.span, heard.duration);
+    return open.packets > 0 && open.packets < 500 && (heard.duration == null || heard.duration >= 120);
+  } catch {
+    return false;
+  }
+}
+
 async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutcome> {
+  const transport = isTransportStream(file);
+  const heard = await probeAudio(file, job.ordinal, transport);
+  const short = trackIsShort(file, heard);
+  if (heard.language || short) {
+    return {
+      language: heard.language,
+      role: short ? "short" : null,
+      confidence: heard.language ? 1 : 0,
+      message: heard.language ? null : "This track is only a moment long.",
+      source: heard.language ? "file" : null,
+    };
+  }
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
   try {
-    const transport = isTransportStream(file);
-    const heard = await probeAudio(file, job.ordinal, transport);
     const mix = dialogueMix(heard.layout, heard.channels);
     const fileSize = transport ? fs.statSync(file).size : 0;
     const samples: Array<{ language: string; probability: number }> = [];
@@ -238,10 +300,16 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
     let agreed = { language: null as string | null, confidence: 0 };
     let readSample = false;
     let silent = false;
+    let shortClip = false;
     const present = (target: string, minimum: number) => fs.existsSync(target) && fs.statSync(target).size >= minimum;
     const hearFile = async (wav: string): Promise<"timeout" | "heard"> => {
       if (!present(wav, 8_000)) return "heard";
-      if (pcmIsSilent(fs.readFileSync(wav))) {
+      const audio = fs.readFileSync(wav);
+      if (isExceptionallyShortClip(wavSeconds(audio))) {
+        shortClip = true;
+        return "heard";
+      }
+      if (pcmIsSilent(audio)) {
         silent = true;
         return "heard";
       }
@@ -305,14 +373,16 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       if (outcome === "timeout") timedOut = true;
     }
     if (samples.length === 0) {
-      const message = readSample
-        ? "No speech found in the sample."
-        : silent
-          ? "This track is silent."
-          : timedOut
-            ? "The audio sample could not be read in time."
-            : "This track has no audio to hear.";
-      return { language: null, role: null, confidence: 0, message };
+      const message = shortClip
+        ? "This track is only a moment long."
+        : readSample
+          ? "No speech found in the sample."
+          : silent
+            ? "This track is silent."
+            : timedOut
+              ? "The audio sample could not be read in time."
+              : "This track has no audio to hear.";
+      return { language: null, role: shortClip ? "short" : null, confidence: 0, message };
     }
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));

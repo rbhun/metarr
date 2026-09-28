@@ -47,7 +47,8 @@ export type AudioTrack = {
   streamIndex?: number | null;
   label?: string | null;
   detectedLanguage?: string | null;
-  detectedRole?: "commentary" | null;
+  detectedRole?: "commentary" | "short" | null;
+  fromFile?: boolean;
   copies?: Array<{ path: string; ordinal: number }>;
 };
 

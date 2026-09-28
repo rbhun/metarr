@@ -186,18 +186,19 @@ export function finishJob(db: Database.Database, id: number, status: "done" | "f
 export function saveDetection(
   db: Database.Database,
   job: DetectJob,
-  result: { language: string | null; role: "commentary" | "forced" | null; confidence: number; message: string | null },
+  result: { language: string | null; role: "commentary" | "forced" | "short" | null; confidence: number; message: string | null; source?: "file" | null },
 ) {
   db.prepare(
-    `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, scanned_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, source, scanned_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(path, kind, ordinal) DO UPDATE SET
        language = excluded.language,
        role = excluded.role,
        confidence = excluded.confidence,
        message = excluded.message,
+       source = excluded.source,
        scanned_at = excluded.scanned_at`,
-  ).run(job.path, job.kind, job.ordinal, result.language, result.role, result.confidence, result.message, new Date().toISOString());
+  ).run(job.path, job.kind, job.ordinal, result.language, result.role, result.confidence, result.message, result.source === "file" ? "file" : null, new Date().toISOString());
 }
 
 export function markWritten(db: Database.Database, from: { path: string; kind: string; ordinal: number }, storedPath: string) {
@@ -290,21 +291,23 @@ export function activeJob(db: Database.Database): { label: string; kind: "audio"
   return { label: row.label, kind: row.kind === "subtitle" ? "subtitle" : "audio" };
 }
 
-export type StoredDetection = { language: string | null; role: "commentary" | "forced" | null };
+export type StoredDetection = { language: string | null; role: "commentary" | "forced" | "short" | null; source?: "file" | null };
 
 export function detectionMap(db: Database.Database): Map<string, StoredDetection> {
-  const rows = db.prepare(`SELECT path, kind, ordinal, language, role FROM detect_results`).all() as Array<{
+  const rows = db.prepare(`SELECT path, kind, ordinal, language, role, source FROM detect_results`).all() as Array<{
     path: string;
     kind: string;
     ordinal: number;
     language: string | null;
     role: string | null;
+    source: string | null;
   }>;
   const map = new Map<string, StoredDetection>();
   for (const row of rows) {
     map.set(`${row.path}\0${row.kind}\0${row.ordinal}`, {
       language: row.language,
-      role: row.role === "commentary" || row.role === "forced" ? row.role : null,
+      role: row.role === "commentary" || row.role === "forced" || row.role === "short" ? row.role : null,
+      source: row.source === "file" ? "file" : null,
     });
   }
   return map;

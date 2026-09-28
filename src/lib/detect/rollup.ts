@@ -10,7 +10,7 @@ function subtitleCopy(videoPath: string | null, track: SubtitleTrack, index: num
 }
 
 function audioCopy(videoPath: string | null, track: AudioTrack, index: number): TrackCopy | null {
-  if (!videoPath || track.language || track.detectedLanguage) return null;
+  if (!videoPath || track.language || track.detectedLanguage || track.fromFile || track.detectedRole === "short") return null;
   return { path: videoPath, ordinal: track.streamIndex ?? index };
 }
 
@@ -37,7 +37,7 @@ export function rollupAudio(files: Array<{ path: string | null; audioTracks: Aud
   for (const file of files) {
     file.audioTracks.forEach((track, index) => {
       const shown = track.language || track.detectedLanguage || "";
-      const key = `${shown}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}|${track.detectedRole ?? ""}`.toLowerCase();
+      const key = `${shown}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}|${track.detectedRole ?? ""}|${track.fromFile ? 1 : 0}`.toLowerCase();
       const copy = audioCopy(file.path, track, index);
       const existing = rows.get(key);
       if (!existing) {

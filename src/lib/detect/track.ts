@@ -11,7 +11,7 @@ function narrowLayout(layout: string | null | undefined): boolean {
 }
 
 export function audioTargets(path: string | null, track: AudioTrack, index: number, label: string): DetectTarget[] {
-  if (track.language) return [];
+  if (track.language || track.fromFile || track.detectedRole === "short") return [];
   if (track.detectedLanguage && (track.detectedRole === "commentary" || !narrowLayout(track.layout))) return [];
   const copies = track.copies?.length ? track.copies : path ? [{ path, ordinal: track.streamIndex ?? index }] : [];
   return copies.map((copy) => ({

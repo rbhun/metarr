@@ -1,4 +1,5 @@
 const unknownClass = "text-red-700 dark:text-red-400";
+export const fileLanguageClass = "text-sky-700 dark:text-sky-400";
 
 export function MarkedText({ text }: { text: string }) {
   const parts = text.split(/(Unknown)/g);

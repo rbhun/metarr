@@ -214,6 +214,7 @@ export function migrate(db: Database.Database) {
       role TEXT,
       confidence REAL,
       message TEXT,
+      source TEXT,
       scanned_at TEXT NOT NULL,
       PRIMARY KEY (path, kind, ordinal)
     );
@@ -274,6 +275,7 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
+  ensureColumn(db, "detect_results", "source", "TEXT");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);

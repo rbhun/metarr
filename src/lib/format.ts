@@ -71,7 +71,12 @@ export function audioLines(tracks: AudioTrack[], languages: string[]): string[] 
   if (tracks.length > 0) {
     const lines = tracks
       .map((track) =>
-        [shownLanguage(track) ?? "Unknown", track.detectedRole === "commentary" ? "commentary" : null, formatLayout(track.layout), track.codec]
+        [
+          shownLanguage(track) ?? "Unknown",
+          track.detectedRole === "commentary" ? "commentary" : track.detectedRole === "short" ? "short" : null,
+          formatLayout(track.layout),
+          track.codec,
+        ]
           .filter(Boolean)
           .join(" "),
       )

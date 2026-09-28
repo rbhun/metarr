@@ -3,7 +3,7 @@
 import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
-import { UnknownLabel } from "@/components/marked-text";
+import { fileLanguageClass, UnknownLabel } from "@/components/marked-text";
 import { audioTargets } from "@/lib/detect/track";
 import { formatLayout } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
@@ -99,16 +99,21 @@ export function AudioTracks({
         .map((track, index) => ({
           language: track.language || track.detectedLanguage || null,
           commentary: track.detectedRole === "commentary",
+          short: track.detectedRole === "short",
+          fromFile: track.fromFile === true,
           layout: formatLayout(track.layout),
           codec: track.codec,
           targets: audioTargets(path, track, index, label),
         }))
         .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, layout: null, codec: null, targets: [] }));
+    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, layout: null, codec: null, targets: [] }));
 
   if (rows.length === 0) return <p>—</p>;
 
-  const items = rows.map((row, index) => (
+  const items = rows.map((row, index) => {
+        const note = [row.fromFile ? "Read from the file" : null, row.short ? "This track is only a moment long" : null].filter(Boolean).join(". ");
+        const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}${row.short ? " short" : ""}`;
+        return (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
           {row.language ? (
             row.targets.length ? (
@@ -118,21 +123,27 @@ export function AudioTracks({
                 title="Listen again"
                 className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
               >
-                {row.language}
-                {row.commentary ? " commentary" : ""}
+                {text}
               </button>
             ) : (
-              <span>
-                {row.language}
-                {row.commentary ? " commentary" : ""}
+              <span className={row.fromFile ? fileLanguageClass : undefined} title={note || undefined}>
+                {text}
               </span>
             )
           ) : (
-            <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
+            <>
+              <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
+              {row.short ? (
+                <span title="This track is only a moment long" className="text-muted-foreground">
+                  short
+                </span>
+              ) : null}
+            </>
           )}
           {row.layout ? <span className="font-mono text-[0.92em] tabular-nums">{row.layout}</span> : null}
           <CodecMark codec={row.codec} />
         </p>
-      ));
+        );
+      });
   return scroll ? <LineScroll className={className}>{items}</LineScroll> : <div className={className}>{items}</div>;
 }

@@ -5,7 +5,7 @@ type StampInput = {
   kind: "audio" | "subtitle";
   ordinal: number;
   language: string;
-  role: "commentary" | "forced" | null;
+  role: "commentary" | "forced" | "short" | null;
   renamedTo: string | null;
 };
 
