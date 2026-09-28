@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.95
+
+- Show an audio-format mismatch in indigo, so it stays separate from the amber used when a language was left out.
+
 ## 0.0.94
 
 - Use the SQLite build shipped with the package, so deploy does not download Node headers from nodejs.org.

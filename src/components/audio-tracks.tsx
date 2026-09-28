@@ -3,7 +3,7 @@
 import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
-import { fileLanguageClass, omittedLanguageClass, UnknownLabel } from "@/components/marked-text";
+import { fileLanguageClass, formatConflictClass, omittedLanguageClass, UnknownLabel } from "@/components/marked-text";
 import { SourceHover } from "@/components/source-hover";
 import { FlagPill } from "@/components/media-pills";
 import { audioTargets } from "@/lib/detect/track";
@@ -119,7 +119,14 @@ export function AudioTracks({
   const items = rows.map((row, index) => {
         const note = languageHover(row.sources, row.language, row.conflict, row.detected);
         const hover = note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
-        const tone = row.conflict || row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
+        const formatConflict = row.conflict?.includes("The file is ") ?? false;
+        const tone = formatConflict
+          ? formatConflictClass
+          : row.conflict || row.omittedByPlex
+            ? omittedLanguageClass
+            : row.fromFile
+              ? fileLanguageClass
+              : undefined;
         const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}`;
         return (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
