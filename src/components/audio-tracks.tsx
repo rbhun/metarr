@@ -5,7 +5,7 @@ import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { fileLanguageClass, omittedLanguageClass, UnknownLabel } from "@/components/marked-text";
 import { audioTargets } from "@/lib/detect/track";
-import { formatLayout } from "@/lib/format";
+import { formatLayout, languageHover } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -102,22 +102,20 @@ export function AudioTracks({
           short: track.detectedRole === "short",
           fromFile: track.fromFile === true,
           omittedByPlex: track.omittedByPlex === true,
+          conflict: track.conflict ?? null,
+          sources: track.sources,
           layout: formatLayout(track.layout),
           codec: track.codec,
           targets: audioTargets(path, track, index, label),
         }))
         .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, omittedByPlex: false, layout: null, codec: null, targets: [] }));
+    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, omittedByPlex: false, conflict: null, sources: undefined, layout: null, codec: null, targets: [] }));
 
   if (rows.length === 0) return <p>—</p>;
 
   const items = rows.map((row, index) => {
-        const note = [
-          row.omittedByPlex ? "Plex left this language out." : null,
-          row.fromFile ? "Read from the file" : null,
-          row.short ? "This track is only a moment long" : null,
-        ].filter(Boolean).join(" ");
-        const tone = row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
+        const note = languageHover(row.sources, row.language, row.short ? "This track is only a moment long" : null);
+        const tone = row.conflict || row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
         const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}${row.short ? " short" : ""}`;
         return (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
@@ -126,7 +124,7 @@ export function AudioTracks({
               <button
                 type="button"
                 onClick={() => void detectUnknown(row.targets)}
-                title="Listen again"
+                title={note || "Listen again"}
                 className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
               >
                 {text}
@@ -138,7 +136,7 @@ export function AudioTracks({
             )
           ) : (
             <>
-              <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
+              <UnknownLabel title={note} onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
               {row.short ? (
                 <span title="This track is only a moment long" className="text-muted-foreground">
                   short

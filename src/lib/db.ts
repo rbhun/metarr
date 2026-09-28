@@ -28,6 +28,7 @@ import type {
   SubtitleTrack,
   SyncNote,
   TitleKind,
+  TrackSources,
   TitleNotes,
 } from "@/lib/types";
 import { CONNECTORS, PROVIDERS } from "@/lib/types";
@@ -727,6 +728,17 @@ function optionalIndex(value: unknown): number | null {
   return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
+function parseSources(value: unknown): TrackSources | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const sources: TrackSources = {};
+  for (const key of ["plex", "radarr", "sonarr", "bazarr", "file"] as const) {
+    if (!(key in record)) continue;
+    sources[key] = typeof record[key] === "string" ? record[key] : null;
+  }
+  return Object.keys(sources).length ? sources : undefined;
+}
+
 export function parseAudioTracks(value: unknown): AudioTrack[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -745,6 +757,9 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
       ...(streamIndex != null ? { streamIndex } : {}),
       ...(label ? { label } : {}),
       ...(track.omittedByPlex === true ? { omittedByPlex: true } : {}),
+      ...(track.fromFile === true ? { fromFile: true } : {}),
+      ...(typeof track.conflict === "string" && track.conflict ? { conflict: track.conflict } : {}),
+      ...(parseSources(track.sources) ? { sources: parseSources(track.sources) } : {}),
     }];
   });
 }
@@ -764,6 +779,9 @@ export function parseSubtitleTracks(value: unknown): SubtitleTrack[] {
       forced: track.forced === true,
       ...(streamIndex != null ? { streamIndex } : {}),
       ...(file ? { file } : {}),
+      ...(track.fromFile === true ? { fromFile: true } : {}),
+      ...(typeof track.conflict === "string" && track.conflict ? { conflict: track.conflict } : {}),
+      ...(parseSources(track.sources) ? { sources: parseSources(track.sources) } : {}),
     }];
   });
 }

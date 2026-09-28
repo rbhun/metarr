@@ -2,9 +2,9 @@
 
 import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
-import { UnknownLabel } from "@/components/marked-text";
+import { omittedLanguageClass, UnknownLabel } from "@/components/marked-text";
 import { subtitleTargets } from "@/lib/detect/track";
-import { shownLanguage, subtitleNote } from "@/lib/format";
+import { languageHover, shownLanguage, subtitleNote } from "@/lib/format";
 import type { SubtitleTrack } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -41,7 +41,13 @@ export function SubtitleRows({
         const rest = subtitleNote(track);
         return (
           <p key={`${language ?? "unknown"}-${track.placement}-${track.format ?? ""}-${track.streamIndex ?? ""}-${index}`}>
-            {language ? language : <UnknownLabel onClick={targets.length ? () => void detectUnknown(targets) : undefined} />}
+            {language ? (
+              <span className={track.conflict ? omittedLanguageClass : undefined} title={languageHover(track.sources, language)}>
+                {language}
+              </span>
+            ) : (
+              <UnknownLabel title={languageHover(track.sources, null)} onClick={targets.length ? () => void detectUnknown(targets) : undefined} />
+            )}
             {rest ? ` · ${rest}` : ""}
           </p>
         );

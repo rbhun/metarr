@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.69
+
+- Hover a language to see whether Plex, Radarr or Sonarr, and the folder scan have that label.
+
+## 0.0.68
+
+- Put the schedule cards in the two-column settings layout, with a divider after them and another before the stored library.
+
+## 0.0.67
+
+- Add a folder scan, off until it is enabled in Settings, that reads language tags from the files and marks where they disagree with Plex or Radarr and Sonarr.
+
 ## 0.0.66
 
 - Resync the library on a timer from Settings, and keep Sync now there with the other schedules.

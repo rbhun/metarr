@@ -15,13 +15,13 @@ export function MarkedText({ text }: { text: string }) {
   );
 }
 
-export function UnknownLabel({ onClick }: { onClick?: () => void }) {
-  if (!onClick) return <span className={unknownClass}>Unknown</span>;
+export function UnknownLabel({ onClick, title }: { onClick?: () => void; title?: string }) {
+  if (!onClick) return <span className={unknownClass} title={title}>Unknown</span>;
   return (
     <button
       type="button"
       onClick={onClick}
-      title="Detect this language now"
+      title={title || "Detect this language now"}
       className={`${unknownClass} cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid`}
     >
       Unknown

@@ -1,4 +1,4 @@
-import type { AudioTrack, HdrLabel, MediaDetail, MediaFile, MediaVersion, PlayableLabel, SubtitleTrack, TitleNotes } from "@/lib/types";
+import type { AudioTrack, HdrLabel, MediaDetail, MediaFile, MediaVersion, PlayableLabel, SubtitleTrack, TitleNotes, TrackSources } from "@/lib/types";
 
 const VIDEO_EXTENSIONS = new Set([
   "mkv",
@@ -470,6 +470,198 @@ export function assignStreamLanguages(tracks: Array<string | null>, languages: s
   };
   walk(0, 0, []);
   return found.length === 1 ? found[0]! : null;
+}
+
+export function sameSpokenLanguage(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false;
+  const a = languageName(left);
+  const b = languageName(right);
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+}
+
+const SOURCE_KEYS = ["plex", "radarr", "sonarr", "bazarr", "file"] as const;
+
+export function withTrackSource<T extends { sources?: TrackSources }>(track: T, key: keyof TrackSources, value: string | null): T {
+  return { ...track, sources: { ...track.sources, [key]: value } };
+}
+
+export function tagFileOrigin(file: MediaFile, connector: "plex" | "radarr" | "sonarr" | "bazarr" | "files"): MediaFile {
+  const origin = connector === "files" ? "file" : connector;
+  const tagged = { ...file, origin };
+  return {
+    ...tagged,
+    audioTracks: stampOriginTracks(tagged, tagged.audioTracks ?? []),
+    subtitleTracks: stampOriginTracks(tagged, tagged.subtitleTracks ?? []),
+  };
+}
+
+export function stampOriginTracks<T extends { language: string | null; sources?: TrackSources }>(file: MediaFile, tracks: T[]): T[] {
+  const origin = file.origin;
+  if (origin !== "plex" && origin !== "file") return tracks;
+  const key = origin === "file" ? "file" : "plex";
+  return tracks.map((track) => {
+    if (track.sources && key in track.sources) return track;
+    return withTrackSource(track, key, track.language ? languageName(track.language) ?? track.language : null);
+  });
+}
+
+export function applyListedSource<T extends { language: string | null; sources?: TrackSources }>(tracks: T[], file: MediaFile, languages: string[]): T[] {
+  const origin = file.origin;
+  if (origin !== "radarr" && origin !== "sonarr" && origin !== "bazarr") return tracks;
+  if (!languages.length) return tracks;
+  return tracks.map((track) => {
+    const named = track.language ? languageName(track.language) ?? track.language : null;
+    const listed = Boolean(named && languages.some((language) => sameSpokenLanguage(language, named)));
+    return withTrackSource(track, origin, listed && named ? named : null);
+  });
+}
+
+export function sourceTooltip(sources: TrackSources | undefined, shown: string | null): string | null {
+  if (!sources || !SOURCE_KEYS.some((key) => key in sources)) return null;
+  const line = (label: string, value: string | null | undefined, unchecked: string | null) => {
+    if (value === undefined) return unchecked ? `${label}: ${unchecked}` : null;
+    if (value === null) return `${label}: missing`;
+    if (shown && sameSpokenLanguage(value, shown)) return `${label}: present`;
+    return `${label}: ${value}`;
+  };
+  const lines = [
+    line("Plex", sources.plex, null),
+    line("Radarr", sources.radarr, null),
+    line("Sonarr", sources.sonarr, null),
+    line("Bazarr", sources.bazarr, null),
+    line("File scan", sources.file, "not scanned"),
+  ].filter((item): item is string => Boolean(item));
+  return lines.length ? lines.join("\n") : null;
+}
+
+function arrOnlyLanguages(file: MediaFile, kind: "audio" | "subtitle"): string[] {
+  const tracks = kind === "audio" ? file.audioTracks ?? [] : file.subtitleTracks ?? [];
+  if (tracks.length > 0) return [];
+  return kind === "audio" ? file.audioLanguages : file.subtitleLanguages;
+}
+
+function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null }>(tracks: T[], languages: string[]): T[] {
+  const known = languages.map((language) => languageName(language)?.toLowerCase()).filter((language): language is string => Boolean(language));
+  if (!known.length) return tracks;
+  return tracks.map((track) => {
+    if (!track.fromFile || !track.language) return track;
+    const name = languageName(track.language)?.toLowerCase();
+    if (!name || known.includes(name)) return track;
+    const extra = "Radarr or Sonarr does not list this.";
+    return { ...track, conflict: track.conflict ? `${track.conflict} ${extra}` : extra };
+  });
+}
+
+/** Compare a folder scan with the tracks Plex stored. The file tag wins, and a mismatch is kept on the track. */
+export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): AudioTrack[] {
+  if (!scanned.length) return reported;
+  if (!reported.length) return scanned.map((track) => ({ ...track, fromFile: true }));
+  const count = Math.max(reported.length, scanned.length);
+  const tracks: AudioTrack[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const report = reported[index];
+    const scan = scanned[index];
+    if (!scan) {
+      if (report) tracks.push({ ...report, sources: { ...report.sources, file: report.sources?.file ?? null } });
+      continue;
+    }
+    if (!report) {
+      tracks.push({ ...scan, fromFile: true, sources: { ...scan.sources, plex: null }, conflict: "Plex did not list this track." });
+      continue;
+    }
+    const fileLanguage = scan.language;
+    if (!fileLanguage) {
+      tracks.push({ ...report, sources: { ...report.sources, ...scan.sources } });
+      continue;
+    }
+    const plexLanguage = report.omittedByPlex ? null : report.language;
+    const arrLanguage = report.omittedByPlex ? report.language : null;
+    const notes: string[] = [];
+    if (!plexLanguage) notes.push("Plex left this language out.");
+    else if (!sameSpokenLanguage(fileLanguage, plexLanguage)) notes.push(`Plex says ${languageName(plexLanguage) ?? plexLanguage}.`);
+    if (arrLanguage && !sameSpokenLanguage(fileLanguage, arrLanguage)) notes.push(`Radarr says ${languageName(arrLanguage) ?? arrLanguage}.`);
+    const { omittedByPlex: _omitted, ...rest } = report;
+    tracks.push({
+      ...rest,
+      language: languageName(fileLanguage) ?? fileLanguage,
+      layout: report.layout ?? scan.layout,
+      codec: report.codec ?? scan.codec,
+      fromFile: true,
+      sources: { ...report.sources, ...scan.sources },
+      ...(notes.length ? { conflict: notes.join(" ") } : {}),
+    });
+  }
+  return tracks;
+}
+
+export function crossCheckSubtitles(reported: SubtitleTrack[], scanned: SubtitleTrack[]): SubtitleTrack[] {
+  if (!scanned.length) return reported;
+  const external = reported.filter((track) => track.placement === "external");
+  const internal = reported.filter((track) => track.placement !== "external");
+  if (!internal.length) return [...scanned.map((track) => ({ ...track, fromFile: true })), ...external];
+  const count = Math.max(internal.length, scanned.length);
+  const tracks: SubtitleTrack[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const report = internal[index];
+    const scan = scanned[index];
+    if (!scan) {
+      if (report) tracks.push({ ...report, sources: { ...report.sources, file: report.sources?.file ?? null } });
+      continue;
+    }
+    if (!report) {
+      tracks.push({ ...scan, fromFile: true, sources: { ...scan.sources, plex: null }, conflict: "Plex did not list this track." });
+      continue;
+    }
+    const fileLanguage = scan.language;
+    if (!fileLanguage) {
+      tracks.push({ ...report, sources: { ...report.sources, ...scan.sources } });
+      continue;
+    }
+    const notes: string[] = [];
+    if (!report.language) notes.push("Plex left this language out.");
+    else if (!sameSpokenLanguage(fileLanguage, report.language)) notes.push(`Plex says ${languageName(report.language) ?? report.language}.`);
+    tracks.push({
+      ...report,
+      language: languageName(fileLanguage) ?? fileLanguage,
+      format: report.format ?? scan.format,
+      fromFile: true,
+      sources: { ...report.sources, ...scan.sources },
+      ...(notes.length ? { conflict: notes.join(" ") } : {}),
+    });
+  }
+  return [...tracks, ...external];
+}
+
+export function reconcileAudio(left: MediaFile, right: MediaFile): AudioTrack[] {
+  const leftTracks = stampOriginTracks(left, left.audioTracks ?? []);
+  const rightTracks = stampOriginTracks(right, right.audioTracks ?? []);
+  const leftScan = leftTracks.some((track) => track.fromFile);
+  const rightScan = rightTracks.some((track) => track.fromFile);
+  const arr = [...arrOnlyLanguages(left, "audio"), ...arrOnlyLanguages(right, "audio")];
+  let tracks: AudioTrack[];
+  if (leftScan !== rightScan) tracks = crossCheckAudio(leftScan ? rightTracks : leftTracks, leftScan ? leftTracks : rightTracks);
+  else {
+    const merged = mergeAudioTracks([leftTracks, rightTracks]);
+    const list = leftTracks.length > 0 ? (rightTracks.length > 0 ? [] : right.audioLanguages) : left.audioLanguages;
+    tracks = fillOmittedAudio(merged, list);
+  }
+  tracks = applyListedSource(tracks, left, arrOnlyLanguages(left, "audio"));
+  tracks = applyListedSource(tracks, right, arrOnlyLanguages(right, "audio"));
+  return noteMissingFromArr(tracks, arr);
+}
+
+export function reconcileSubtitles(left: MediaFile, right: MediaFile): SubtitleTrack[] {
+  const leftTracks = stampOriginTracks(left, left.subtitleTracks ?? []);
+  const rightTracks = stampOriginTracks(right, right.subtitleTracks ?? []);
+  const leftScan = leftTracks.some((track) => track.fromFile);
+  const rightScan = rightTracks.some((track) => track.fromFile);
+  const arr = [...arrOnlyLanguages(left, "subtitle"), ...arrOnlyLanguages(right, "subtitle")];
+  let tracks: SubtitleTrack[];
+  if (leftScan !== rightScan) tracks = crossCheckSubtitles(leftScan ? rightTracks : leftTracks, leftScan ? leftTracks : rightTracks);
+  else tracks = mergeSubtitleTracks([leftTracks, rightTracks]);
+  tracks = applyListedSource(tracks, left, arrOnlyLanguages(left, "subtitle"));
+  tracks = applyListedSource(tracks, right, arrOnlyLanguages(right, "subtitle"));
+  return noteMissingFromArr(tracks, arr);
 }
 
 export function fillOmittedAudio(tracks: AudioTrack[], languages: string[]): AudioTrack[] {

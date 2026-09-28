@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assignStreamLanguages, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -167,6 +167,92 @@ test("a blank audio track takes the language Radarr already listed when the orde
   assert.equal(filled[0]?.omittedByPlex, undefined);
   assert.equal(filled[3]?.language, "Magyar");
   assert.equal(assignStreamLanguages([null, "English"], ["English"]), null);
+});
+
+test("a language label names which source has it", () => {
+  const plex = tagFileOrigin(
+    {
+      container: "m2ts",
+      path: "/movies/Film.m2ts",
+      qualityName: null,
+      resolution: "1080p",
+      hdr: "none",
+      is3d: false,
+      audioLanguages: ["English"],
+      subtitleLanguages: ["English"],
+      audioTracks: [{ language: "English", layout: "5.1", codec: "DTS", streamIndex: 0 }, { language: null, layout: "2.0", codec: "AC3", streamIndex: 1 }],
+      subtitleTracks: [{ language: "English", placement: "internal", format: "PGS", forced: false, streamIndex: 0 }],
+    },
+    "plex",
+  );
+  const radarr = tagFileOrigin(
+    {
+      container: "m2ts",
+      path: "/movies/Film.m2ts",
+      qualityName: null,
+      resolution: "1080p",
+      hdr: "none",
+      is3d: false,
+      audioLanguages: ["English", "Portuguese"],
+      subtitleLanguages: ["English", "Portuguese"],
+    },
+    "radarr",
+  );
+  const scanned = tagFileOrigin(
+    {
+      container: "m2ts",
+      path: "/movies/Film.m2ts",
+      qualityName: null,
+      resolution: null,
+      hdr: "none",
+      is3d: false,
+      audioLanguages: ["English", "Portuguese"],
+      subtitleLanguages: ["English"],
+      audioTracks: [
+        { language: "English", layout: null, codec: null, streamIndex: 0, fromFile: true },
+        { language: "Portuguese", layout: null, codec: null, streamIndex: 1, fromFile: true },
+      ],
+      subtitleTracks: [{ language: "English", placement: "internal", format: "PGS", forced: false, streamIndex: 0, fromFile: true }],
+    },
+    "files",
+  );
+  const withRadarr = reconcileAudio(plex, radarr);
+  const checked = reconcileAudio(
+    { ...plex, audioTracks: withRadarr },
+    scanned,
+  );
+  assert.equal(sourceTooltip(checked[0]?.sources, "English"), "Plex: present\nRadarr: present\nFile scan: present");
+  assert.equal(sourceTooltip(checked[1]?.sources, "Portuguese"), "Plex: missing\nRadarr: present\nFile scan: present");
+  assert.equal(sourceTooltip({ plex: "Hungarian" }, "Czech"), "Plex: Hungarian\nFile scan: not scanned");
+});
+
+test("a folder scan keeps the file language and marks a Plex mismatch", () => {
+  const plex = [
+    { language: "English", layout: "5.1", codec: "DTS-HD", streamIndex: 0 },
+    { language: null, layout: "2.0", codec: "Dolby Digital", streamIndex: 1 },
+    { language: "Hungarian", layout: "5.1", codec: "DTS", streamIndex: 2 },
+  ];
+  const scanned = [
+    { language: "English", layout: null, codec: null, streamIndex: 0, fromFile: true },
+    { language: "Portuguese", layout: null, codec: null, streamIndex: 1, fromFile: true },
+    { language: "Czech", layout: null, codec: null, streamIndex: 2, fromFile: true },
+  ];
+  const checked = crossCheckAudio(plex, scanned);
+  assert.equal(checked[0]?.conflict, undefined);
+  assert.equal(checked[1]?.language, "Portuguese");
+  assert.equal(checked[1]?.conflict, "Plex left this language out.");
+  assert.equal(checked[2]?.conflict, "Plex says Hungarian.");
+  const merged = reconcileAudio(
+    { container: "m2ts", path: "/movies/Film.m2ts", qualityName: null, resolution: "1080p", hdr: "none", is3d: false, audioLanguages: ["English", "Hungarian"], subtitleLanguages: [], audioTracks: plex, subtitleTracks: [] },
+    { container: "m2ts", path: "/movies/Film.m2ts", qualityName: null, resolution: null, hdr: "none", is3d: false, audioLanguages: ["English", "Portuguese", "Czech"], subtitleLanguages: ["English"], audioTracks: scanned, subtitleTracks: [{ language: "Portuguese", placement: "internal", format: "PGS", forced: false, streamIndex: 0, fromFile: true }] },
+  );
+  assert.equal(merged[1]?.fromFile, true);
+  const subs = crossCheckSubtitles(
+    [{ language: null, placement: "internal", format: "PGS", forced: false, streamIndex: 0 }],
+    [{ language: "Portuguese", placement: "internal", format: "PGS", forced: false, streamIndex: 0, fromFile: true }],
+  );
+  assert.equal(subs[0]?.language, "Portuguese");
+  assert.equal(subs[0]?.conflict, "Plex left this language out.");
 });
 
 test("a language name maps to the tag stored in a media file", () => {

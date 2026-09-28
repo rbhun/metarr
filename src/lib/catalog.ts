@@ -4,7 +4,6 @@ import { clusterMatches, externalKeys, fallbackKey, type Matchable } from "@/lib
 import {
   bestHdr,
   detect3d,
-  fillOmittedAudio,
   isAired,
   mergeAudioTracks,
   mergeLanguages,
@@ -13,6 +12,9 @@ import {
   normalizeImdb,
   normalizeNumericId,
   normalizeTitle,
+  reconcileAudio,
+  reconcileSubtitles,
+  tagFileOrigin,
   resolutionRank,
   buildDetail,
   summarizeFiles,
@@ -144,10 +146,7 @@ function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
   const rightScore = rightRank + (right.bitrateKbps ? 1 : 0) + (right.audioTracks?.length ?? 0) + (right.fileBytes ? 1 : 0);
   const primary = rightScore > leftScore ? right : left;
   const extra = primary === left ? right : left;
-  const mergedTracks = mergeAudioTracks([primary.audioTracks ?? [], extra.audioTracks ?? []]);
-  const partner = (primary.audioTracks?.length ?? 0) > 0 ? extra : primary;
-  const languageList = (partner.audioTracks?.length ?? 0) > 0 ? [] : partner.audioLanguages;
-  const audioTracks = fillOmittedAudio(mergedTracks, languageList);
+  const audioTracks = reconcileAudio(primary, extra);
   const audioLanguages = mergeLanguages(primary.audioLanguages, extra.audioLanguages);
   return {
     container: filledText(primary.container) ?? filledText(extra.container),
@@ -159,7 +158,7 @@ function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
     audioLanguages,
     subtitleLanguages: mergeLanguages(primary.subtitleLanguages, extra.subtitleLanguages),
     audioTracks,
-    subtitleTracks: mergeSubtitleTracks([primary.subtitleTracks ?? [], extra.subtitleTracks ?? []]),
+    subtitleTracks: reconcileSubtitles(primary, extra),
     bitrateKbps: primary.bitrateKbps ?? extra.bitrateKbps ?? null,
     videoCodec: filledText(primary.videoCodec) ?? filledText(extra.videoCodec),
     videoProfile: filledText(primary.videoProfile) ?? filledText(extra.videoProfile),
@@ -194,8 +193,10 @@ function filesFrom(records: SourceDraft[]): MediaFile[] {
           ]
         : [];
     for (const file of own) {
-      const normalized =
-        record.connector === "bazarr" ? { ...file, audioLanguages: [], audioTracks: [] } : file;
+      const normalized = tagFileOrigin(
+        record.connector === "bazarr" ? { ...file, audioLanguages: [], audioTracks: [] } : file,
+        record.connector,
+      );
       const pathKey = filePathKey(normalized.path);
       const key = pathKey
         ? `path:${pathKey}`

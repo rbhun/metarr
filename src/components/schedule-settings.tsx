@@ -77,34 +77,15 @@ export function ScheduleSettings() {
 
   if (!sync || !detect || !remux) return null;
 
-  async function save() {
-    if (!sync || !detect || !remux) return;
+  async function saveOne(request: Promise<Response>, saved: string) {
     setBusy(true);
     try {
-      const requests = [
-        fetch("/api/sync", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(sync),
-        }),
-        fetch("/api/detect", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(detect),
-        }),
-        fetch("/api/remux", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(remux),
-        }),
-      ];
-      const responses = await Promise.all(requests);
-      for (const response of responses) {
-        if (response.ok) continue;
+      const response = await request;
+      if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error || "Could not save the schedule.");
       }
-      toast.success("Schedule saved on this machine.");
+      toast.success(saved);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not save the schedule.");
     } finally {
@@ -113,54 +94,71 @@ export function ScheduleSettings() {
   }
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>Schedule</CardTitle>
-        <CardDescription>
-          Library resync, language detection, and disc remux run on their own. Sync now reads Plex, Radarr, Sonarr, and Bazarr immediately. A connector that fails keeps its last successful copy.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Label htmlFor="sync-enabled">Resync the library</Label>
-              <p className="text-xs leading-5 text-muted-foreground">Pulls metadata again after the interval. Video files stay where they are.</p>
-            </div>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Library resync</CardTitle>
+          <CardDescription>
+            Pulls metadata again after the interval. Sync now reads Plex, Radarr, Sonarr, and Bazarr immediately. A connector that fails keeps its last successful copy. Video files stay where they are.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+            <Label htmlFor="sync-enabled">Resync the library</Label>
             <Switch id="sync-enabled" checked={sync.enabled} onCheckedChange={(value) => setSync({ ...sync, enabled: value === true })} />
           </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-40 flex-1 space-y-1.5">
-              <Label htmlFor="sync-interval">Interval</Label>
-              <select
-                id="sync-interval"
-                value={sync.intervalHours}
-                className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                onChange={(event) => setSync({ ...sync, intervalHours: Number(event.target.value) })}
-              >
-                {INTERVALS.map((interval) => (
-                  <option key={interval.hours} value={interval.hours}>
-                    {interval.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Button type="button" onClick={() => void startSync()} disabled={status?.running}>
+          <div className="space-y-1.5">
+            <Label htmlFor="sync-interval">Interval</Label>
+            <select
+              id="sync-interval"
+              value={sync.intervalHours}
+              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+              onChange={(event) => setSync({ ...sync, intervalHours: Number(event.target.value) })}
+            >
+              {INTERVALS.map((interval) => (
+                <option key={interval.hours} value={interval.hours}>
+                  {interval.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-muted-foreground">Last sync {formatWhen(status?.finishedAt)}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void saveOne(
+                  fetch("/api/sync", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(sync),
+                  }),
+                  "Library resync saved on this machine.",
+                )
+              }
+            >
+              Save
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => void startSync()} disabled={status?.running}>
               <RefreshCw className={status?.running ? "animate-spin" : undefined} />
               {status?.running ? "Syncing" : "Sync now"}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">Last sync {formatWhen(status?.finishedAt)}</p>
-        </div>
+        </CardContent>
+      </Card>
 
-        <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Label htmlFor="schedule-detect">Scan unknown tracks</Label>
-              <p className="text-xs leading-5 text-muted-foreground">
-                Queued tracks and the daily pass run from the start hour until the end hour, and wait while Plex is busy.
-              </p>
-            </div>
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Scan unknown tracks</CardTitle>
+          <CardDescription>
+            Queued tracks and the daily pass run from the start hour until the end hour, and wait while Plex is busy.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+            <Label htmlFor="schedule-detect">Scan unknown tracks</Label>
             <Switch
               id="schedule-detect"
               checked={detect.enabled}
@@ -177,16 +175,36 @@ export function ScheduleSettings() {
               <HourSelect id="schedule-detect-end" value={detect.endHour} onChange={(endHour) => setDetect({ ...detect, endHour })} />
             </div>
           </div>
-        </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void saveOne(
+                fetch("/api/detect", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(detect),
+                }),
+                "Language detection hours saved on this machine.",
+              )
+            }
+          >
+            Save
+          </Button>
+        </CardContent>
+      </Card>
 
-        <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Label htmlFor="schedule-remux">Run queued discs</Label>
-              <p className="text-xs leading-5 text-muted-foreground">
-                The queue runs from the start hour until the end hour, and waits while Plex is playing or language detection is using a file.
-              </p>
-            </div>
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Run queued discs</CardTitle>
+          <CardDescription>
+            The queue runs from the start hour until the end hour, and waits while Plex is playing or language detection is using a file.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+            <Label htmlFor="schedule-remux">Run queued discs</Label>
             <Switch id="schedule-remux" checked={remux.enabled} onCheckedChange={(value) => setRemux({ ...remux, enabled: value === true })} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -199,12 +217,25 @@ export function ScheduleSettings() {
               <HourSelect id="schedule-remux-end" value={remux.endHour} onChange={(endHour) => setRemux({ ...remux, endHour })} />
             </div>
           </div>
-        </div>
-
-        <Button type="button" size="sm" disabled={busy} onClick={() => void save()}>
-          {busy ? "Saving…" : "Save schedule"}
-        </Button>
-      </CardContent>
-    </Card>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void saveOne(
+                fetch("/api/remux", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(remux),
+                }),
+                "Disc remux hours saved on this machine.",
+              )
+            }
+          >
+            Save
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

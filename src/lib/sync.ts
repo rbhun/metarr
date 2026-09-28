@@ -13,10 +13,12 @@ import {
   insertSourceRecords,
   isDemo,
   listConnectors,
+  loadSourceRecords,
   plexExcludedLibraries,
   recordConnectorSync,
   setMeta,
 } from "@/lib/db";
+import { readFolderScan, scanFolders } from "@/lib/folder-scan";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
 type Memory = {
@@ -115,6 +117,41 @@ async function runSync(only?: ConnectorId) {
     if (only && connector.id !== only) continue;
     const slot = status.connectors.find((item) => item.id === connector.id);
     if (!slot) continue;
+    if (connector.id === "files") {
+      const scan = readFolderScan(db);
+      if (!scan.enabled) {
+        slot.state = "skipped";
+        slot.message = "Folder scan is off.";
+        continue;
+      }
+      if (!scan.roots.length) {
+        slot.state = "skipped";
+        slot.message = "Add a folder to scan.";
+        continue;
+      }
+      slot.state = "running";
+      slot.message = "Scanning folders";
+      try {
+        const known = [
+          ...loadSourceRecords(db).filter((record) => record.connector !== "files" && !staged.has(record.connector)),
+          ...[...staged.values()].flat(),
+        ];
+        const records = await scanFolders(scan.roots, known, (update) => {
+          slot.message = update.message;
+          slot.fetched = update.fetched;
+          slot.total = update.total;
+        });
+        staged.set(connector.id, records);
+        slot.state = "success";
+        slot.message = describe(records);
+        slot.fetched = records.length;
+        slot.total = records.length;
+      } catch (error) {
+        slot.state = "error";
+        slot.message = error instanceof Error ? error.message : "Folder scan failed.";
+      }
+      continue;
+    }
     const hasCredentials = Boolean(connector.baseUrl.trim() && connector.apiKey.trim());
     const configured = only ? hasCredentials : connector.enabled && hasCredentials;
     if (!configured) {

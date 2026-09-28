@@ -1,4 +1,4 @@
-export const CONNECTORS = ["plex", "radarr", "sonarr", "bazarr"] as const;
+export const CONNECTORS = ["plex", "radarr", "sonarr", "bazarr", "files"] as const;
 
 export type ConnectorId = (typeof CONNECTORS)[number];
 
@@ -40,6 +40,14 @@ export type TitleKind = "movie" | "series";
 
 export type RecordKind = TitleKind | "episode";
 
+export type TrackSources = {
+  plex?: string | null;
+  radarr?: string | null;
+  sonarr?: string | null;
+  bazarr?: string | null;
+  file?: string | null;
+};
+
 export type AudioTrack = {
   language: string | null;
   layout: string | null;
@@ -50,6 +58,8 @@ export type AudioTrack = {
   detectedRole?: "commentary" | "short" | null;
   fromFile?: boolean;
   omittedByPlex?: boolean;
+  conflict?: string | null;
+  sources?: TrackSources;
   copies?: Array<{ path: string; ordinal: number }>;
 };
 
@@ -63,6 +73,9 @@ export type SubtitleTrack = {
   streamIndex?: number | null;
   file?: string | null;
   detectedLanguage?: string | null;
+  fromFile?: boolean;
+  conflict?: string | null;
+  sources?: TrackSources;
   copies?: Array<{ path: string; ordinal: number }>;
 };
 
@@ -77,6 +90,7 @@ export type MediaFile = {
   subtitleLanguages: string[];
   audioTracks?: AudioTrack[];
   subtitleTracks?: SubtitleTrack[];
+  origin?: "plex" | "radarr" | "sonarr" | "bazarr" | "file";
   bitrateKbps?: number | null;
   videoCodec?: string | null;
   videoProfile?: string | null;
@@ -315,6 +329,7 @@ export const CONNECTOR_LABEL: Record<ConnectorId, string> = {
   radarr: "Radarr",
   sonarr: "Sonarr",
   bazarr: "Bazarr",
+  files: "Files",
 };
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {

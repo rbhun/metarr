@@ -207,7 +207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <DialogHeader>
             <DialogTitle>Sync metadata</DialogTitle>
             <DialogDescription>
-              Metarr reads library records only. A connector that fails keeps the last successful copy.
+              Metarr reads Plex, Radarr, Sonarr, and Bazarr. Folder scan, when it is on, reads the files and compares their language tags. A connector that fails keeps the last successful copy.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">

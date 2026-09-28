@@ -1,5 +1,5 @@
-import { languageName, playableName } from "@/lib/media";
-import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack } from "@/lib/types";
+import { languageName, playableName, sourceTooltip } from "@/lib/media";
+import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack, type TrackSources } from "@/lib/types";
 
 export function formatWhen(value: string | null | undefined): string {
   if (!value) return "Never synced";
@@ -59,6 +59,12 @@ export function formatLayout(layout: string | null | undefined): string | null {
   if (/stereo/i.test(layout)) return "2.0";
   if (/mono/i.test(layout)) return "1.0";
   return layout;
+}
+
+export function languageHover(sources: TrackSources | undefined, shown: string | null, note?: string | null): string | undefined {
+  const report = sourceTooltip(sources, shown);
+  const text = [report, note?.trim() ? note : null].filter(Boolean).join("\n");
+  return text || undefined;
 }
 
 export function shownLanguage(track: { language: string | null; detectedLanguage?: string | null }): string | null {

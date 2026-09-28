@@ -2,9 +2,11 @@
 
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
+import { FolderScanCard } from "@/components/folder-scan-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
 import { ScheduleSettings } from "@/components/schedule-settings";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,7 +21,7 @@ import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
-const HELP: Record<ConnectorId, { url: string; secret: string; body: string }> = {
+const HELP: Record<Exclude<ConnectorId, "files">, { url: string; secret: string; body: string }> = {
   plex: {
     url: "http://192.168.1.20:32400",
     secret: "X-Plex-Token",
@@ -320,8 +322,10 @@ export function SettingsView() {
 
         <ScheduleSettings />
 
+        <Separator />
+
         <div className="grid gap-4 lg:grid-cols-2">
-          {(Object.keys(HELP) as ConnectorId[]).map((id) => {
+          {(Object.keys(HELP) as Array<Exclude<ConnectorId, "files">>).map((id) => {
             const form = forms[id];
             const stored = saved.find((connector) => connector.id === id);
             const help = HELP[id];
@@ -572,6 +576,7 @@ export function SettingsView() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
+          <FolderScanCard />
           <DetectSettingsCard />
           <RemuxSettingsCard />
         </div>
@@ -636,6 +641,8 @@ export function SettingsView() {
             );
           })}
         </div>
+
+        <Separator />
 
         <Card size="sm">
           <CardHeader>

@@ -5,6 +5,7 @@ import { testSonarr } from "@/lib/connectors/sonarr";
 import type { ConnectorId } from "@/lib/types";
 
 export async function testConnector(id: ConnectorId, baseUrl: string, apiKey: string): Promise<string> {
+  if (id === "files") throw new Error("Folder scan reads local folders. Turn it on in Settings.");
   if (!baseUrl.trim()) throw new Error("Enter a base URL.");
   if (!apiKey.trim()) {
     throw new Error(id === "plex" ? "Enter a Plex token." : "Enter an API key.");

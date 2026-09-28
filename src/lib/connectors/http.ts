@@ -11,6 +11,7 @@ export const DEFAULT_PORT: Record<ConnectorId, number> = {
   radarr: 7878,
   sonarr: 8989,
   bazarr: 6767,
+  files: 80,
 };
 
 export function normalizeBaseUrl(input: string, defaultPort?: number): string {
