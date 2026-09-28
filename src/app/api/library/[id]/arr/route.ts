@@ -1,4 +1,5 @@
 import { arrAction, bazarrOpenUrl, plexOpenUrl } from "@/lib/arr-action";
+import { askPlexToScan } from "@/lib/plex-scan";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -11,10 +12,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: "Unknown title." }, { status: 400 });
   }
   const body = (await request.json().catch(() => null)) as { action?: string; app?: string; episodeId?: number } | null;
-  const action = body?.action === "open" || body?.action === "search" ? body.action : null;
+  const action = body?.action === "open" || body?.action === "search" || body?.action === "scan" ? body.action : null;
   if (!action) return NextResponse.json({ error: "Choose open or search." }, { status: 400 });
   try {
     if (body?.app === "plex") {
+      if (action === "scan") return NextResponse.json(await askPlexToScan(catalogId, body.episodeId));
       if (action !== "open") return NextResponse.json({ error: "Plex can only be opened." }, { status: 400 });
       return NextResponse.json(await plexOpenUrl(catalogId, body.episodeId));
     }
@@ -22,6 +24,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (action !== "open") return NextResponse.json({ error: "Bazarr can only be opened." }, { status: 400 });
       return NextResponse.json(await bazarrOpenUrl(catalogId));
     }
+    if (action === "scan") return NextResponse.json({ error: "Only Plex can scan a folder." }, { status: 400 });
     const app = body?.app === "radarr" || body?.app === "sonarr" ? body.app : undefined;
     return NextResponse.json(await arrAction(catalogId, action, app));
   } catch (error) {

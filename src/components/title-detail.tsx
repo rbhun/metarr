@@ -16,7 +16,7 @@ import { multiPartLabel } from "@/lib/media";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
-import { openService, type ServiceApp } from "@/components/open-service";
+import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 import { useState } from "react";
 
@@ -82,6 +82,16 @@ export function TitleDetail({
       const body = (await response.json()) as { message?: string; error?: string };
       if (!response.ok) throw new Error(body.error || "The request failed.");
       toast.success(body.message || "Sent.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The request failed.");
+    } finally {
+      setArrBusy(null);
+    }
+  }
+  async function askPlexScan(id: number) {
+    setArrBusy("plex");
+    try {
+      toast.success(await scanInPlex(id, episode?.id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The request failed.");
     } finally {
@@ -207,7 +217,11 @@ export function TitleDetail({
                     </button>
                   </Badge>
                 ) : (
-                  <Badge variant="outline">Not in Plex</Badge>
+                  <Badge variant="outline" asChild className="cursor-pointer border-rose-600/40 bg-rose-500/10 text-rose-800 hover:underline dark:text-rose-200">
+                    <button type="button" disabled={arrBusy != null} onClick={() => void askPlexScan(title.id)} aria-label="Ask Plex to scan this title" title="Ask Plex to scan this folder">
+                      Not in Plex
+                    </button>
+                  </Badge>
                 )}
                 {arr?.apps.map((app) =>
                   app.present ? (

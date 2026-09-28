@@ -37,7 +37,7 @@ import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versi
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
-import { openService, type ServiceApp } from "@/components/open-service";
+import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 
 type KindFilter = "all" | TitleKind;
@@ -72,7 +72,7 @@ function playableClass(label: PlayableLabel): string {
   return "text-foreground";
 }
 
-function Presence({ yes, label, onOpen }: { yes: boolean; label: string; onOpen?: () => void }) {
+function Presence({ yes, label, onOpen, onMissing }: { yes: boolean; label: string; onOpen?: () => void; onMissing?: () => void }) {
   const className = yes
     ? "border-emerald-600/40 bg-emerald-500/15 text-emerald-900 dark:text-emerald-100"
     : "border-rose-600/40 bg-rose-500/10 text-rose-800 dark:text-rose-200";
@@ -81,6 +81,15 @@ function Presence({ yes, label, onOpen }: { yes: boolean; label: string; onOpen?
       <Badge variant="outline" asChild className={cn(className, "cursor-pointer hover:underline")}>
         <button type="button" onClick={onOpen} aria-label={`Open in ${label}`}>
           {label}
+        </button>
+      </Badge>
+    );
+  }
+  if (!yes && onMissing) {
+    return (
+      <Badge variant="outline" asChild className={cn(className, "cursor-pointer hover:underline")}>
+        <button type="button" onClick={onMissing} aria-label={`Ask ${label} to scan this title`} title={`Ask ${label} to scan this folder`}>
+          {`No ${label}`}
         </button>
       </Badge>
     );
@@ -271,6 +280,12 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
 
   function openIn(titleId: number, app: ServiceApp, episodeId?: number) {
     void openService(titleId, app, episodeId)
+      .then((message) => toast.success(message))
+      .catch((caught: unknown) => toast.error(caught instanceof Error ? caught.message : "The request failed."));
+  }
+
+  function scanTitle(titleId: number, episodeId?: number) {
+    void scanInPlex(titleId, episodeId)
       .then((message) => toast.success(message))
       .catch((caught: unknown) => toast.error(caught instanceof Error ? caught.message : "The request failed."));
   }
@@ -744,7 +759,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                           </TableCell>
                           <TableCell rowSpan={title.versions.length > 1 ? title.versions.length : undefined}>
                             <div className="flex max-w-48 flex-wrap gap-1">
-                              <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} />
+                              <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} onMissing={title.inPlex ? undefined : () => scanTitle(title.id)} />
                               {arr.apps.map((app) => (
                                 <Presence key={app.id} yes={app.present} label={app.label} onOpen={app.present ? () => openIn(title.id, app.id) : undefined} />
                               ))}
@@ -840,6 +855,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                               setDetailEpisode(episode);
                             }}
                             onOpenIn={(app, episodeId) => openIn(title.id, app, episodeId)}
+                            onScan={(episodeId) => scanTitle(title.id, episodeId)}
                           />
                         ) : null}
                       </Fragment>
@@ -941,7 +957,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                       )}
                     </dl>
                     <div className="mt-3 flex flex-wrap gap-1">
-                      <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} />
+                      <Presence yes={title.inPlex} label="Plex" onOpen={title.inPlex ? () => openIn(title.id, "plex") : undefined} onMissing={title.inPlex ? undefined : () => scanTitle(title.id)} />
                       {arr.apps.map((app) => (
                         <Presence key={app.id} yes={app.present} label={app.label} onOpen={app.present ? () => openIn(title.id, app.id) : undefined} />
                       ))}
@@ -996,6 +1012,7 @@ function EpisodeRows({
   onToggle,
   onOpen,
   onOpenIn,
+  onScan,
 }: {
   series: LibraryTitle;
   detail: LibraryEpisode[] | "loading" | "error" | undefined;
@@ -1004,6 +1021,7 @@ function EpisodeRows({
   onToggle: (row: SelectedRow, on: boolean) => void;
   onOpen: (episode: LibraryEpisode) => void;
   onOpenIn: (app: ServiceApp, episodeId?: number) => void;
+  onScan: (episodeId: number) => void;
 }) {
   const [openSeasons, setOpenSeasons] = useState<Set<string>>(() => new Set());
   if (!detail || detail === "loading") {
@@ -1089,7 +1107,7 @@ function EpisodeRows({
                           </TableCell>
                           <TableCell rowSpan={versions.length > 1 ? versions.length : undefined}>
                             <div className="flex max-w-48 flex-wrap gap-1">
-                              <Presence yes={episode.inPlex} label="Plex" onOpen={episode.inPlex ? () => onOpenIn("plex", episode.id) : undefined} />
+                              <Presence yes={episode.inPlex} label="Plex" onOpen={episode.inPlex ? () => onOpenIn("plex", episode.id) : undefined} onMissing={episode.inPlex ? undefined : () => onScan(episode.id)} />
                               {(["sonarr", "bazarr"] as const).filter((id) => configured.includes(id)).map((id) => {
                                 const present = id === "sonarr" ? episode.inSonarr : episode.inBazarr;
                                 return (

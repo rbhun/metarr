@@ -82,7 +82,7 @@ export async function suggestedPlexFolders(db: Database.Database): Promise<PlexL
     const identity = folderPath.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     if (!identity || seen.has(identity)) continue;
     seen.add(identity);
-    local.push({ path: folderPath, library: folder.library });
+    local.push({ path: folderPath, library: folder.library, key: folder.key });
   }
   return local;
 }

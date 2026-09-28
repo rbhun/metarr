@@ -609,7 +609,7 @@ export async function fetchPlexLibraries(baseUrl: string, token: string): Promis
   return listPlexLibraries(payload);
 }
 
-export type PlexLibraryFolder = { path: string; library: string };
+export type PlexLibraryFolder = { path: string; library: string; key: string };
 
 /** Movie and show folders Plex is watching, skipping libraries Metarr was told to ignore. */
 export function plexLibraryFolders(payload: unknown, excludedKeys: string[] = []): PlexLibraryFolder[] {
@@ -630,10 +630,57 @@ export function plexLibraryFolders(payload: unknown, excludedKeys: string[] = []
       const identity = root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
       if (!root || seen.has(identity)) continue;
       seen.add(identity);
-      folders.push({ path: root, library });
+      folders.push({ path: root, library, key });
     }
   }
   return folders;
+}
+
+/**
+ * Section and folder Plex should refresh so a file it has not seen yet is picked up.
+ * The folder is the first directory under the library root, which is the movie or show
+ * even when the file sits in BDMV/STREAM.
+ */
+export function plexFolderToScan(
+  locations: Array<{ key: string; path: string }>,
+  filePath: string,
+): { key: string; path: string } | null {
+  const file = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!file) return null;
+  let best: { key: string; root: string } | null = null;
+  for (const location of locations) {
+    const root = location.path.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!root || !location.key) continue;
+    const inside = file.toLowerCase() === root.toLowerCase() || file.toLowerCase().startsWith(`${root.toLowerCase()}/`);
+    if (!inside) continue;
+    if (!best || root.length > best.root.length) best = { key: location.key, root };
+  }
+  if (!best) return null;
+  const rest = file.slice(best.root.length).replace(/^\/+/, "");
+  const segment = rest.split("/").find((part) => part.length > 0) ?? "";
+  if (!segment || !rest.includes("/")) return { key: best.key, path: best.root };
+  return { key: best.key, path: `${best.root}/${segment}` };
+}
+
+export async function refreshPlexSectionFolder(baseUrl: string, token: string, sectionKey: string, folder: string): Promise<void> {
+  const base = normalizeBaseUrl(baseUrl, 32400);
+  const url = `${base}/library/sections/${encodeURIComponent(sectionKey)}/refresh?path=${encodeURIComponent(folder)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: plexHeaders(token.trim()),
+      cache: "no-store",
+      signal: AbortSignal.timeout(25000),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "TimeoutError" || name === "AbortError") throw new Error("Timed out waiting for Plex.");
+    throw new Error("Could not reach Plex. Check the base URL and that this machine can open it.");
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`Plex rejected the key (HTTP ${response.status}).`);
+  }
+  if (!response.ok) throw new Error(`Plex returned HTTP ${response.status}.`);
 }
 
 export async function fetchPlexLibraryFolders(baseUrl: string, token: string, excludedKeys: string[] = []): Promise<PlexLibraryFolder[]> {

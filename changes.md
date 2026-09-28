@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.91
+
+- Click the No Plex pill to ask Plex to scan that title’s folder, so a new file can be recognized.
+
 ## 0.0.90
 
 - Check a recognized language against the file, and write it when the track is still unlabeled.
