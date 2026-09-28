@@ -45,7 +45,9 @@ export function parseRadarrMovie(value: unknown): SourceDraft | null {
     media?.height,
   );
   const hdr = detectHdr([media?.videoDynamicRangeType, media?.videoDynamicRange, media?.videoHdrFormat]);
-  const audio = collectLanguages(media?.audioLanguages ?? media?.audioLanguage);
+  const probed = collectLanguages(media?.audioLanguages ?? media?.audioLanguage);
+  const listed = collectLanguages(file?.languages).filter((name) => !/^(any|original)$/i.test(name));
+  const audio = probed.length ? probed : listed;
   const subtitles = collectLanguages(media?.subtitles);
   const quality = qualityName(file);
   const is3d = detect3d([title, filePath, quality]);

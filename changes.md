@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.86
+
+- Read the language Radarr stores on the movie file when its audio field is blank, so that label is not treated as missing.
+
 ## 0.0.85
 
 - Say on a language label when Metarr recognized it, and name Radarr or Sonarr there when the title is in that app.
