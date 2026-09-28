@@ -89,7 +89,9 @@ function runMakeMkv(binary: string, args: string[], home: string, onLine: (line:
       settled = true;
       clearTimeout(timer);
       if (code === 0) resolve(output);
-      else reject(new Error(makemkvFailure(output, code)));
+      else if (code === 127) {
+        reject(new Error(`${binary} was not found where Metarr runs. Rebuild the Docker image (it includes MakeMKV), or set the full path in Settings → Disc remux.`));
+      } else reject(new Error(makemkvFailure(output, code)));
     });
   });
 }

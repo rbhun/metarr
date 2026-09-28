@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.61
+
+- Build MakeMKV 2.0.0 into the Docker image, because remux failed with exit code 127 when makemkvcon only existed on the host, and say plainly when it cannot be found.
+
 ## 0.0.60
 
 - Put remux and retag scratch on the NAS in `/mnt/media/.metarr-work`, since the Plex VM has no room for a Blu-ray remux, and rename finished files into place instead of copying them again.
