@@ -257,6 +257,7 @@ export function migrate(db: Database.Database) {
   if (!titleColumns.some((column) => column.name === "match_key")) {
     db.exec(`ALTER TABLE catalog_titles ADD COLUMN match_key TEXT`);
   }
+  ensureColumn(db, "remux_jobs", "immediate", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "catalog_titles", "content_rating", "TEXT");
   ensureColumn(db, "catalog_titles", "bitrate_kbps", "INTEGER");
   ensureColumn(db, "catalog_titles", "audio_tracks", "TEXT NOT NULL DEFAULT '[]'");

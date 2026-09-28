@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.92
+
+- Add a Convert button to the library panel for disc titles; it remuxes right away instead of waiting for the overnight window.
+
 ## 0.0.91
 
 - Click the No Plex pill to ask Plex to scan that title’s folder, so a new file can be recognized.

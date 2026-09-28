@@ -22,6 +22,7 @@ import {
   enqueueDiscs,
   enqueuePaths,
   finishRemux,
+  hasImmediateRemux,
   KEEP_ALL_SELECTION,
   retryFailedRemux,
   listRemuxJobs,
@@ -116,7 +117,7 @@ test("only disc images join the queue, one after another", () => {
     ],
     true,
   );
-  assert.deepEqual(result, { added: 2, skipped: 1, already: 0 });
+  assert.deepEqual(result, { added: 2, skipped: 1, already: 0, promoted: 0 });
   assert.equal(discsFromFile(scan("Show", "/tv/Show.mkv", "mkv")).length, 0);
   const again = enqueueDiscs(db, [scan("Film (1999)", "/movies/Film.iso", "iso")], false);
   assert.equal(again.already, 1);
@@ -126,6 +127,26 @@ test("only disc images join the queue, one after another", () => {
   assert.equal(first?.extras, true);
   assert.equal(claimNextRemux(db)?.label, "Disc (2001)");
   assert.equal(claimNextRemux(db), null);
+  db.close();
+});
+
+test("Convert now jumps the queue and moves up a waiting disc", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueDiscs(db, [scan("Old (1990)", "/movies/Old.iso", "iso"), scan("Film (1999)", "/movies/Film.iso", "iso")], false);
+  assert.equal(hasImmediateRemux(db), false);
+  assert.equal(claimNextRemux(db, true), null);
+  const promoted = enqueueDiscs(db, [scan("Film (1999)", "/movies/Film.iso", "iso")], false, true);
+  assert.deepEqual(promoted, { added: 0, skipped: 0, already: 0, promoted: 1 });
+  assert.equal(enqueueDiscs(db, [scan("Film (1999)", "/movies/Film.iso", "iso")], false, true).already, 1);
+  const added = enqueuePaths(db, [{ path: "/movies/New.iso", label: "New (2020)" }], false, true);
+  assert.equal(added.added, 1);
+  assert.equal(hasImmediateRemux(db), true);
+  assert.equal(claimNextRemux(db, true)?.label, "Film (1999)");
+  assert.equal(claimNextRemux(db, true)?.label, "New (2020)");
+  assert.equal(claimNextRemux(db, true), null);
+  assert.equal(hasImmediateRemux(db), false);
+  assert.equal(claimNextRemux(db)?.label, "Old (1990)");
   db.close();
 });
 
@@ -202,7 +223,7 @@ test("paths and library discs feed the remux queue and history list", () => {
     ],
     false,
   );
-  assert.deepEqual(byPath, { added: 1, skipped: 1, already: 1 });
+  assert.deepEqual(byPath, { added: 1, skipped: 1, already: 1, promoted: 0 });
   const again = enqueuePaths(db, [{ path: "/movies/Alien DVD.iso" }], true);
   assert.equal(again.already, 1);
   assert.deepEqual(remuxTotals(db), { pending: 1, running: 0, done: 0, failed: 0 });

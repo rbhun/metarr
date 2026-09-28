@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3";
 import { filesForLibrary } from "@/lib/detect/files";
-import type { ScanFile } from "@/lib/detect/targets";
-import { discKind, isDiscImage, playableName } from "@/lib/media";
-import { discsFromFile } from "@/lib/remux/discs";
-import type { MediaVersion, PlayableLabel } from "@/lib/types";
+import { discKind, playableName } from "@/lib/media";
+import { convertedFileFor, discsFromFile } from "@/lib/remux/discs";
+import type { PlayableLabel } from "@/lib/types";
+
+export { convertedFileFor };
 
 export type DiscCandidateView = {
   path: string;
@@ -15,17 +16,6 @@ export type DiscCandidateView = {
   convertedPath: string | null;
   titleId: number | null;
 };
-
-/** A playable, non-disc video file on the same title, such as the MKV a remux produced. */
-export function convertedFileFor(
-  file: Pick<ScanFile, "path" | "container" | "playableLabel"> & { versions: Array<Pick<MediaVersion, "path" | "container" | "playableLabel">> },
-): string | null {
-  const paths = [
-    ...(file.playableLabel === "video" ? [{ path: file.path, container: file.container }] : []),
-    ...file.versions.filter((version) => version.playableLabel === "video").map((version) => ({ path: version.path, container: version.container })),
-  ];
-  return paths.find((item) => item.path && !isDiscImage(item.container, item.path))?.path ?? null;
-}
 
 function finishedRemuxPaths(db: Database.Database): Set<string> {
   const rows = db

@@ -105,9 +105,10 @@ export async function POST(request: Request) {
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
   const paths = pathList(record.paths);
+  const immediate = record.immediate === true;
   const result = paths.length
-    ? enqueuePaths(db, paths, record.extras === true)
-    : enqueueDiscs(db, filesForSelection(db, idList(record.titles), idList(record.episodes)), record.extras === true);
+    ? enqueuePaths(db, paths, record.extras === true, immediate)
+    : enqueueDiscs(db, filesForSelection(db, idList(record.titles), idList(record.episodes)), record.extras === true, immediate);
   startRemuxWorker();
   kickRemuxWorker();
   return NextResponse.json({ ...result, counts: remuxCounts(db), totals: remuxTotals(db) });
