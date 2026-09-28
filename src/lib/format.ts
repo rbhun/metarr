@@ -132,7 +132,7 @@ export function episodeCode(season: number | null, episode: number | null): stri
 }
 
 export function arrPresence(title: LibraryTitle, configured: ConnectorId[]) {
-  const candidates: ConnectorId[] = title.kind === "movie" ? ["radarr", "bazarr"] : ["sonarr", "bazarr"];
+  const candidates: Array<"radarr" | "sonarr" | "bazarr"> = title.kind === "movie" ? ["radarr", "bazarr"] : ["sonarr", "bazarr"];
   const apps = candidates
     .filter((id) => configured.includes(id))
     .map((id) => ({
