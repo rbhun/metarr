@@ -3,6 +3,7 @@
 ## 0.0.70
 
 - Label a finished rip as Saved (or Dry run) on Tasks, instead of "No language", which only applies to language checks.
+- Fix the build after the folder scan source was added, so the Docker image compiles again.
 
 ## 0.0.69
 
