@@ -4,6 +4,7 @@ import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
 import { FolderScanCard } from "@/components/folder-scan-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
+import { RewrapSettingsCard } from "@/components/rewrap-settings";
 import { ScheduleSettings } from "@/components/schedule-settings";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -580,6 +581,7 @@ export function SettingsView() {
         <div className="grid gap-4 lg:grid-cols-2">
           <DetectSettingsCard />
           <RemuxSettingsCard />
+          <RewrapSettingsCard />
         </div>
 
         <div>

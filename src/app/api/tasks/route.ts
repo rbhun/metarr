@@ -1,6 +1,8 @@
 import { clearJobs, detectCounts, jobTotals as languageTotals, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
 import { clearRemuxJobs, remuxCounts, remuxTotals, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
+import { clearRewrapJobs, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
+import { kickRewrapWorker, startRewrapWorker } from "@/lib/rewrap/worker";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
 import { getDb } from "@/lib/db";
@@ -10,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STATUSES = new Set<TaskStatus>(["pending", "running", "done", "failed", "skipped"]);
-const QUEUES = new Set<TaskQueue | "all">(["all", "language", "remux"]);
+const QUEUES = new Set<TaskQueue | "all">(["all", "language", "remux", "rewrap"]);
 
 function parseStatus(raw: string | null): TaskStatusFilter {
   if (!raw || raw === "all") return "all";
@@ -21,6 +23,7 @@ function parseStatus(raw: string | null): TaskStatusFilter {
 export async function GET(request: Request) {
   startDetectWorker();
   startRemuxWorker();
+  startRewrapWorker();
   const db = getDb();
   const url = new URL(request.url);
   const status = parseStatus(url.searchParams.get("status"));
@@ -37,6 +40,7 @@ export async function GET(request: Request) {
     allTotal: taskTotalsSum(totals),
     languageTotals: languageTotals(db),
     remuxTotals: remuxTotals(db),
+    rewrapTotals: rewrapTotals(db),
     counts: { ...detectCounts(db), remux: remuxCounts(db) },
     jobs: list.jobs,
     total: list.total,
@@ -53,14 +57,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const queue = record.queue === "language" || record.queue === "remux" ? record.queue : null;
+  const queue = record.queue === "language" || record.queue === "remux" || record.queue === "rewrap" ? record.queue : null;
   const id = typeof record.id === "number" && Number.isInteger(record.id) && record.id > 0 ? record.id : null;
   if (!queue || !id) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
   const db = getDb();
-  const result = queue === "language" ? retryFailedJob(db, id) : retryFailedRemux(db, id);
+  const result = queue === "language" ? retryFailedJob(db, id) : queue === "rewrap" ? retryFailedRewrap(db, id) : retryFailedRemux(db, id);
   if (result === "missing") return NextResponse.json({ error: "That failed task is no longer there." }, { status: 404 });
   if (result === "retried") {
     if (queue === "language") kickDetectWorker();
+    else if (queue === "rewrap") kickRewrapWorker();
     else kickRemuxWorker();
   }
   return NextResponse.json({ result, totals: taskTotalsFor(db, queue) });
@@ -78,7 +83,9 @@ export async function DELETE(request: Request) {
   let removed = 0;
   if (queue === "all" || queue === "language") removed += clearJobs(db, status as DetectJobStatus);
   if ((queue === "all" || queue === "remux") && status !== "skipped") removed += clearRemuxJobs(db, status as RemuxJobStatus);
+  if ((queue === "all" || queue === "rewrap") && status !== "skipped") removed += clearRewrapJobs(db, status as RewrapJobStatus);
   kickRemuxWorker();
+  kickRewrapWorker();
   return NextResponse.json({
     removed,
     totals: taskTotalsFor(db, queue),
