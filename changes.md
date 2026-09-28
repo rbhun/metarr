@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.70
+
+- Label a finished rip as Saved (or Dry run) on Tasks, instead of "No language", which only applies to language checks.
+
 ## 0.0.69
 
 - Hover a language to see whether Plex, Radarr or Sonarr, and the folder scan have that label.
