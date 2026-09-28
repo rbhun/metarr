@@ -69,18 +69,21 @@ export function languageHover(sources: TrackSources | undefined, shown: string |
 
 const FILE_KEYS = ["plex", "radarr", "sonarr", "bazarr", "file"] as const;
 
-/** Per-file presence wins. Title flags fill a connector the stored file did not mention. */
+/** Per-file presence wins. A movie names Radarr and an episode names Sonarr. */
 export function fileHoverSources(
-  flags: { inPlex: boolean; inRadarr?: boolean; inSonarr?: boolean; inBazarr?: boolean },
+  flags: { kind?: "movie" | "series"; inPlex: boolean; inRadarr?: boolean; inSonarr?: boolean; inBazarr?: boolean },
   configured: ConnectorId[],
   stored?: FileSources,
 ): FileSources {
+  const series = flags.kind === "series" || (flags.kind == null && flags.inRadarr == null && flags.inSonarr != null);
   const sources: FileSources = { plex: flags.inPlex ? true : null };
-  if (configured.includes("radarr") && flags.inRadarr != null) sources.radarr = flags.inRadarr ? true : null;
-  if (configured.includes("sonarr") && flags.inSonarr != null) sources.sonarr = flags.inSonarr ? true : null;
+  if (!series && configured.includes("radarr") && flags.inRadarr != null) sources.radarr = flags.inRadarr ? true : null;
+  if (series && configured.includes("sonarr") && flags.inSonarr != null) sources.sonarr = flags.inSonarr ? true : null;
   if (configured.includes("bazarr") && flags.inBazarr != null) sources.bazarr = flags.inBazarr ? true : null;
   if (!stored) return sources;
   for (const key of FILE_KEYS) {
+    if (key === "sonarr" && !series) continue;
+    if (key === "radarr" && series) continue;
     if (key in stored) sources[key] = stored[key];
   }
   return sources;

@@ -566,10 +566,12 @@ export function presenceTooltip(presence: FileSources | undefined): string | nul
     if (value === undefined) return unchecked ? `${label}: ${unchecked}` : null;
     return `${label}: ${value ? "present" : "missing"}`;
   };
+  const radarr = presence.sonarr === true ? undefined : presence.radarr;
+  const sonarr = presence.radarr === true ? undefined : presence.sonarr;
   const lines = [
     line("Plex", presence.plex, null),
-    line("Radarr", presence.radarr, null),
-    line("Sonarr", presence.sonarr, null),
+    line("Radarr", radarr, null),
+    line("Sonarr", sonarr, null),
     line("Bazarr", presence.bazarr, null),
     line("File scan", presence.file, "not scanned"),
   ].filter((item): item is string => Boolean(item));

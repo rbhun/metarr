@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.74
+
+- Fill an empty folder scan list from the movie and show folders Plex is already watching.
+
+## 0.0.73
+
+- A file tooltip names Radarr or Sonarr, not both, because a movie and an episode do not share those apps.
+
 ## 0.0.72
 
 - Show a source tooltip on a language and on the file-type pill, using the labels already stored for that title.

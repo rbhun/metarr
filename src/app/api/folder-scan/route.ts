@@ -1,12 +1,19 @@
 import { getDb } from "@/lib/db";
-import { cleanRoots, readFolderScan, writeFolderScan } from "@/lib/folder-scan";
+import { cleanRoots, readFolderScan, suggestedPlexFolders, writeFolderScan } from "@/lib/folder-scan";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ settings: readFolderScan(getDb()) });
+  const db = getDb();
+  let plexFolders: Awaited<ReturnType<typeof suggestedPlexFolders>> = [];
+  try {
+    plexFolders = await suggestedPlexFolders(db);
+  } catch {
+    plexFolders = [];
+  }
+  return NextResponse.json({ settings: readFolderScan(db), plexFolders });
 }
 
 export async function PUT(request: Request) {

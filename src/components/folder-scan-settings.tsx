@@ -12,9 +12,13 @@ type FolderScanSettings = {
   roots: string[];
 };
 
+type PlexFolder = { path: string; library: string };
+
 export function FolderScanCard() {
   const [settings, setSettings] = useState<FolderScanSettings | null>(null);
   const [roots, setRoots] = useState("");
+  const [plexFolders, setPlexFolders] = useState<PlexFolder[]>([]);
+  const [filledFromPlex, setFilledFromPlex] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -22,10 +26,18 @@ export function FolderScanCard() {
       void fetch("/api/folder-scan", { cache: "no-store" })
         .then(async (response) => {
           if (!response.ok) return;
-          const body = (await response.json()) as { settings?: FolderScanSettings };
+          const body = (await response.json()) as { settings?: FolderScanSettings; plexFolders?: PlexFolder[] };
           if (!body.settings) return;
+          const suggested = body.plexFolders ?? [];
           setSettings(body.settings);
-          setRoots(body.settings.roots.join("\n"));
+          setPlexFolders(suggested);
+          if (body.settings.roots.length) {
+            setRoots(body.settings.roots.join("\n"));
+            setFilledFromPlex(false);
+          } else if (suggested.length) {
+            setRoots(suggested.map((folder) => folder.path).join("\n"));
+            setFilledFromPlex(true);
+          }
         })
         .catch(() => undefined);
     }, 0);
@@ -48,6 +60,7 @@ export function FolderScanCard() {
       if (body?.settings) {
         setSettings(body.settings);
         setRoots(body.settings.roots.join("\n"));
+        setFilledFromPlex(false);
       }
       toast.success(settings.enabled ? "Folder scan is on. The next sync reads those folders." : "Folder scan is off.");
     } catch (caught) {
@@ -85,11 +98,28 @@ export function FolderScanCard() {
             onChange={(event) => setRoots(event.target.value)}
             className="w-full rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
-          <p className="text-xs leading-5 text-muted-foreground">One full path per line. The scan uses the paths this machine can open.</p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {filledFromPlex
+              ? `Filled from Plex: ${[...new Set(plexFolders.map((folder) => folder.library))].join(", ")}. Save to keep them.`
+              : "One full path per line. The scan uses the paths this machine can open."}
+          </p>
         </div>
-        <Button size="sm" onClick={() => void save()} disabled={busy} className="self-start">
-          Save
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => void save()} disabled={busy} className="self-start">
+            Save
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || plexFolders.length === 0}
+            onClick={() => {
+              setRoots(plexFolders.map((folder) => folder.path).join("\n"));
+              setFilledFromPlex(true);
+            }}
+          >
+            Use Plex folders
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

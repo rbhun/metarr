@@ -602,6 +602,39 @@ export async function fetchPlexLibraries(baseUrl: string, token: string): Promis
   return listPlexLibraries(payload);
 }
 
+export type PlexLibraryFolder = { path: string; library: string };
+
+/** Movie and show folders Plex is watching, skipping libraries Metarr was told to ignore. */
+export function plexLibraryFolders(payload: unknown, excludedKeys: string[] = []): PlexLibraryFolder[] {
+  const container = asRecord(asRecord(payload)?.MediaContainer) ?? asRecord(payload);
+  const skipped = new Set(excludedKeys);
+  const folders: PlexLibraryFolder[] = [];
+  const seen = new Set<string>();
+  for (const section of asArray(container?.Directory)) {
+    const record = asRecord(section);
+    if (!record || (record.type !== "movie" && record.type !== "show")) continue;
+    const key = record.key != null ? String(record.key) : "";
+    if (!key || skipped.has(key)) continue;
+    const library = typeof record.title === "string" && record.title.trim() ? record.title.trim() : key;
+    for (const location of asArray(record.Location)) {
+      const folder = asRecord(location)?.path;
+      if (typeof folder !== "string") continue;
+      const root = folder.trim();
+      const identity = root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      if (!root || seen.has(identity)) continue;
+      seen.add(identity);
+      folders.push({ path: root, library });
+    }
+  }
+  return folders;
+}
+
+export async function fetchPlexLibraryFolders(baseUrl: string, token: string, excludedKeys: string[] = []): Promise<PlexLibraryFolder[]> {
+  const base = normalizeBaseUrl(baseUrl, 32400);
+  const payload = await fetchJson(`${base}/library/sections`, plexHeaders(token.trim()));
+  return plexLibraryFolders(payload, excludedKeys);
+}
+
 export async function testPlex(baseUrl: string, token: string): Promise<string> {
   const base = normalizeBaseUrl(baseUrl, 32400);
   const payload = await fetchJson(`${base}/identity`, plexHeaders(token.trim()));

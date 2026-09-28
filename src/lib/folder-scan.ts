@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { languageFromProbeTags } from "@/lib/detect/audio";
-import { getMeta, listConnectors, saveConnector, setMeta } from "@/lib/db";
+import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { readDetectSettings } from "@/lib/detect/store";
+import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
+import { getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
 import { fileExtension, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
@@ -52,6 +55,35 @@ export function readFolderScan(db: Database.Database): FolderScanSettings {
 export function writeFolderScan(db: Database.Database, settings: FolderScanSettings) {
   saveConnector({ id: "files", baseUrl: "", apiKey: "", enabled: settings.enabled }, db);
   setMeta(db, ROOTS_KEY, JSON.stringify(settings.roots));
+}
+
+function localizeFolder(folder: string, maps: PathMap[]): string {
+  const found = resolveMediaPath(folder, maps, (candidate) => {
+    try {
+      return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+  return found ?? folder.trim();
+}
+
+/** Folders from the Plex libraries Metarr syncs. A path map is applied when that folder exists here. */
+export async function suggestedPlexFolders(db: Database.Database): Promise<PlexLibraryFolder[]> {
+  const plex = listConnectors(db).find((connector) => connector.id === "plex");
+  if (!plex?.baseUrl.trim() || !plex.apiKey.trim()) return [];
+  const folders = await fetchPlexLibraryFolders(plex.baseUrl, plex.apiKey, plexExcludedLibraries(db));
+  const maps = readDetectSettings(db).pathMaps;
+  const seen = new Set<string>();
+  const local: PlexLibraryFolder[] = [];
+  for (const folder of folders) {
+    const folderPath = localizeFolder(folder.path, maps);
+    const identity = folderPath.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    if (!identity || seen.has(identity)) continue;
+    seen.add(identity);
+    local.push({ path: folderPath, library: folder.library });
+  }
+  return local;
 }
 
 export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } | null {

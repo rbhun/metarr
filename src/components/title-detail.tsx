@@ -117,7 +117,7 @@ export function TitleDetail({
   const hoverFlags = title
     ? episode
       ? { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr }
-      : { inPlex: title.inPlex, inRadarr: title.inRadarr, inSonarr: title.inSonarr, inBazarr: title.inBazarr }
+      : { kind: title.kind, inPlex: title.inPlex, inRadarr: title.inRadarr, inSonarr: title.inSonarr, inBazarr: title.inBazarr }
     : null;
 
   return (

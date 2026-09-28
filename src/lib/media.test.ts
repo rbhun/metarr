@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileHoverSources } from "@/lib/format";
 import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
@@ -279,6 +280,26 @@ test("a file pill lists which source has that file", () => {
   assert.equal(noted[0]?.presence?.plex, true);
   assert.equal(noted[0]?.presence?.radarr, null);
   assert.equal(presenceTooltip(noted[0]?.presence), "Plex: present\nRadarr: missing\nFile scan: not scanned");
+  assert.equal(
+    presenceTooltip({ plex: true, radarr: true, sonarr: null }),
+    "Plex: present\nRadarr: present\nFile scan: not scanned",
+  );
+  assert.equal(
+    presenceTooltip({ plex: true, radarr: null, sonarr: true }),
+    "Plex: present\nSonarr: present\nFile scan: not scanned",
+  );
+  const movie = fileHoverSources(
+    { kind: "movie", inPlex: true, inRadarr: true, inSonarr: false, inBazarr: true },
+    ["radarr", "sonarr", "bazarr"],
+  );
+  assert.equal(movie.radarr, true);
+  assert.equal("sonarr" in movie, false);
+  const episode = fileHoverSources(
+    { inPlex: true, inSonarr: true, inBazarr: false },
+    ["radarr", "sonarr", "bazarr"],
+  );
+  assert.equal(episode.sonarr, true);
+  assert.equal("radarr" in episode, false);
   const versions = versionsFrom(noted);
   assert.equal(versions[0]?.presence?.plex, true);
 });
