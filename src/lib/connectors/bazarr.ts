@@ -183,6 +183,34 @@ export async function testBazarr(baseUrl: string, apiKey: string): Promise<strin
   return version ? `Connected to Bazarr ${version}.` : "Connected to Bazarr.";
 }
 
+export async function fetchBazarrMovie(baseUrl: string, apiKey: string, radarrId: number): Promise<SourceDraft | null> {
+  const base = normalizeBaseUrl(baseUrl, 6767);
+  const payload = await fetchJson(`${base}/api/movies/${radarrId}`, headers(apiKey.trim()));
+  const record = asRecord(payload);
+  return parseBazarrMovie(record?.data ?? payload);
+}
+
+export async function fetchBazarrEpisode(
+  baseUrl: string,
+  apiKey: string,
+  seriesId: string,
+  videoPath: string,
+): Promise<SourceDraft | null> {
+  const base = normalizeBaseUrl(baseUrl, 6767);
+  const rows = await fetchSeriesEpisodes(base, apiKey.trim(), seriesId);
+  for (const row of rows) {
+    const parsed = parseBazarrEpisode(row);
+    if (!parsed) continue;
+    const paths = [parsed.path, ...parsed.files.map((file) => file.path)];
+    if (paths.some((filePath) => filePath && sameStoredPath(filePath, videoPath))) return parsed;
+  }
+  return null;
+}
+
+function sameStoredPath(left: string, right: string): boolean {
+  return left.replace(/\\/g, "/") === right.replace(/\\/g, "/");
+}
+
 export async function pullBazarr(
   baseUrl: string,
   apiKey: string,

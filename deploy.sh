@@ -37,6 +37,53 @@ METARR_UID=${METARR_UID:-1500}
 METARR_GID=${METARR_GID:-1002}
 echo "Running as ${METARR_UID}:${METARR_GID}, umask ${UMASK:-002}$( [ "${METARR_DRY_RUN:-0}" = "1" ] && echo ', dry run (nothing is written to /mnt/media)')."
 
+# MakeMKV is compiled from a Debian image. That image is pulled only when the
+# binaries are not already on this machine. Later deploys copy the saved copy.
+install_makemkv() {
+  version=$(sed -n 's/^ARG MAKEMKV_VERSION=//p' "$root/Dockerfile.makemkv" | head -n 1)
+  [ -n "$version" ] || version=2.0.0
+  dest="$root/vendor/makemkv"
+  if [ -x "$dest/bin/makemkvcon" ] && [ "$(cat "$dest/VERSION" 2>/dev/null || true)" = "$version" ]; then
+    echo "MakeMKV ${version} is already installed."
+    return
+  fi
+
+  current_image() {
+    id=$(docker compose ps -aq metarr 2>/dev/null | head -n 1 || true)
+    if [ -n "$id" ]; then
+      docker inspect -f '{{.Image}}' "$id" 2>/dev/null || true
+      return
+    fi
+    docker images -q --filter label=com.docker.compose.service=metarr 2>/dev/null | head -n 1 || true
+  }
+
+  extract_makemkv() {
+    image=$1
+    rm -rf "$dest"
+    mkdir -p "$dest/bin" "$dest/lib"
+    docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/'
+  }
+
+  image=$(current_image)
+  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon'; then
+    echo "MakeMKV is already in the current image. Copying it out."
+    extract_makemkv "$image" || rm -rf "$dest"
+  fi
+  if [ ! -x "$dest/bin/makemkvcon" ]; then
+    echo "MakeMKV ${version} is missing. Downloading it."
+    docker build -f "$root/Dockerfile.makemkv" -t "metarr-makemkv:${version}" "$root"
+    extract_makemkv "metarr-makemkv:${version}"
+  fi
+  if [ ! -x "$dest/bin/makemkvcon" ]; then
+    echo "MakeMKV could not be installed." >&2
+    exit 1
+  fi
+  printf '%s\n' "$version" > "$dest/VERSION"
+  echo "MakeMKV ${version} is installed."
+}
+
+install_makemkv
+
 docker compose up --build -d
 
 i=0

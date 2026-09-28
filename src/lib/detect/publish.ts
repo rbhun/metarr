@@ -1,4 +1,5 @@
-import { normalizeBaseUrl } from "@/lib/connectors/http";
+import { asRecord, normalizeBaseUrl } from "@/lib/connectors/http";
+import { refreshFileSources } from "@/lib/detect/refresh";
 import { listConnectors } from "@/lib/db";
 import type Database from "better-sqlite3";
 
@@ -84,7 +85,7 @@ function remember(key: string) {
   recent.set(key, Date.now());
 }
 
-async function send(url: string, method: string, headers: Record<string, string>, body?: string): Promise<void> {
+async function send(url: string, method: string, headers: Record<string, string>, body?: string): Promise<unknown> {
   const response = await fetch(url, {
     method,
     headers,
@@ -93,7 +94,32 @@ async function send(url: string, method: string, headers: Record<string, string>
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  await response.arrayBuffer().catch(() => undefined);
+  const text = await response.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {};
+  }
+}
+
+function commandId(payload: unknown): number | null {
+  const id = asRecord(payload)?.id;
+  const numeric = typeof id === "number" ? id : typeof id === "string" ? Number(id) : NaN;
+  return Number.isInteger(numeric) ? numeric : null;
+}
+
+async function waitForCommand(base: string, headers: Record<string, string>, id: number) {
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    try {
+      const status = String(asRecord(await send(`${base}/api/v3/command/${id}`, "GET", headers))?.status ?? "").toLowerCase();
+      if (status === "completed" || status === "failed" || status === "aborted" || status === "cancelled") return;
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
 }
 
 function sourcesFor(db: Database.Database, videoPaths: string[]): PlayerSource[] {
@@ -136,12 +162,23 @@ export async function notifyPlayers(db: Database.Database, videoPaths: string[],
   const connectors = listConnectors(db);
   const asked: string[] = [];
   const failed: string[] = [];
+  const pending: Array<{ base: string; headers: Record<string, string>; id: number }> = [];
+  let plexFresh = false;
 
   const plex = connectors.find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
   if (plex) {
     const base = normalizeBaseUrl(plex.baseUrl, 32400);
     const headers = { Accept: "application/json", "X-Plex-Token": plex.apiKey, "X-Plex-Product": "Metarr", "X-Plex-Client-Identifier": "metarr-local" };
-    await askEach("Plex", ids.plex, (id) => send(`${base}/library/metadata/${id}/analyze`, "PUT", headers), asked, failed);
+    await askEach(
+      "Plex",
+      ids.plex,
+      async (id) => {
+        await send(`${base}/library/metadata/${id}/analyze`, "PUT", headers);
+        plexFresh = true;
+      },
+      asked,
+      failed,
+    );
   }
 
   const radarr = connectors.find((connector) => connector.id === "radarr" && connector.enabled && connector.baseUrl && connector.apiKey);
@@ -151,7 +188,10 @@ export async function notifyPlayers(db: Database.Database, videoPaths: string[],
     await askEach(
       "Radarr",
       ids.radarr.map(String),
-      (id) => send(`${base}/api/v3/command`, "POST", headers, JSON.stringify({ name: "RescanMovie", movieId: Number(id) })),
+      async (id) => {
+        const command = commandId(await send(`${base}/api/v3/command`, "POST", headers, JSON.stringify({ name: "RescanMovie", movieId: Number(id) })));
+        if (command != null) pending.push({ base, headers, id: command });
+      },
       asked,
       failed,
     );
@@ -164,7 +204,10 @@ export async function notifyPlayers(db: Database.Database, videoPaths: string[],
     await askEach(
       "Sonarr",
       ids.sonarr.map(String),
-      (id) => send(`${base}/api/v3/command`, "POST", headers, JSON.stringify({ name: "RescanSeries", seriesId: Number(id) })),
+      async (id) => {
+        const command = commandId(await send(`${base}/api/v3/command`, "POST", headers, JSON.stringify({ name: "RescanSeries", seriesId: Number(id) })));
+        if (command != null) pending.push({ base, headers, id: command });
+      },
       asked,
       failed,
     );
@@ -177,15 +220,26 @@ export async function notifyPlayers(db: Database.Database, videoPaths: string[],
     await askEach(
       "Bazarr",
       [...ids.bazarrMovies.map((id) => `movie:${id}`), ...ids.bazarrSeries.map((id) => `series:${id}`)],
-      (key) => {
+      async (key) => {
         const movie = key.match(/^movie:(\d+)$/)?.[1];
-        if (movie) return send(`${base}/api/movies`, "PATCH", headers, JSON.stringify({ radarrid: Number(movie), action: "scan-disk" }));
+        if (movie) {
+          await send(`${base}/api/movies`, "PATCH", headers, JSON.stringify({ radarrid: Number(movie), action: "scan-disk" }));
+          return;
+        }
         const series = key.match(/^series:(\d+)$/)?.[1];
-        return send(`${base}/api/series`, "PATCH", headers, JSON.stringify({ seriesid: Number(series), action: "scan-disk" }));
+        await send(`${base}/api/series`, "PATCH", headers, JSON.stringify({ seriesid: Number(series), action: "scan-disk" }));
       },
       asked,
       failed,
     );
+  }
+
+  await Promise.all(pending.map((command) => waitForCommand(command.base, command.headers, command.id)));
+  let refreshed = "";
+  try {
+    refreshed = await refreshFileSources(db, videoPaths, { waitForPlex: plexFresh });
+  } catch {
+    refreshed = "";
   }
 
   const parts: string[] = [];
@@ -193,5 +247,6 @@ export async function notifyPlayers(db: Database.Database, videoPaths: string[],
   else if (asked.length > 1) parts.push(`${nameList(asked)} were asked to re-read the file.`);
   if (failed.length === 1) parts.push(`${failed[0]} could not be asked to re-read the file.`);
   else if (failed.length > 1) parts.push(`${nameList(failed)} could not be asked to re-read the file.`);
+  if (refreshed) parts.push(refreshed);
   return parts.join(" ");
 }

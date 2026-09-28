@@ -24,6 +24,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# MakeMKV binaries copied out of the image, or downloaded by deploy.sh
+/vendor/
+
 # local library database (may contain server keys and library rows)
 /data/*.db
 /data/*.db-*

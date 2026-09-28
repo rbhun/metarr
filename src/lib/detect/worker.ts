@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { applyNextSaved, writeFinding } from "@/lib/detect/apply";
+import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
 import { filesForLibrary } from "@/lib/detect/files";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
@@ -11,6 +11,7 @@ import {
   detectCounts,
   enqueueTargets,
   finishJob,
+  hasUncheckedTags,
   hasUnwritten,
   markWritten,
   readDetectSettings,
@@ -50,11 +51,12 @@ async function step() {
   }
   const counts = detectCounts(db);
   const waiting = counts.immediate > 0 || (open && counts.window > 0);
-  if (!waiting && !hasUnwritten(db)) return;
+  if (!waiting && !hasUnwritten(db) && !hasUncheckedTags(db)) return;
   if (counts.immediate === 0) {
     if (await plexIsBusy(db)) return;
     if (remuxIsRunning(db)) return;
     if (await applyNextSaved(db, settings.pathMaps)) return;
+    if (await confirmNextSaved(db, settings.pathMaps)) return;
   }
   if (!waiting) return;
   const job = claimNextJob(db, open);
@@ -122,7 +124,7 @@ async function loop() {
     current.working = false;
   }
   const counts = detectCounts(getDb());
-  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) ? 1_000 : 15_000;
+  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) || hasUncheckedTags(getDb()) ? 1_000 : 15_000;
   current.timer = setTimeout(() => {
     void loop();
   }, delay);

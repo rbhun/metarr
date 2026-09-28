@@ -216,6 +216,31 @@ export function hasUnwritten(db: Database.Database): boolean {
   return Boolean(row);
 }
 
+/** Recognized earlier, and not yet compared with the language stored in the file. */
+export function hasUncheckedTags(db: Database.Database): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 AS ok FROM detect_results
+       WHERE language IS NOT NULL AND IFNULL(source, '') != 'file' AND written_at IS NOT NULL AND tag_checked_at IS NULL
+       LIMIT 1`,
+    )
+    .get() as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+export function markTagChecked(db: Database.Database, row: { path: string; kind: string; ordinal: number }) {
+  db.prepare(`UPDATE detect_results SET tag_checked_at = ? WHERE path = ? AND kind = ? AND ordinal = ?`).run(
+    new Date().toISOString(),
+    row.path,
+    row.kind,
+    row.ordinal,
+  );
+}
+
+export function reopenForWrite(db: Database.Database, row: { path: string; kind: string; ordinal: number }) {
+  db.prepare(`UPDATE detect_results SET written_at = NULL WHERE path = ? AND kind = ? AND ordinal = ?`).run(row.path, row.kind, row.ordinal);
+}
+
 export function releaseRunningJobs(db: Database.Database) {
   db.prepare(`UPDATE detect_jobs SET status = 'failed', message = ?, finished_at = ? WHERE status = 'running'`).run(
     "Stopped because Metarr restarted. On a small machine this usually means it ran out of memory.",

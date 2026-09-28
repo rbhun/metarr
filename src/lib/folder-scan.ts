@@ -245,6 +245,13 @@ export function listVideos(root: string): string[] {
   return found;
 }
 
+/** Probe one video. Used after a language write so the folder scanner does not walk the library. */
+export async function scanOneFile(filePath: string, match: SourceDraft | null): Promise<SourceDraft | null> {
+  const probed = tracksFromProbe(await probeFile(filePath));
+  if (!probed) return null;
+  return folderDraft(filePath, probed, match);
+}
+
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {
   const present = roots.filter((root) => fs.existsSync(root));
   const missing = roots.filter((root) => !fs.existsSync(root));

@@ -279,6 +279,7 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "detect_results", "source", "TEXT");
+  ensureColumn(db, "detect_results", "tag_checked_at", "TEXT");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);

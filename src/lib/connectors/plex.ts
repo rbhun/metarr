@@ -596,6 +596,13 @@ export function listPlexLibraries(payload: unknown): PlexLibrary[] {
   return libraries;
 }
 
+export async function fetchPlexMetadata(baseUrl: string, token: string, ratingKey: string): Promise<SourceDraft | null> {
+  const base = normalizeBaseUrl(baseUrl, 32400);
+  const payload = await fetchJson(`${base}/library/metadata/${encodeURIComponent(ratingKey)}`, plexHeaders(token));
+  const container = asRecord(asRecord(payload)?.MediaContainer);
+  return parsePlexItem(asArray(container?.Metadata)[0]);
+}
+
 export async function fetchPlexLibraries(baseUrl: string, token: string): Promise<PlexLibrary[]> {
   const base = normalizeBaseUrl(baseUrl, 32400);
   const payload = await fetchJson(`${base}/library/sections`, plexHeaders(token.trim()));

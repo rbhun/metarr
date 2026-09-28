@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.90
+
+- Check a recognized language against the file, and write it when the track is still unlabeled.
+
+## 0.0.89
+
+- Install MakeMKV during deploy only when it is missing, and re-read just the file that received a language from each source.
+
 ## 0.0.88
 
 - Click a title under Already converted on Rips, or on Tasks, to open it in the library.

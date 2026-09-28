@@ -77,6 +77,11 @@ export function planTag(
   return { action: "skip", reason: "container" };
 }
 
+/** A saved recognition still needs writing when this container can store it and the track has no language. */
+export function fileOmitsSavedLanguage(plan: TagPlan, existing: string | null): boolean {
+  return plan.action !== "skip" && !existing;
+}
+
 export function retargetPath(storedPath: string, localFrom: string, localTo: string): string {
   const stored = storedPath.replace(/\\/g, "/");
   const from = localFrom.replace(/\\/g, "/");

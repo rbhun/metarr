@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { stampLanguage } from "@/lib/detect/stamp";
-import { planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
+import { fileOmitsSavedLanguage, planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
 import { deliverFile } from "@/lib/deliver";
 import { dryRun } from "@/lib/dry-run";
 import { idle } from "@/lib/idle";
@@ -10,7 +10,7 @@ import { scratchRoot } from "@/lib/scratch";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { notifyPlayers } from "@/lib/detect/publish";
-import { markWritten } from "@/lib/detect/store";
+import { markTagChecked, markWritten, reopenForWrite } from "@/lib/detect/store";
 import { languageName } from "@/lib/media";
 import type Database from "better-sqlite3";
 
@@ -344,9 +344,50 @@ export async function writeFinding(
 }
 
 const deferredWrites = new Set<string>();
+const deferredChecks = new Set<string>();
 
 function savedKey(filePath: string, kind: string, ordinal: number): string {
   return `${filePath}\0${kind}\0${ordinal}`;
+}
+
+/**
+ * A language recognized before it could be written was marked done without the file saying it.
+ * Compare one saved result with the file. When the track is still unlabeled, queue that write again.
+ */
+export async function confirmNextSaved(db: Database.Database, maps: PathMap[]): Promise<boolean> {
+  const rows = db
+    .prepare(
+      `SELECT path, kind, ordinal, language, role FROM detect_results
+       WHERE language IS NOT NULL AND IFNULL(source, '') != 'file' AND written_at IS NOT NULL AND tag_checked_at IS NULL
+       ORDER BY scanned_at
+       LIMIT 40`,
+    )
+    .all() as Array<{ path: string; kind: string; ordinal: number; language: string; role: string | null }>;
+  const row = rows.find((item) => !deferredChecks.has(savedKey(item.path, item.kind, item.ordinal)));
+  if (!row?.language) return false;
+  const key = savedKey(row.path, row.kind, row.ordinal);
+  const kind = row.kind === "subtitle" ? "subtitle" : "audio";
+  const role = row.role === "commentary" || row.role === "forced" || row.role === "short" ? row.role : null;
+  const local = resolveMediaPath(row.path, maps, (candidate) => {
+    try {
+      return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
+  if (!local) {
+    deferredChecks.add(key);
+    return true;
+  }
+  const plan = planTag(local, kind, row.ordinal, row.language, role);
+  const header = plan.action === "riff" ? plan.header : undefined;
+  const existing = plan.action === "skip" ? null : await existingLanguage(local, kind, row.ordinal, header);
+  if (!fileOmitsSavedLanguage(plan, existing)) {
+    markTagChecked(db, row);
+    return true;
+  }
+  reopenForWrite(db, row);
+  return true;
 }
 
 /** Write a language that was recognized earlier and never stored in the file. One file per call. */

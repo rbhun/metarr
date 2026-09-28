@@ -14,7 +14,7 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, listJobs, retryFailedJob, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markWritten, reopenForWrite, retryFailedJob, saveDetection } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
@@ -24,7 +24,7 @@ import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
 import { commandFailureText, writeFinding } from "@/lib/detect/apply";
-import { planTag, retargetPath } from "@/lib/detect/tag";
+import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
 import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
@@ -658,6 +658,30 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
   });
   assert.deepEqual(planTag("/movies/Film.m2ts", "audio", 0, "English", null), { action: "skip", reason: "container" });
   assert.equal(retargetPath("/mnt/media/Dune.srt", "/Volumes/media/Dune.srt", "/Volumes/media/Dune.hun.srt"), "/mnt/media/Dune.hun.srt");
+  const mkv = planTag("/movies/Dune.mkv", "audio", 0, "Hungarian", null);
+  assert.equal(fileOmitsSavedLanguage(mkv, null), true);
+  assert.equal(fileOmitsSavedLanguage(mkv, "Hungarian"), false);
+  assert.equal(fileOmitsSavedLanguage(mkv, "English"), false);
+  assert.equal(fileOmitsSavedLanguage(planTag("/movies/Film.m2ts", "audio", 0, "English", null), null), false);
+});
+
+test("a recognized language marked done is queued again when the file never received it", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/movies/Dune.avi", kind: "audio", ordinal: 0, label: "Dune", format: null, placement: null, streamLabel: null },
+  ], "immediate");
+  const job = claimNextJob(db, true);
+  assert.ok(job);
+  saveDetection(db, job!, { language: "Hungarian", role: null, confidence: 1, message: null });
+  markWritten(db, job!, job!.path);
+  assert.equal(hasUncheckedTags(db), true);
+  assert.equal(hasUnwritten(db), false);
+  reopenForWrite(db, job!);
+  assert.equal(hasUnwritten(db), true);
+  const row = db.prepare(`SELECT written_at FROM detect_results WHERE path = '/movies/Dune.avi'`).get() as { written_at: string | null };
+  assert.equal(row.written_at, null);
+  db.close();
 });
 
 test("a recognized language is saved on the library row that owns the file", () => {

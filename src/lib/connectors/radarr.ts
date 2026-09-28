@@ -102,6 +102,11 @@ export async function testRadarr(baseUrl: string, apiKey: string): Promise<strin
   return version ? `Connected to Radarr ${version}.` : "Connected to Radarr.";
 }
 
+export async function fetchRadarrMovie(baseUrl: string, apiKey: string, movieId: number): Promise<SourceDraft | null> {
+  const base = normalizeBaseUrl(baseUrl, 7878);
+  return parseRadarrMovie(await fetchJson(`${base}/api/v3/movie/${movieId}`, headers(apiKey.trim())));
+}
+
 export async function pullRadarr(
   baseUrl: string,
   apiKey: string,

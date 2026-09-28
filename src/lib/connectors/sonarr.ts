@@ -42,6 +42,8 @@ function fileMedia(file: Record<string, unknown>, title: string): MediaFile {
     null;
   const quality = qualityName(file);
   const hdr = detectHdr([media?.videoDynamicRangeType, media?.videoDynamicRange, media?.videoHdrFormat]);
+  const probed = collectLanguages(media?.audioLanguages ?? media?.audioLanguage);
+  const listed = collectLanguages(file.languages).filter((name) => !/^(any|original)$/i.test(name));
   return {
     container: normalizeContainer(typeof media?.container === "string" ? media.container : null, filePath),
     path: filePath,
@@ -49,7 +51,7 @@ function fileMedia(file: Record<string, unknown>, title: string): MediaFile {
     resolution: normalizeResolution(media?.resolution ?? asRecord(asRecord(file.quality)?.quality)?.resolution, media?.height),
     hdr,
     is3d: detect3d([title, filePath, quality]),
-    audioLanguages: collectLanguages(media?.audioLanguages ?? media?.audioLanguage ?? file.languages),
+    audioLanguages: probed.length ? probed : listed,
     subtitleLanguages: collectLanguages(media?.subtitles),
     bitrateKbps: parseBitrateKbps(media?.videoBitrate ?? media?.videoBitRate, "bps"),
   };
@@ -131,6 +133,22 @@ export async function testSonarr(baseUrl: string, apiKey: string): Promise<strin
   }
   const version = typeof payload?.version === "string" ? payload.version : "";
   return version ? `Connected to Sonarr ${version}.` : "Connected to Sonarr.";
+}
+
+export async function fetchSonarrEpisode(
+  baseUrl: string,
+  apiKey: string,
+  episodeId: number,
+  series: SourceDraft,
+): Promise<SourceDraft | null> {
+  const base = normalizeBaseUrl(baseUrl, 8989);
+  const key = apiKey.trim();
+  const episode = await fetchJson(`${base}/api/v3/episode/${episodeId}`, headers(key));
+  const record = asRecord(episode);
+  const fileId = record?.episodeFileId;
+  const file =
+    fileId != null ? asRecord(await fetchJson(`${base}/api/v3/episodefile/${encodeURIComponent(String(fileId))}`, headers(key))) : null;
+  return parseSonarrEpisode(episode, series, file, new Set());
 }
 
 export async function pullSonarr(
