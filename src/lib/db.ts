@@ -1172,6 +1172,7 @@ export type LibraryQuery = {
   q: string;
   offset: number;
   limit: number;
+  id?: number;
 };
 
 function likePattern(value: string): string {
@@ -1181,6 +1182,10 @@ function likePattern(value: string): string {
 function filterClause(query: LibraryQuery, language: string): { where: string; params: Array<string | number> } {
   const where: string[] = [];
   const params: Array<string | number> = [];
+  if (query.id != null) {
+    where.push("id = ?");
+    params.push(query.id);
+  }
   if (query.kind === "movie" || query.kind === "series") {
     where.push("kind = ?");
     params.push(query.kind);

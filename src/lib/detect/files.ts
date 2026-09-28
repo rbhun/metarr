@@ -53,6 +53,7 @@ function withSidecars(videoPath: string | null, tracks: SubtitleTrack[]): Subtit
 function fromTitle(row: TitleFileRow): ScanFile {
   const name = row.year ? `${row.title} (${row.year})` : row.title;
   return {
+    titleId: row.id,
     label: name,
     path: row.path,
     container: row.container,
@@ -68,6 +69,7 @@ function fromTitle(row: TitleFileRow): ScanFile {
 
 function fromEpisode(row: EpisodeFileRow): ScanFile {
   return {
+    titleId: row.catalog_id,
     label: `${row.series_title} ${episodeCode(row.season, row.episode)} ${row.title}`.trim(),
     path: row.path,
     container: row.container,

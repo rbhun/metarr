@@ -42,6 +42,7 @@ type TaskJob = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  titleId?: number | null;
 };
 
 type JobTotals = { pending: number; running: number; done: number; failed: number; skipped: number };
@@ -292,7 +293,15 @@ export function TasksView() {
               <article key={job.key} className={cn("space-y-1.5 rounded-lg border px-3 py-3", rowTone(job.status))}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="min-w-0 text-sm font-medium">{job.label}</h2>
+                    <h2 className="min-w-0 text-sm font-medium">
+                      {job.titleId ? (
+                        <Link href={`/?file=${encodeURIComponent(job.path)}`} className="hover:underline underline-offset-2">
+                          {job.label}
+                        </Link>
+                      ) : (
+                        job.label
+                      )}
+                    </h2>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {job.queue === "remux" ? "Rip" : "Language"}
                       {job.detail ? ` · ${job.detail}` : ""}
