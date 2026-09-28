@@ -3,10 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-format";
 import { languageFromProbeTags } from "@/lib/detect/audio";
+import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
-import { getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
+import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
 import { fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
@@ -314,12 +315,14 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
   if (!present.length) throw new Error(`Folder not found: ${missing[0] ?? "the scan folder"}`);
   const files = filesRepresentingFolders(present.flatMap((root) => listVideos(root)), known);
   const indexed = indexKnown(known, present);
+  const recognized = recognizedWrites(getDb());
   const drafts: SourceDraft[] = [];
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]!;
     onProgress({ message: `Files · ${index + 1}/${files.length} ${path.basename(file)}`, fetched: index, total: files.length });
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
+    queueUnlabeledTracks(file, probed, recognized);
     drafts.push(folderDraft(file, probed, pickMatch(indexed, file)));
   }
   onProgress({
@@ -328,6 +331,22 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     total: files.length,
   });
   return drafts;
+}
+
+function queueUnlabeledTracks(
+  filePath: string,
+  probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] },
+  recognized: ReturnType<typeof recognizedWrites>,
+) {
+  const db = getDb();
+  probed.audio.forEach((track, index) => {
+    if (track.language) return;
+    queueUnlabeledRecognition(db, recognized, filePath, "audio", track.streamIndex ?? index);
+  });
+  probed.subtitles.forEach((track, index) => {
+    if (track.language) return;
+    queueUnlabeledRecognition(db, recognized, filePath, "subtitle", track.streamIndex ?? index);
+  });
 }
 
 function recordPaths(record: SourceDraft): string[] {

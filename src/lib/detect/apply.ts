@@ -350,6 +350,33 @@ function savedKey(filePath: string, kind: string, ordinal: number): string {
   return `${filePath}\0${kind}\0${ordinal}`;
 }
 
+function sameFile(left: string, right: string): boolean {
+  return left.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === right.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+export type RecognizedWrite = { path: string; kind: string; ordinal: number; language: string };
+
+/** Recognitions Metarr made, rather than languages read from the file tag. */
+export function recognizedWrites(db: Database.Database): RecognizedWrite[] {
+  return db
+    .prepare(
+      `SELECT path, kind, ordinal, language FROM detect_results
+       WHERE language IS NOT NULL AND IFNULL(source, '') != 'file'`,
+    )
+    .all() as RecognizedWrite[];
+}
+
+/** The file tag is empty, so write the saved recognition again. */
+export function queueUnlabeledRecognition(db: Database.Database, recognized: RecognizedWrite[], filePath: string, kind: "audio" | "subtitle", ordinal: number): boolean {
+  const row = recognized.find((item) => item.kind === kind && item.ordinal === ordinal && sameFile(item.path, filePath));
+  if (!row) return false;
+  if (planTag(row.path, kind, row.ordinal, row.language, null).action === "skip") return false;
+  db.prepare(`UPDATE detect_results SET written_at = NULL, tag_checked_at = NULL WHERE path = ? AND kind = ? AND ordinal = ?`).run(row.path, row.kind, row.ordinal);
+  deferredWrites.delete(savedKey(row.path, row.kind, row.ordinal));
+  deferredChecks.delete(savedKey(row.path, row.kind, row.ordinal));
+  return true;
+}
+
 /**
  * A language recognized before it could be written was marked done without the file saying it.
  * Compare one saved result with the file. When the track is still unlabeled, queue that write again.

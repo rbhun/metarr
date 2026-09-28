@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.96
+
+- Write a recognized language into the file when a folder scan finds that track unlabeled.
+
 ## 0.0.95
 
 - Show an audio-format mismatch in indigo, so it stays separate from the amber used when a language was left out.

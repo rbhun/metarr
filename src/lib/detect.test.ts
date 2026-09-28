@@ -14,7 +14,7 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markWritten, reopenForWrite, retryFailedJob, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, reopenForWrite, retryFailedJob, saveDetection } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
@@ -23,7 +23,7 @@ import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
-import { commandFailureText, writeFinding } from "@/lib/detect/apply";
+import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeFinding } from "@/lib/detect/apply";
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
@@ -663,6 +663,31 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
   assert.equal(fileOmitsSavedLanguage(mkv, "Hungarian"), false);
   assert.equal(fileOmitsSavedLanguage(mkv, "English"), false);
   assert.equal(fileOmitsSavedLanguage(planTag("/movies/Film.m2ts", "audio", 0, "English", null), null), false);
+});
+
+test("a folder scan queues a recognized language when the file tag is empty", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/movies/10 Things.mkv", kind: "audio", ordinal: 0, label: "10 Things", format: null, placement: null, streamLabel: null },
+  ], "immediate");
+  const job = claimNextJob(db, true);
+  assert.ok(job);
+  saveDetection(db, job!, { language: "English", role: null, confidence: 1, message: null });
+  markWritten(db, job!, job!.path);
+  markTagChecked(db, job!);
+  assert.equal(queueUnlabeledRecognition(db, recognizedWrites(db), "/Movies/10 Things.mkv", "audio", 0), true);
+  const row = db.prepare(`SELECT written_at, tag_checked_at FROM detect_results WHERE path = '/movies/10 Things.mkv'`).get() as {
+    written_at: string | null;
+    tag_checked_at: string | null;
+  };
+  assert.equal(row.written_at, null);
+  assert.equal(row.tag_checked_at, null);
+  assert.equal(hasUnwritten(db), true);
+  saveDetection(db, job!, { language: "English", role: null, confidence: 1, message: null, source: "file" });
+  markWritten(db, job!, job!.path);
+  assert.equal(queueUnlabeledRecognition(db, recognizedWrites(db), job!.path, "audio", 0), false);
+  db.close();
 });
 
 test("a recognized language marked done is queued again when the file never received it", () => {

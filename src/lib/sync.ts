@@ -18,6 +18,7 @@ import {
   recordConnectorSync,
   setMeta,
 } from "@/lib/db";
+import { hasUnwritten } from "@/lib/detect/store";
 import { queueFormatRefresh } from "@/lib/detect/format-refresh";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
@@ -145,10 +146,8 @@ async function runSync(only?: ConnectorId) {
         });
         staged.set(connector.id, records);
         const refresh = formatRefreshPaths(known, records);
-        if (refresh.length) {
-          queueFormatRefresh(db, refresh);
-          kickDetectWorker();
-        }
+        if (refresh.length) queueFormatRefresh(db, refresh);
+        if (refresh.length || hasUnwritten(db)) kickDetectWorker();
         slot.state = "success";
         slot.message = describe(records);
         slot.fetched = records.length;
