@@ -486,7 +486,7 @@ export function withTrackSource<T extends { sources?: TrackSources }>(track: T, 
 }
 
 export function tagFileOrigin(file: MediaFile, connector: "plex" | "radarr" | "sonarr" | "bazarr" | "files"): MediaFile {
-  const origin = connector === "files" ? "file" : connector;
+  const origin: MediaFile["origin"] = connector === "files" ? "file" : connector;
   const tagged = { ...file, origin };
   return {
     ...tagged,

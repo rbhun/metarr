@@ -88,6 +88,7 @@ function taskState(job: TaskJob): string {
   if (job.status === "pending") return job.priority === "window" ? "Waiting for the window" : "Starting";
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
+  if (job.queue === "remux") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 
