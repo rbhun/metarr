@@ -5,9 +5,14 @@ export function partialPath(target: string): string {
   return `${target}.partial`;
 }
 
+function leftOver(partial: string): Error {
+  return new Error(`${path.basename(partial)} is left over from an earlier copy. Remove it, then try again.`);
+}
+
 /**
- * Copy a finished file from local scratch to `<target>.partial`, flush it, then
- * rename it to the target, so Plex and the *arr apps never see a half-written file.
+ * Move a finished scratch file to `<target>.partial` (a rename on the same filesystem,
+ * a copy otherwise), flush it, then rename it to the target, so Plex and the *arr apps
+ * never see a half-written file. The scratch file is consumed.
  * Without `replace`, an existing target is never overwritten.
  * Only the `.partial` this call created is ever removed.
  */
@@ -15,14 +20,22 @@ export function deliverFile(from: string, target: string, options: { replace?: b
   const name = path.basename(target);
   if (!options.replace && fs.existsSync(target)) throw new Error(`${name} already exists, so nothing was written.`);
   const partial = partialPath(target);
+  if (fs.existsSync(partial)) throw leftOver(partial);
+  let moved = false;
   try {
-    fs.copyFileSync(from, partial, fs.constants.COPYFILE_EXCL);
+    fs.renameSync(from, partial);
+    moved = true;
   } catch (caught) {
-    if ((caught as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`${path.basename(partial)} is left over from an earlier copy. Remove it, then try again.`);
+    if ((caught as NodeJS.ErrnoException).code !== "EXDEV") throw caught;
+  }
+  if (!moved) {
+    try {
+      fs.copyFileSync(from, partial, fs.constants.COPYFILE_EXCL);
+    } catch (caught) {
+      if ((caught as NodeJS.ErrnoException).code === "EEXIST") throw leftOver(partial);
+      fs.rmSync(partial, { force: true });
+      throw caught;
     }
-    fs.rmSync(partial, { force: true });
-    throw caught;
   }
   try {
     fs.chmodSync(partial, options.mode ?? 0o664);
@@ -35,7 +48,15 @@ export function deliverFile(from: string, target: string, options: { replace?: b
     if (!options.replace && fs.existsSync(target)) throw new Error(`${name} appeared while copying, so it was left unchanged.`);
     fs.renameSync(partial, target);
   } catch (caught) {
-    fs.rmSync(partial, { force: true });
+    if (moved) {
+      try {
+        fs.renameSync(partial, from);
+      } catch {
+        // Leave the .partial in place rather than lose the finished file.
+      }
+    } else {
+      fs.rmSync(partial, { force: true });
+    }
     throw caught;
   }
 }

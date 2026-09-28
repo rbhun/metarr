@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.60
+
+- Put remux and retag scratch on the NAS in `/mnt/media/.metarr-work`, since the Plex VM has no room for a Blu-ray remux, and rename finished files into place instead of copying them again.
+
 ## 0.0.59
 
 - Follow the host rules for media: run as 1500:1002 with umask 002, deliver files through `.partial`, keep scratch local, ask Plex and Radarr/Sonarr to rescan, and add a dry-run mode.

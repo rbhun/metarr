@@ -39,11 +39,14 @@ Settings live in `/opt/metarr/.env`; the first deploy copies it from `metarr.env
 | `METARR_GID` | `1002` | Group `media`, which gives write access to `/mnt/media`. |
 | `UMASK` | `002` | New files stay group-writable, so Radarr and Sonarr can manage them. |
 | `METARR_DRY_RUN` | `0` | `1` makes remux and file tagging report what they would change without writing to media. |
+| `METARR_SCRATCH` | `/mnt/media/.metarr-work` | Work folder for remux and MP4 retagging, on the NAS and outside every library folder. A Blu-ray remux needs up to about 50 GB. |
+
+These apply to the whole app. The language detection tagger (mkvpropedit, MP4 retag, subtitle renames) writes as the same user, group and umask as remux, and follows the same dry-run switch.
 
 How Metarr treats the library:
 
-- **Scratch stays on local disk.** MakeMKV and MP4 retagging write to `/app/data` (a Docker volume on the VM disk), never to `/mnt/media`.
-- **Files are delivered in two steps.** A finished file is copied to `<target>.partial` in the destination folder, flushed, then renamed to its final name, so Plex and the *arr apps never see half-written files. An existing file is never overwritten, and the disc it came from is left in place.
+- **Scratch is on the NAS, outside the libraries.** MakeMKV and MP4 retagging write into `METARR_SCRATCH`. Metarr only removes its own `remux-work/job-N` and `retag-work/job-*` folders there.
+- **Files are delivered in two steps.** A finished file is moved to `<target>.partial` in the destination folder (a rename on the same share, a copy otherwise), flushed, then renamed to its final name, so Plex and the *arr apps never see half-written files. An existing file is never overwritten, and the disc it came from is left in place.
 - **Plex keeps priority.** Tools run under `ionice -c3` and `nice -n 19`, the container has a low CPU weight, and jobs run one at a time.
 - **Every track is kept.** Remux keeps every audio and subtitle track in disc order, including Hungarian, with their language tags. The only thing dropped is the 3D video layer.
 - **Plex, Radarr and Sonarr are told about new files through their APIs.** After a remux, Metarr asks Plex for a partial scan of that folder only, and asks Radarr or Sonarr to rescan the movie or series that owns the folder. Plex's database and Application Support folder are never touched.

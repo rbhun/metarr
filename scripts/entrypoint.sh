@@ -7,7 +7,7 @@ gid="${METARR_GID:-1002}"
 # New media files must stay group-writable so Radarr/Sonarr can manage them.
 umask "${UMASK:-002}"
 
-mkdir -p /app/data/remux-work /app/data/retag-work /app/data/makemkv-home /app/data/whisper
+mkdir -p /app/data/makemkv-home /app/data/whisper
 
 if [ "$uid" != "0" ] || [ "$gid" != "0" ]; then
   chown -R "$uid:$gid" /app/data || true
