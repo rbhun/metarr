@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.93
+
+- Leave the npm install in place across deploys. A version bump was changing package.json, so every deploy downloaded the packages again and the install could fail.
+
 ## 0.0.92
 
 - Read the audio format and channel count from the file when a track is missing them, and ask Plex, Radarr, and Sonarr to re-read that file. A mismatch is shown on the language name.
