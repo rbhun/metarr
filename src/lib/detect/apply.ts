@@ -6,6 +6,7 @@ import { planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
 import { deliverFile } from "@/lib/deliver";
 import { dryRun } from "@/lib/dry-run";
 import { idle } from "@/lib/idle";
+import { scratchRoot } from "@/lib/scratch";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { notifyPlayers } from "@/lib/detect/publish";
@@ -91,7 +92,7 @@ function roomForCopy(file: string, scratch: string): boolean {
 }
 
 function retagScratch(db: Database.Database): string {
-  return path.join(path.dirname(db.name), "retag-work");
+  return path.join(scratchRoot(db.name), "retag-work");
 }
 
 function dryRunSentence(plan: Exclude<TagPlan, { action: "skip" }>, kind: "audio" | "subtitle", localFile: string): string {

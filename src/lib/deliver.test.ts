@@ -20,7 +20,7 @@ test("a delivered file arrives complete, group-writable, and without a leftover 
     assert.equal(fs.readFileSync(target, "utf8"), "new");
     assert.equal(fs.statSync(target).mode & 0o777, 0o664);
     assert.equal(fs.existsSync(partialPath(target)), false);
-    assert.equal(fs.existsSync(source), true);
+    assert.equal(fs.existsSync(source), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -36,6 +36,7 @@ test("delivery never overwrites an existing file or removes a .partial it did no
     fs.writeFileSync(partialPath(target), "someone else");
     assert.throws(() => deliverFile(source, target), /left over/);
     assert.equal(fs.readFileSync(partialPath(target), "utf8"), "someone else");
+    assert.equal(fs.readFileSync(source, "utf8"), "new");
     assert.equal(fs.existsSync(target), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

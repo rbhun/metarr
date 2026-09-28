@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { scratchRoot } from "@/lib/scratch";
 
-/** Temp folder for MakeMKV output, under the database directory so Docker always can write. */
 export function remuxWorkDirectory(databasePath: string, jobId: number): string {
-  return path.join(path.dirname(databasePath), "remux-work", `job-${jobId}`);
+  return path.join(scratchRoot(databasePath), "remux-work", `job-${jobId}`);
 }
 
 /** Explain a missing path for Tasks, including the Docker volume case. */

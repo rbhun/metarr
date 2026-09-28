@@ -15,10 +15,11 @@ services:
       METARR_GID: "${METARR_GID:-1002}"
       UMASK: "${UMASK:-002}"
       METARR_DRY_RUN: "${METARR_DRY_RUN:-0}"
+      # Remux and retag work files. On the NAS, outside every library folder, so Plex and the *arr apps never see them.
+      METARR_SCRATCH: "${METARR_SCRATCH:-/mnt/media/.metarr-work}"
     # Low CPU weight so Plex playback transcodes always win; tools also run under ionice -c3 / nice 19.
     cpu_shares: 128
     volumes:
-      # App database and all scratch (remux-work, retag-work) live on local VM disk, never on /mnt/media.
       - metarr-data:/app/data
       - /mnt/media:/mnt/media
     restart: unless-stopped
