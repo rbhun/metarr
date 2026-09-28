@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
+import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
@@ -51,12 +52,13 @@ async function step() {
   }
   const counts = detectCounts(db);
   const waiting = counts.immediate > 0 || (open && counts.window > 0);
-  if (!waiting && !hasUnwritten(db) && !hasUncheckedTags(db)) return;
+  if (!waiting && !hasUnwritten(db) && !hasUncheckedTags(db) && !hasFormatRefresh(db)) return;
   if (counts.immediate === 0) {
     if (await plexIsBusy(db)) return;
     if (remuxIsRunning(db)) return;
     if (await applyNextSaved(db, settings.pathMaps)) return;
     if (await confirmNextSaved(db, settings.pathMaps)) return;
+    if (await refreshNextFormat(db)) return;
   }
   if (!waiting) return;
   const job = claimNextJob(db, open);
@@ -124,7 +126,7 @@ async function loop() {
     current.working = false;
   }
   const counts = detectCounts(getDb());
-  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) || hasUncheckedTags(getDb()) ? 1_000 : 15_000;
+  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) || hasUncheckedTags(getDb()) || hasFormatRefresh(getDb()) ? 1_000 : 15_000;
   current.timer = setTimeout(() => {
     void loop();
   }, delay);

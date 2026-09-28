@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.92
+
+- Read the audio format and channel count from the file when a track is missing them, and ask Plex, Radarr, and Sonarr to re-read that file. A mismatch is shown on the language name.
+
 ## 0.0.91
 
 - Click the No Plex pill to ask Plex to scan that title’s folder, so a new file can be recognized.

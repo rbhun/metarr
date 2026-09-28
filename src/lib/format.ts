@@ -1,3 +1,4 @@
+import { canonicalLayout } from "@/lib/audio-format";
 import { languageName, playableName, sameSpokenLanguage, sourceTooltip } from "@/lib/media";
 import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type FileSources, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack, type TrackSources } from "@/lib/types";
 
@@ -43,12 +44,7 @@ export function formatList(values: string[]): string {
 }
 
 export function formatLayout(layout: string | null | undefined): string | null {
-  if (!layout) return null;
-  const found = layout.match(/\d\.\d(?:\.\d)?/);
-  if (found) return found[0];
-  if (/stereo/i.test(layout)) return "2.0";
-  if (/mono/i.test(layout)) return "1.0";
-  return layout;
+  return canonicalLayout(layout);
 }
 
 export function languageHover(

@@ -117,7 +117,7 @@ export function AudioTracks({
   if (rows.length === 0) return <p>—</p>;
 
   const items = rows.map((row, index) => {
-        const note = languageHover(row.sources, row.language, null, row.detected);
+        const note = languageHover(row.sources, row.language, row.conflict, row.detected);
         const hover = note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
         const tone = row.conflict || row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
         const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}`;
@@ -129,7 +129,7 @@ export function AudioTracks({
                 <button
                   type="button"
                   onClick={() => void detectUnknown(row.targets)}
-                  className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                  className={`cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid ${tone ?? ""}`}
                 >
                   {text}
                 </button>

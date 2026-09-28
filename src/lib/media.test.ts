@@ -274,6 +274,25 @@ test("a folder scan keeps the file language and marks a Plex mismatch", () => {
   assert.equal(checked[1]?.language, "Portuguese");
   assert.equal(checked[1]?.conflict, "Plex left this language out.");
   assert.equal(checked[2]?.conflict, "Plex says Hungarian.");
+  const filled = crossCheckAudio(
+    [{ language: null, layout: null, codec: null, streamIndex: 0 }],
+    [{ language: null, layout: "2.0", codec: "Dolby Digital", streamIndex: 0, fromFile: true }],
+  );
+  assert.equal(filled[0]?.layout, "2.0");
+  assert.equal(filled[0]?.codec, "Dolby Digital");
+  assert.equal(filled[0]?.conflict, undefined);
+  const disagreed = crossCheckAudio(
+    [{ language: "English", layout: "2.0", codec: "AAC", streamIndex: 0 }],
+    [{ language: "English", layout: "5.1", codec: "Dolby Digital", streamIndex: 0, fromFile: true }],
+  );
+  assert.equal(disagreed[0]?.layout, "2.0");
+  assert.equal(disagreed[0]?.codec, "AAC");
+  assert.equal(disagreed[0]?.conflict, "The file is Dolby Digital 5.1. Plex says AAC 2.0.");
+  const same = crossCheckAudio(
+    [{ language: "English", layout: "5.1(side)", codec: "AC3", streamIndex: 0 }],
+    [{ language: "English", layout: "5.1", codec: "Dolby Digital", streamIndex: 0, fromFile: true }],
+  );
+  assert.equal(same[0]?.conflict, undefined);
   const merged = reconcileAudio(
     { container: "m2ts", path: "/movies/Film.m2ts", qualityName: null, resolution: "1080p", hdr: "none", is3d: false, audioLanguages: ["English", "Hungarian"], subtitleLanguages: [], audioTracks: plex, subtitleTracks: [] },
     { container: "m2ts", path: "/movies/Film.m2ts", qualityName: null, resolution: null, hdr: "none", is3d: false, audioLanguages: ["English", "Portuguese", "Czech"], subtitleLanguages: ["English"], audioTracks: scanned, subtitleTracks: [{ language: "Portuguese", placement: "internal", format: "PGS", forced: false, streamIndex: 0, fromFile: true }] },

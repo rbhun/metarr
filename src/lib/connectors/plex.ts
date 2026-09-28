@@ -15,6 +15,7 @@ import {
   parseRating,
   parseYear,
 } from "@/lib/media";
+import { audioCodecLabel, audioLayoutLabel } from "@/lib/audio-format";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, MediaFile, SourceDraft, SubtitlePlacement, SubtitleTrack } from "@/lib/types";
 import { asArray, asRecord, fetchJson, normalizeBaseUrl, type ProgressUpdate } from "@/lib/connectors/http";
@@ -38,57 +39,6 @@ function textOf(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function channelLayout(count: number): string | null {
-  if (count === 1) return "1.0";
-  if (count === 2) return "2.0";
-  if (count === 3) return "2.1";
-  if (count === 4) return "3.1";
-  if (count === 5) return "5.0";
-  if (count === 6) return "5.1";
-  if (count === 7) return "6.1";
-  if (count === 8) return "7.1";
-  if (count === 10) return "7.1.2";
-  if (count === 12) return "7.1.4";
-  if (Number.isFinite(count) && count > 0) return `${count}.0`;
-  return null;
-}
-
-function audioLayout(channels: unknown, layout: unknown, title: unknown): string | null {
-  const named = textOf(layout);
-  if (named) {
-    const found = named.match(/\d\.\d(?:\.\d)?/);
-    if (found) return found[0];
-    if (/stereo/i.test(named)) return "2.0";
-    if (/mono/i.test(named)) return "1.0";
-  }
-  const count = typeof channels === "number" ? channels : typeof channels === "string" ? Number(channels) : NaN;
-  const fromCount = channelLayout(count);
-  if (fromCount) return fromCount;
-  const label = textOf(title) ?? "";
-  const fromTitle = label.match(/\b(\d\.\d(?:\.\d)?)\b/);
-  if (fromTitle?.[1]) return fromTitle[1];
-  if (/stereo/i.test(label)) return "2.0";
-  if (/\bmono\b/i.test(label)) return "1.0";
-  return null;
-}
-
-function audioCodecLabel(codec: unknown, profile: unknown, title: unknown): string | null {
-  const blob = [codec, profile, title].map(textOf).filter(Boolean).join(" ");
-  if (!blob) return null;
-  if (/atmos/i.test(blob)) return "Dolby Atmos";
-  if (/truehd/i.test(blob)) return "Dolby TrueHD";
-  if (/eac3|e-ac-3|digital plus/i.test(blob)) return "Dolby Digital Plus";
-  if (/\bdts-hd\b|\bdts:x\b|\bdts hd\b/i.test(blob)) return "DTS-HD";
-  if (/\bdts\b|\bdca\b/i.test(blob)) return "DTS";
-  if (/ac3|ac-3|dolby digital/i.test(blob)) return "Dolby Digital";
-  if (/\baac\b/i.test(blob)) return "AAC";
-  if (/flac/i.test(blob)) return "FLAC";
-  if (/opus/i.test(blob)) return "Opus";
-  if (/mp3/i.test(blob)) return "MP3";
-  if (/pcm/i.test(blob)) return "PCM";
-  return null;
-}
-
 function audioTrackFrom(stream: Record<string, unknown>, media: Record<string, unknown>, streamIndex: number): AudioTrack {
   const title = stream.displayTitle ?? stream.extendedDisplayTitle ?? stream.title;
   const language = collectLanguages([streamLanguage(stream)])[0] ?? null;
@@ -96,7 +46,7 @@ function audioTrackFrom(stream: Record<string, unknown>, media: Record<string, u
   const label = textOf(stream.title) ?? (shown && /\bcommentary\b|\bcomm\b/i.test(shown) ? shown : null);
   return {
     language,
-    layout: audioLayout(stream.channels ?? media.audioChannels, stream.audioChannelLayout ?? media.audioChannelLayout, title),
+    layout: audioLayoutLabel(stream.channels ?? media.audioChannels, stream.audioChannelLayout ?? media.audioChannelLayout, title),
     codec: audioCodecLabel(stream.codec ?? media.audioCodec, stream.profile ?? stream.audioProfile ?? media.audioProfile, title),
     streamIndex,
     ...(label ? { label } : {}),
@@ -247,7 +197,7 @@ function mediaFiles(item: Record<string, unknown>, title: string): MediaFile[] {
         : [
             {
               language: null,
-              layout: audioLayout(media.audioChannels, media.audioChannelLayout, null),
+              layout: audioLayoutLabel(media.audioChannels, media.audioChannelLayout, null),
               codec: audioCodecLabel(media.audioCodec, media.audioProfile, null),
             },
           ].filter((track) => track.layout || track.codec);

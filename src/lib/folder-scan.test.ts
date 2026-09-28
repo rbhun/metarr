@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chooseMatch, cleanRoots, filesRepresentingFolders, folderDraft, tracksFromProbe } from "@/lib/folder-scan";
+import { chooseMatch, cleanRoots, filesRepresentingFolders, folderDraft, formatRefreshPaths, tracksFromProbe } from "@/lib/folder-scan";
 import { sourceDraft } from "@/lib/source";
 
 test("a probe report becomes audio and subtitle tracks in file order", () => {
   const probed = tracksFromProbe({
     streams: [
       { codec_type: "video", codec_name: "h264" },
-      { codec_type: "audio", codec_name: "ac3", tags: { language: "por" } },
+      { codec_type: "audio", codec_name: "ac3", channels: 6, channel_layout: "5.1(side)", tags: { language: "por" } },
       { codec_type: "subtitle", codec_name: "hdmv_pgs_subtitle", tags: { language: "ces" } },
     ],
   });
   assert.equal(probed?.audio[0]?.language, "Portuguese");
+  assert.equal(probed?.audio[0]?.codec, "Dolby Digital");
+  assert.equal(probed?.audio[0]?.layout, "5.1");
   assert.equal(probed?.audio[0]?.fromFile, true);
   assert.equal(probed?.audio[0]?.streamIndex, 0);
   assert.equal(probed?.subtitles[0]?.language, "Czech");
@@ -164,4 +166,39 @@ test("a file in a different movie folder is not claimed", () => {
   });
   const match = chooseMatch([radarr], "/mnt/media/Movies/Heat (1995)/Heat.mkv", ["/mnt/media/Movies"]);
   assert.equal(match, null);
+});
+
+test("a probed format is sent back to an app that does not have it", () => {
+  const file = {
+    container: "mkv",
+    path: "/movies/Film.mkv",
+    qualityName: null,
+    resolution: null,
+    hdr: "none" as const,
+    is3d: false,
+    audioLanguages: ["English"],
+    subtitleLanguages: [],
+  };
+  const plex = sourceDraft({
+    connector: "plex",
+    kind: "movie",
+    externalKey: "1",
+    title: "Film",
+    path: "/movies/Film.mkv",
+    files: [{ ...file, audioTracks: [{ language: "English", layout: null, codec: null, streamIndex: 0 }] }],
+  });
+  const scanned = sourceDraft({
+    connector: "files",
+    kind: "movie",
+    externalKey: "path:/movies/film.mkv",
+    title: "Film",
+    path: "/movies/Film.mkv",
+    files: [{ ...file, audioTracks: [{ language: "English", layout: "5.1", codec: "Dolby Digital", streamIndex: 0, fromFile: true }] }],
+  });
+  assert.deepEqual(formatRefreshPaths([plex], [scanned]), ["/movies/Film.mkv"]);
+  const named = sourceDraft({
+    ...plex,
+    files: [{ ...file, audioTracks: [{ language: "English", layout: "5.1", codec: "Dolby Digital", streamIndex: 0 }] }],
+  });
+  assert.deepEqual(formatRefreshPaths([named], [scanned]), []);
 });

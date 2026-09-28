@@ -1,3 +1,4 @@
+import { audioFormatConflict } from "@/lib/audio-format";
 import type { AudioTrack, FileSources, HdrLabel, MediaDetail, MediaFile, MediaVersion, PlayableLabel, SubtitleTrack, TitleNotes, TrackSources } from "@/lib/types";
 
 const VIDEO_EXTENSIONS = new Set([
@@ -625,7 +626,16 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
     }
     const fileLanguage = scan.language;
     if (!fileLanguage) {
-      tracks.push({ ...report, sources: { ...report.sources, ...scan.sources } });
+      const notes = report.conflict ? [report.conflict] : [];
+      const mismatch = audioFormatConflict(report, scan);
+      if (mismatch) notes.push(mismatch);
+      tracks.push({
+        ...report,
+        layout: report.layout ?? scan.layout ?? null,
+        codec: report.codec ?? scan.codec ?? null,
+        sources: { ...report.sources, ...scan.sources },
+        ...(notes.length ? { conflict: notes.join(" ") } : {}),
+      });
       continue;
     }
     const plexLanguage = report.omittedByPlex ? null : report.language;
@@ -634,6 +644,8 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
     if (!plexLanguage) notes.push("Plex left this language out.");
     else if (!sameSpokenLanguage(fileLanguage, plexLanguage)) notes.push(`Plex says ${languageName(plexLanguage) ?? plexLanguage}.`);
     if (arrLanguage && !sameSpokenLanguage(fileLanguage, arrLanguage)) notes.push(`Radarr says ${languageName(arrLanguage) ?? arrLanguage}.`);
+    const mismatch = audioFormatConflict(report, scan);
+    if (mismatch) notes.push(mismatch);
     const { omittedByPlex: _omitted, ...rest } = report;
     tracks.push({
       ...rest,

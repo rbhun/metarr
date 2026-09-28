@@ -18,7 +18,9 @@ import {
   recordConnectorSync,
   setMeta,
 } from "@/lib/db";
-import { readFolderScan, scanFolders } from "@/lib/folder-scan";
+import { queueFormatRefresh } from "@/lib/detect/format-refresh";
+import { kickDetectWorker } from "@/lib/detect/worker";
+import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
 type Memory = {
@@ -142,6 +144,11 @@ async function runSync(only?: ConnectorId) {
           slot.total = update.total;
         });
         staged.set(connector.id, records);
+        const refresh = formatRefreshPaths(known, records);
+        if (refresh.length) {
+          queueFormatRefresh(db, refresh);
+          kickDetectWorker();
+        }
         slot.state = "success";
         slot.message = describe(records);
         slot.fetched = records.length;

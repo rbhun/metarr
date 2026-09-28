@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-format";
 import { languageFromProbeTags } from "@/lib/detect/audio";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { readDetectSettings } from "@/lib/detect/store";
@@ -94,10 +95,23 @@ export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtit
   const subtitles: SubtitleTrack[] = [];
   for (const item of record.streams) {
     if (!item || typeof item !== "object") continue;
-    const stream = item as { codec_type?: unknown; codec_name?: unknown; tags?: unknown };
+    const stream = item as {
+      codec_type?: unknown;
+      codec_name?: unknown;
+      profile?: unknown;
+      channels?: unknown;
+      channel_layout?: unknown;
+      tags?: unknown;
+    };
     const language = languageFromProbeTags(stream.tags);
     if (stream.codec_type === "audio") {
-      audio.push({ language, layout: null, codec: null, streamIndex: audio.length, fromFile: true });
+      audio.push({
+        language,
+        layout: audioLayoutLabel(stream.channels, stream.channel_layout, null),
+        codec: audioCodecLabel(stream.codec_name, stream.profile, null),
+        streamIndex: audio.length,
+        fromFile: true,
+      });
       continue;
     }
     if (stream.codec_type === "subtitle") {
@@ -113,6 +127,48 @@ export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtit
   }
   if (!audio.length && !subtitles.length) return null;
   return { audio, subtitles };
+}
+
+function reportedAudio(records: SourceDraft[], filePath: string): AudioTrack[] {
+  const key = pathKey(filePath);
+  let tracks: AudioTrack[] = [];
+  for (const record of records) {
+    if (record.connector === "files") continue;
+    const files = record.files.length ? record.files : record.path ? [{ path: record.path, audioTracks: record.audioTracks }] : [];
+    for (const file of files) {
+      if (pathKey(file.path) !== key) continue;
+      const list = file.audioTracks ?? [];
+      if (!tracks.length) {
+        tracks = list;
+        continue;
+      }
+      const count = Math.max(tracks.length, list.length);
+      const merged: AudioTrack[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const left = tracks[index];
+        const right = list[index];
+        merged.push({
+          language: left?.language ?? right?.language ?? null,
+          layout: left?.layout ?? right?.layout ?? null,
+          codec: left?.codec ?? right?.codec ?? null,
+        });
+      }
+      tracks = merged;
+    }
+  }
+  return tracks;
+}
+
+/** Files whose stream has a format or channel count the other apps have not stored. */
+export function formatRefreshPaths(known: SourceDraft[], scanned: SourceDraft[]): string[] {
+  const paths: string[] = [];
+  for (const record of scanned) {
+    const filePath = record.path;
+    if (!filePath) continue;
+    const probed = record.files[0]?.audioTracks ?? record.audioTracks;
+    if (formatGaps(reportedAudio(known, filePath), probed)) paths.push(filePath);
+  }
+  return paths;
 }
 
 type EpisodeCode = { season: number; episode: number };
@@ -498,7 +554,7 @@ function subtitleFormat(codec: unknown): string | null {
 
 function probeFile(file: string): Promise<unknown> {
   return new Promise((resolve) => {
-    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name:stream_tags=language", "-of", "json", file], {
+    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,profile,channels,channel_layout:stream_tags=language", "-of", "json", file], {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const chunks: Buffer[] = [];
