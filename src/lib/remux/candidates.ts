@@ -13,6 +13,7 @@ export type DiscCandidateView = {
   /** Set when the title already has a playable video file, or a real remux of this disc finished. */
   converted: boolean;
   convertedPath: string | null;
+  titleId: number | null;
 };
 
 /** A playable, non-disc video file on the same title, such as the MKV a remux produced. */
@@ -51,6 +52,7 @@ export function listDiscCandidates(db: Database.Database): DiscCandidateView[] {
         kindLabel: playableName(kind),
         converted: Boolean(convertedPath) || finished.has(disc.path),
         convertedPath,
+        titleId: file.titleId ?? null,
       });
     }
   }

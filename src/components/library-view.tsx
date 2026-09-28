@@ -35,6 +35,7 @@ import { LibraryFilters } from "@/components/library-filters";
 import { GenreLines, TitleDetail } from "@/components/title-detail";
 import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versions";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
 import { openService, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
@@ -251,6 +252,7 @@ function episodeStatus(episode: LibraryEpisode): { label: string; className: str
 
 export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const { epoch, bump, status } = useShell();
+  const searchParams = useSearchParams();
   const [kind, setKind] = useState<KindFilter>("all");
   const [rules, setRules] = useState<FilterRule[]>([]);
   const [selected, setSelected] = useState<Map<string, SelectedRow>>(() => new Map());
@@ -280,6 +282,30 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }, 200);
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  // Links from Rips and Tasks arrive as /?file=<path>: find the title that owns it and open its detail.
+  const linkedFile = searchParams.get("file");
+  useEffect(() => {
+    if (!linkedFile) return;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/library?file=${encodeURIComponent(linkedFile)}&limit=1`, { cache: "no-store" });
+        const body = (await response.json().catch(() => null)) as LibraryResponse | null;
+        const title = body?.titles?.[0];
+        if (!response.ok || !title) {
+          toast.error("That title is no longer in the library. Sync to refresh it.");
+          return;
+        }
+        setSearch(title.title);
+        setDetailEpisode(null);
+        setDetail(title);
+      } catch {
+        toast.error("That title could not be opened.");
+      } finally {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    })();
+  }, [linkedFile]);
 
   useEffect(() => {
     const controller = new AbortController();

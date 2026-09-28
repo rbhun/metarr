@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { jobTotals as detectTotals, listJobs as listDetectJobs, type DetectJobStatus } from "@/lib/detect/store";
+import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, remuxTotals, type RemuxJobStatus } from "@/lib/remux/store";
+import { titleIdForPath } from "@/lib/title-link";
 
 export type TaskQueue = "language" | "remux";
 export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
@@ -20,6 +22,7 @@ export type TaskJob = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  titleId?: number | null;
 };
 
 export type TaskTotals = {
@@ -128,8 +131,25 @@ function mergeJobs(language: TaskJob[], remux: TaskJob[], status: TaskStatusFilt
   return merged.sort((a, b) => stamp(b) - stamp(a) || b.id - a.id || a.key.localeCompare(b.key));
 }
 
-/** List language and remux jobs for the Tasks page. */
+function withTitles(db: Database.Database, list: { jobs: TaskJob[]; total: number }): { jobs: TaskJob[]; total: number } {
+  const found = new Map<string, number | null>();
+  const jobs = list.jobs.map((job) => {
+    const key = `${job.queue}\0${job.path}`;
+    if (!found.has(key)) found.set(key, titleIdForPath(db, job.path, job.queue === "remux" ? outputDirectory(job.path) : null));
+    return { ...job, titleId: found.get(key) ?? null };
+  });
+  return { jobs, total: list.total };
+}
+
+/** List language and remux jobs for the Tasks page, each linked to its library title when one owns the file. */
 export function listTaskJobs(
+  db: Database.Database,
+  query: { queue: TaskQueue | "all"; status: TaskStatusFilter; page: number; pageSize: number },
+): { jobs: TaskJob[]; total: number } {
+  return withTitles(db, pageOfTaskJobs(db, query));
+}
+
+function pageOfTaskJobs(
   db: Database.Database,
   query: { queue: TaskQueue | "all"; status: TaskStatusFilter; page: number; pageSize: number },
 ): { jobs: TaskJob[]; total: number } {

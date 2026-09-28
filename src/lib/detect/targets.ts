@@ -13,6 +13,8 @@ export type DetectTarget = {
 };
 
 export type ScanFile = {
+  /** Library title (a movie, or the series of an episode). */
+  titleId?: number;
   label: string;
   path: string | null;
   container: string | null;

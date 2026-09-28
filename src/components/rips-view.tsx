@@ -16,6 +16,7 @@ type DiscCandidate = {
   kindLabel: string;
   converted?: boolean;
   convertedPath?: string | null;
+  titleId?: number | null;
 };
 
 function fileName(filePath: string): string {
@@ -329,7 +330,13 @@ export function RipsView() {
                   {convertedDiscs.map((disc) => (
                     <li key={disc.path} className="px-3 py-3">
                       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span className="text-sm font-medium">{disc.label}</span>
+                        {disc.titleId ? (
+                          <Link href={`/?file=${encodeURIComponent(disc.path)}`} className="text-sm font-medium hover:underline underline-offset-2">
+                            {disc.label}
+                          </Link>
+                        ) : (
+                          <span className="text-sm font-medium">{disc.label}</span>
+                        )}
                         <span className="text-xs text-muted-foreground">{disc.kindLabel}</span>
                         <span className="text-xs text-emerald-700 dark:text-emerald-300">
                           {disc.convertedPath ? `Converted to ${fileName(disc.convertedPath)}` : "Remux finished"}

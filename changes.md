@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.88
+
+- Click a title under Already converted on Rips, or on Tasks, to open it in the library.
+
 ## 0.0.87
 
 - Move a disc that already has a converted file to an "Already converted" list on Rips, so the disc list only shows what still needs a remux.

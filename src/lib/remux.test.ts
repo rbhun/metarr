@@ -7,7 +7,8 @@ import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
 import { plexSessionBusy } from "@/lib/detect/plex";
 import type { ScanFile } from "@/lib/detect/targets";
-import { insertSourceRecords, migrate } from "@/lib/db";
+import { insertSourceRecords, migrate, queryLibrary } from "@/lib/db";
+import { titleIdForPath } from "@/lib/title-link";
 import { demoRecords } from "@/lib/demo";
 import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWorkDirectory, writeAccessDeniedMessage } from "@/lib/remux/access";
 import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
@@ -185,6 +186,13 @@ test("paths and library discs feed the remux queue and history list", () => {
   rebuildCatalog(db);
   const discs = listDiscCandidates(db);
   assert.ok(discs.some((disc) => disc.path.includes("/BDMV/") && disc.kind === "bluray"));
+  const avatar = discs.find((disc) => disc.path.includes("/BDMV/"));
+  assert.ok(avatar?.titleId);
+  assert.equal(titleIdForPath(db, avatar.path), avatar.titleId);
+  assert.equal(titleIdForPath(db, "/movies/Avatar (2009)/Avatar.hun.srt"), avatar.titleId);
+  assert.equal(titleIdForPath(db, "/nowhere/Film.mkv"), null);
+  assert.equal(titleIdForPath(db, "/movies/Unknown.mkv"), null);
+  assert.equal(queryLibrary({ kind: "all", rules: [], q: "", offset: 0, limit: 1, id: avatar.titleId }).titles[0]?.id, avatar.titleId);
   const byPath = enqueuePaths(
     db,
     [
