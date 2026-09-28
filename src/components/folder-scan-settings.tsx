@@ -124,7 +124,8 @@ export function FolderScanCard() {
           <Button
             size="sm"
             variant="outline"
-            disabled={busy || status?.running || settings.roots.length === 0}
+            disabled={busy || (!status?.running && settings.roots.length === 0)}
+            aria-label={status?.running ? "Show sync progress" : "Sync folders"}
             onClick={() => void startSync("files")}
           >
             Sync

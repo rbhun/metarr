@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.81
+
+- Keep the Syncing button clickable so a scan that is already running can be opened and watched.
+
+## 0.0.80
+
+- Write a recognized audio language into the AVI that is already there, instead of creating an MKV.
+
 ## 0.0.79
 
 - A numbered disc stream such as 00000.m2ts takes the movie folder it is in, and the other streams in that folder stay with that movie.

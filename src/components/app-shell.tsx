@@ -132,13 +132,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const startSync = useCallback(async (id?: ConnectorId) => {
     setSyncOpen(true);
+    if (status?.running) return;
     await fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(id ? { id } : {}),
     });
     await refresh();
-  }, [refresh]);
+  }, [refresh, status?.running]);
 
   return (
     <ShellContext.Provider value={{ status, epoch, startSync, bump }}>

@@ -401,7 +401,8 @@ export function SettingsView() {
                       size="sm"
                       variant="outline"
                       onClick={() => void startSync(id)}
-                      disabled={!stored?.baseUrl || !stored.apiKey || status?.running}
+                      disabled={(!stored?.baseUrl || !stored.apiKey) && !status?.running}
+                      aria-label={status?.running ? "Show sync progress" : `Sync ${CONNECTOR_LABEL[id]}`}
                     >
                       Sync
                     </Button>

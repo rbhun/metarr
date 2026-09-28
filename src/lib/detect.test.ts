@@ -630,10 +630,15 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
   assert.equal(pair.action === "rename" && pair.pairTo, "/movies/Dune.hun.sub");
   assert.deepEqual(planTag("/movies/Dune.eng.srt", "subtitle", 0, "Hungarian", null), { action: "skip", reason: "already-named" });
   assert.deepEqual(planTag("/movies/Dune.avi", "audio", 0, "Hungarian", null), {
-    action: "remux",
-    to: "/movies/Dune.mkv",
-    specifier: "s:a:0",
+    action: "riff",
+    header: "IAS1",
     language: "hun",
+    commentary: false,
+  });
+  assert.deepEqual(planTag("/movies/Dune.avi", "audio", 1, "Italian", null), {
+    action: "riff",
+    header: "IAS2",
+    language: "ita",
     commentary: false,
   });
   assert.deepEqual(planTag("/movies/Film.m2ts", "audio", 0, "English", null), { action: "skip", reason: "container" });
@@ -696,34 +701,6 @@ test("a recognized language is saved on the library row that owns the file", () 
   ) as Array<{ language: string; file: string }>;
   assert.equal(subtitles[0]?.language, "Hungarian");
   assert.equal(subtitles[0]?.file, "/movies/Dune.hun.srt");
-  db.close();
-});
-
-test("an AVI copied to MKV keeps the language on the new file", () => {
-  const db = new Database(":memory:");
-  migrate(db);
-  db.prepare(
-    `INSERT INTO catalog_titles (
-      kind, title, sort_title, playable_label, container, path, audio_tracks, subtitle_tracks, audio_languages, subtitle_languages, versions_json
-    ) VALUES ('movie', '8½', '8 1/2', 'video', 'avi', '/movies/8.avi', ?, '[]', '[]', '[]', ?)`,
-  ).run(
-    JSON.stringify([{ language: null, layout: "2.0", codec: "MP3", streamIndex: 0 }]),
-    JSON.stringify([{ name: "8.avi", path: "/movies/8.avi", container: "avi", audioTracks: [{ language: null, layout: "2.0", codec: "MP3", streamIndex: 0 }], audioLanguages: [], subtitleTracks: [], subtitleLanguages: [] }]),
-  );
-  stampLanguage(db, { path: "/movies/8.avi", kind: "audio", ordinal: 0, language: "Italian", role: null, renamedTo: "/movies/8.mkv" });
-  const row = db.prepare(`SELECT path, container, audio_tracks, versions_json FROM catalog_titles`).get() as {
-    path: string;
-    container: string;
-    audio_tracks: string;
-    versions_json: string;
-  };
-  assert.equal(row.path, "/movies/8.mkv");
-  assert.equal(row.container, "mkv");
-  assert.equal((JSON.parse(row.audio_tracks) as Array<{ language: string }>)[0]?.language, "Italian");
-  const version = (JSON.parse(row.versions_json) as Array<{ path: string; container: string; name: string }>)[0];
-  assert.equal(version?.path, "/movies/8.mkv");
-  assert.equal(version?.container, "mkv");
-  assert.equal(version?.name, "8.mkv");
   db.close();
 });
 

@@ -141,7 +141,13 @@ export function ScheduleSettings() {
             >
               Save
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => void startSync()} disabled={status?.running}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void startSync()}
+              aria-label={status?.running ? "Show sync progress" : "Sync now"}
+            >
               <RefreshCw className={status?.running ? "animate-spin" : undefined} />
               {status?.running ? "Syncing" : "Sync now"}
             </Button>
