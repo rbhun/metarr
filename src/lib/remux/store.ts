@@ -318,7 +318,7 @@ export function latestRemux(db: Database.Database): { label: string; status: "do
 export function writeMakeMkvHome(directory: string, licenseKey: string | null): string {
   const configDir = path.join(directory, ".MakeMKV");
   fs.mkdirSync(configDir, { recursive: true });
-  const lines = [`app_DefaultSelectionString = "${KEEP_ALL_SELECTION}"`, `app_MinimumTitleLength = "0"`];
+  const lines = [`app_DefaultSelectionString = "${KEEP_ALL_SELECTION}"`, `app_MinimumTitleLength = "0"`, `app_UpdateEnable = "0"`];
   if (licenseKey) lines.push(`app_Key = "${licenseKey}"`);
   fs.writeFileSync(path.join(configDir, "settings.conf"), `${lines.join("\n")}\n`, { mode: 0o600 });
   return directory;

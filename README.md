@@ -104,7 +104,7 @@ The queue runs one disc at a time. The next starts when the previous one finishe
 
 MakeMKV copies every audio language, commentary track, and subtitle into the MKV. It does not re-encode them. The 3D MVC video track is left out. The longest title is saved as `Title (Year).mkv` in the disc’s folder. With extras on, the other titles are `Title (Year)-other.mkv`, `Title (Year)-other2.mkv`, and so on, in that same folder, which Plex lists as extras. Disc menus are not included.
 
-Install MakeMKV on this machine, put `makemkvcon` on `PATH` or set its path in Settings, and paste the MakeMKV key there. The key stays in the local database. Path mapping from language detection is used when a Plex path is not a file on this machine. With Docker, the media folder must be mounted at the same path Metarr sees (default `/mnt/media`); MakeMKV must also be available inside the container or Metarr must run on the host.
+The Docker image builds MakeMKV (headless, version set by the `MAKEMKV_VERSION` build argument), so nothing needs installing on the host. Paste the MakeMKV key in Settings; it stays in the local database. Without Docker, install MakeMKV yourself and put `makemkvcon` on `PATH` or set its path in Settings. Path mapping from language detection is used when a Plex path is not a file on this machine. With Docker, the media folder must be mounted at the same path Metarr sees (default `/mnt/media`).
 
 ## Online sources
 
