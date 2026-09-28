@@ -246,6 +246,82 @@ test("both resolutions of one movie stay on the title", () => {
   db.close();
 });
 
+test("Radarr languages fill blank Plex audio tracks and mark that Plex left them out", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const path = "/mnt/media/Movies/The Adjustment Bureau (2011)/50201.m2ts";
+  const track = (language: string | null, streamIndex: number, layout = "2.0", codec = "Dolby Digital") => ({
+    language,
+    layout,
+    codec,
+    streamIndex,
+  });
+  insertSourceRecords(db, [
+    withMedia(
+      sourceDraft({
+        connector: "plex",
+        kind: "movie",
+        externalKey: "item:50201",
+        title: "The Adjustment Bureau",
+        year: 2011,
+      }),
+      [
+        {
+          container: "m2ts",
+          path,
+          qualityName: null,
+          resolution: "1080p",
+          hdr: "none",
+          is3d: false,
+          audioLanguages: ["English", "Hungarian", "Polish"],
+          subtitleLanguages: [],
+          audioTracks: [
+            track("English", 0, "5.1", "DTS-HD"),
+            track(null, 1),
+            track(null, 2),
+            track("Hungarian", 3, "5.1", "DTS"),
+            track(null, 4),
+            track("Polish", 5),
+            track(null, 6),
+            track(null, 7),
+            track(null, 8),
+            track("English", 9),
+          ],
+        },
+      ],
+    ),
+    withMedia(
+      sourceDraft({
+        connector: "radarr",
+        kind: "movie",
+        externalKey: "radarr:50201",
+        title: "The Adjustment Bureau",
+        year: 2011,
+      }),
+      [
+        {
+          container: "m2ts",
+          path,
+          qualityName: "Bluray-1080p",
+          resolution: "1080p",
+          hdr: "none",
+          is3d: false,
+          audioLanguages: ["English", "Portuguese", "Czech", "Hungarian", "Spanish", "Polish", "Russian", "Thai", "Turkish"],
+          subtitleLanguages: [],
+        },
+      ],
+    ),
+  ]);
+  rebuildCatalog(db);
+  const row = db.prepare(`SELECT versions_json FROM catalog_titles WHERE title = 'The Adjustment Bureau'`).get() as { versions_json: string };
+  const versions = JSON.parse(row.versions_json) as Array<{ audioTracks: Array<{ language: string | null; omittedByPlex?: boolean }> }>;
+  const languages = versions[0]?.audioTracks.map((item) => item.language);
+  assert.deepEqual(languages, ["English", "Portuguese", "Czech", "Hungarian", "Spanish", "Polish", "Russian", "Thai", "Turkish", "English"]);
+  assert.equal(versions[0]?.audioTracks[1]?.omittedByPlex, true);
+  assert.equal(versions[0]?.audioTracks[0]?.omittedByPlex, undefined);
+  db.close();
+});
+
 test("the same file from Plex and Bazarr is one version", () => {
   const db = new Database(":memory:");
   migrate(db);

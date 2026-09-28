@@ -3,6 +3,7 @@
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
+import { ScheduleSettings } from "@/components/schedule-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -316,6 +317,8 @@ export function SettingsView() {
         ) : null}
 
         {loading ? <p className="text-sm text-muted-foreground">Loading saved connectors…</p> : null}
+
+        <ScheduleSettings />
 
         <div className="grid gap-4 lg:grid-cols-2">
           {(Object.keys(HELP) as ConnectorId[]).map((id) => {

@@ -3,6 +3,8 @@ import {
   collectGenres,
   collectLanguages,
   detect3d,
+  knownLanguage,
+  languageName,
   detectHdr,
   normalizeContentRating,
   formatAspect,
@@ -187,15 +189,26 @@ function posterPathOf(item: Record<string, unknown>): string | null {
   return thumb.split("?")[0] ?? null;
 }
 
+function titledLanguage(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.split("(")[0]?.trim() ?? "";
+  if (!name || /^unknown$/i.test(name)) return null;
+  return knownLanguage(name);
+}
+
 function streamLanguage(stream: Record<string, unknown> | null): unknown {
   if (!stream) return null;
-  if (stream.language || stream.languageTag || stream.languageCode) {
-    return stream.language || stream.languageTag || stream.languageCode;
+  for (const value of [stream.languageCode, stream.languageTag, stream.language]) {
+    if (typeof value !== "string") continue;
+    const named = languageName(value);
+    if (named) return named;
   }
-  if (typeof stream.displayTitle !== "string") return null;
-  const name = stream.displayTitle.split("(")[0]?.trim() ?? "";
-  if (!name || /^unknown$/i.test(name)) return null;
-  return name;
+  if (typeof stream.displayTitle === "string") {
+    const name = stream.displayTitle.split("(")[0]?.trim() ?? "";
+    const named = name ? knownLanguage(name) : null;
+    if (named) return named;
+  }
+  return titledLanguage(stream.extendedDisplayTitle) ?? titledLanguage(stream.title);
 }
 
 function plexHeaders(token: string, start?: number): Record<string, string> {
@@ -420,6 +433,26 @@ async function fetchAllPaged(
   return collected;
 }
 
+export function streamLanguageMissing(item: unknown): boolean {
+  const record = asRecord(item);
+  if (!record) return false;
+  for (const mediaValue of plexList(record.Media)) {
+    const media = asRecord(mediaValue);
+    if (!media) continue;
+    const parts = plexList(media.Part).map(asRecord).filter((part): part is Record<string, unknown> => part != null);
+    const containers = parts.length ? parts : [media];
+    for (const part of containers) {
+      for (const streamValue of plexList(part.Stream ?? media.Stream)) {
+        const stream = asRecord(streamValue);
+        const type = streamTypeOf(stream);
+        if (!stream || (type !== 2 && type !== 3)) continue;
+        if (!streamLanguage(stream)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function externalSubtitleLacksFile(item: unknown): boolean {
   const record = asRecord(item);
   if (!record) return false;
@@ -490,7 +523,7 @@ async function withStreamDetails(
     const type = record?.type;
     if (type !== "movie" && type !== "episode") continue;
     if (record?.ratingKey == null) continue;
-    if (itemHasStreams(item) && !externalSubtitleLacksFile(item)) continue;
+    if (itemHasStreams(item) && !externalSubtitleLacksFile(item) && !streamLanguageMissing(item)) continue;
     const key = String(record.ratingKey);
     if (seen.has(key)) continue;
     seen.add(key);

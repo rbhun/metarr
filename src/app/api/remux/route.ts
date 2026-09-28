@@ -121,19 +121,22 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const startHour = clampHour(record.startHour, -1);
-  const endHour = clampHour(record.endHour, -1);
-  if (startHour < 0 || endHour < 0) return NextResponse.json({ error: "Use hours from 0 to 23." }, { status: 400 });
-  if (startHour === endHour) {
-    return NextResponse.json({ error: "The end hour has to be different from the start. An earlier end hour runs past midnight." }, { status: 400 });
+  const db = getDb();
+  const current = readRemuxSettings(db);
+  const startHour = record.startHour == null ? current.startHour : clampHour(record.startHour, -1);
+  const endHour = record.endHour == null ? current.endHour : clampHour(record.endHour, -1);
+  if (record.startHour != null || record.endHour != null) {
+    if (startHour < 0 || endHour < 0) return NextResponse.json({ error: "Use hours from 0 to 23." }, { status: 400 });
+    if (startHour === endHour) {
+      return NextResponse.json({ error: "The end hour has to be different from the start. An earlier end hour runs past midnight." }, { status: 400 });
+    }
   }
-  const binary = parseBinary(record.binary);
+  const binary = record.binary == null ? current.binary : parseBinary(record.binary);
   if (!binary) return NextResponse.json({ error: "Enter the makemkvcon command or its full path." }, { status: 400 });
   const licenseKey = record.licenseKey == null || record.licenseKey === "" ? null : parseLicenseKey(record.licenseKey);
   if (record.licenseKey && !licenseKey) return NextResponse.json({ error: "That MakeMKV key is not usable." }, { status: 400 });
-  const db = getDb();
   writeRemuxSettings(db, {
-    enabled: record.enabled === true,
+    enabled: typeof record.enabled === "boolean" ? record.enabled : current.enabled,
     startHour,
     endHour,
     binary,

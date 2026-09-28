@@ -15,7 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Disc3, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings } from "lucide-react";
+import { Disc3, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -111,6 +111,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const next = (await response.json()) as SyncStatus;
     setStatus((previous) => {
       if (previous?.running && !next.running) bump();
+      else if (previous && !next.running && previous.finishedAt !== next.finishedAt) bump();
       return next;
     });
   }, [bump]);
@@ -123,10 +124,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (!status?.running && !syncOpen) return;
     const timer = window.setInterval(() => {
       void refresh();
-    }, 800);
+    }, status?.running || syncOpen ? 800 : 10_000);
     return () => window.clearInterval(timer);
   }, [refresh, status?.running, syncOpen]);
 
@@ -170,22 +170,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className={cn(collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
           </div>
-          <div className={cn("mt-auto space-y-3", collapsed ? "p-2" : "p-3")}>
-            <Button
-              className={cn(collapsed ? "w-full px-0" : "w-full")}
-              aria-label={status?.running ? "Syncing" : "Sync metadata"}
-              onClick={() => void startSync()}
-              disabled={status?.running}
-            >
-              <RefreshCw className={status?.running ? "animate-spin" : undefined} />
-              {collapsed ? <span className="sr-only">{status?.running ? "Syncing" : "Sync metadata"}</span> : status?.running ? "Syncing" : "Sync metadata"}
-            </Button>
-            {collapsed ? null : (
-              <p className="px-1 text-[11px] leading-4 text-muted-foreground">
-                Metadata only. Video files stay on your servers.
-              </p>
-            )}
-          </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center gap-2 border-b px-3 py-2 md:hidden">
@@ -203,12 +187,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
                 </div>
-                <div className="mt-auto space-y-2 p-4">
-                  <Button className="w-full" onClick={() => void startSync()} disabled={status?.running}>
-                    <RefreshCw className={status?.running ? "animate-spin" : undefined} />
-                    {status?.running ? "Syncing" : "Sync metadata"}
-                  </Button>
-                </div>
               </SheetContent>
             </Sheet>
             <p className="text-sm font-semibold">Metarr</p>
@@ -219,10 +197,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 Tasks
                 <TaskCount bump={bump} className="text-xs" />
               </Link>
-            </Button>
-            <Button className="ml-auto" size="sm" onClick={() => void startSync()} disabled={status?.running}>
-              <RefreshCw className={status?.running ? "animate-spin" : undefined} />
-              Sync
             </Button>
           </header>
           <div className="flex min-h-0 flex-1 flex-col">{children}</div>

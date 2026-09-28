@@ -3,8 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
@@ -16,12 +14,6 @@ type DetectSettings = {
   endHour: number;
   pathMaps: PathMap[];
 };
-
-const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
-
-function hourLabel(hour: number): string {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
 
 export function DetectSettingsCard() {
   const [settings, setSettings] = useState<DetectSettings | null>(null);
@@ -49,7 +41,7 @@ export function DetectSettingsCard() {
       const response = await fetch("/api/detect", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({ pathMaps: settings.pathMaps }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; settings?: DetectSettings } | null;
       if (!response.ok) throw new Error(body?.error || "Could not save language detection.");
@@ -67,50 +59,10 @@ export function DetectSettingsCard() {
       <CardHeader>
         <CardTitle>Language detection</CardTitle>
         <CardDescription>
-          Listens to unknown audio with Whisper and reads unknown subtitles. A recognized language is written into the file. Plex, Radarr, and Sonarr are asked to re-read it, and Bazarr is asked when the track is a subtitle. Start now runs immediately. Queued tracks and the daily library scan run only between the start and end hour, and wait while Plex is scanning or transcoding.
+          Listens to unknown audio with Whisper and reads unknown subtitles. A recognized language is written into the file. Plex, Radarr, and Sonarr are asked to re-read it, and Bazarr is asked when the track is a subtitle. The daily hours are set under Schedule.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-          <Label htmlFor="detect-enabled">Scan unknown tracks every day</Label>
-          <Switch
-            id="detect-enabled"
-            checked={settings.enabled}
-            onCheckedChange={(value) => setSettings({ ...settings, enabled: value === true })}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="detect-start">Start hour</Label>
-            <select
-              id="detect-start"
-              value={settings.startHour}
-              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-              onChange={(event) => setSettings({ ...settings, startHour: Number(event.target.value) })}
-            >
-              {HOURS.map((hour) => (
-                <option key={hour} value={hour}>
-                  {hourLabel(hour)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="detect-end">End hour</Label>
-            <select
-              id="detect-end"
-              value={settings.endHour}
-              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-              onChange={(event) => setSettings({ ...settings, endHour: Number(event.target.value) })}
-            >
-              {HOURS.map((hour) => (
-                <option key={hour} value={hour}>
-                  {hourLabel(hour)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
         <div className="space-y-2">
           <div>
             <p className="text-sm font-medium">Path mapping</p>

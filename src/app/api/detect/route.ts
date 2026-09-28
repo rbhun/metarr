@@ -103,18 +103,21 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const startHour = clampHour(record.startHour, -1);
-  const endHour = clampHour(record.endHour, -1);
-  if (startHour < 0 || endHour < 0) return NextResponse.json({ error: "Use hours from 0 to 23." }, { status: 400 });
-  if (startHour === endHour) {
-    return NextResponse.json({ error: "The end hour has to be different from the start. An earlier end hour runs past midnight." }, { status: 400 });
-  }
   const db = getDb();
+  const current = readDetectSettings(db);
+  const startHour = record.startHour == null ? current.startHour : clampHour(record.startHour, -1);
+  const endHour = record.endHour == null ? current.endHour : clampHour(record.endHour, -1);
+  if (record.startHour != null || record.endHour != null) {
+    if (startHour < 0 || endHour < 0) return NextResponse.json({ error: "Use hours from 0 to 23." }, { status: 400 });
+    if (startHour === endHour) {
+      return NextResponse.json({ error: "The end hour has to be different from the start. An earlier end hour runs past midnight." }, { status: 400 });
+    }
+  }
   writeDetectSettings(db, {
-    enabled: record.enabled === true,
+    enabled: typeof record.enabled === "boolean" ? record.enabled : current.enabled,
     startHour,
     endHour,
-    pathMaps: parsePathMaps(record.pathMaps),
+    pathMaps: record.pathMaps == null ? current.pathMaps : parsePathMaps(record.pathMaps),
   });
   startDetectWorker();
   return NextResponse.json({ settings: readDetectSettings(db) });

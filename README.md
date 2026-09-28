@@ -70,7 +70,7 @@ Open **Settings** from the sidebar (or go to `/settings`).
 | Sonarr | Base URL + API key (`X-Api-Key`, v3) |
 | Bazarr | Base URL + API key (`X-Api-Key`) |
 
-Turn on **Include in sync** for each server you want to read, then use **Sync metadata**. Progress and per-app errors show in the sync dialog. If one app fails, its previous successful rows stay. Music and photo libraries in Plex are skipped.
+Turn on **Include in sync** for each server you want to read, then use **Sync now** under **Schedule**. That block can also resync the library on an interval, and it holds the hours for language detection and disc remux. Progress and per-app errors show in the sync dialog. If one app fails, its previous successful rows stay. Music and photo libraries in Plex are skipped.
 
 **Load demo library** fills the table with sample titles (including The Godfather Part II with no file) without contacting a server. It does not change saved URLs or keys. A successful live sync replaces the sample.
 

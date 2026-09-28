@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.66
+
+- Resync the library on a timer from Settings, and keep Sync now there with the other schedules.
+
+## 0.0.65
+
+- Read the language code Plex sends with a track, so a name written in another language is not stored as unknown.
+
+## 0.0.64
+
+- Load the full Plex record when an audio track has no language, and fill a blank track from Radarr or Sonarr when their list lines up, so a language both sources already have is not shown as unknown.
+
 ## 0.0.63
 
 - Sync the library two minutes after a remux finishes, so the title shows the new MKV instead of the DVD without a manual Sync.

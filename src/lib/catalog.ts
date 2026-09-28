@@ -4,6 +4,7 @@ import { clusterMatches, externalKeys, fallbackKey, type Matchable } from "@/lib
 import {
   bestHdr,
   detect3d,
+  fillOmittedAudio,
   isAired,
   mergeAudioTracks,
   mergeLanguages,
@@ -143,7 +144,10 @@ function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
   const rightScore = rightRank + (right.bitrateKbps ? 1 : 0) + (right.audioTracks?.length ?? 0) + (right.fileBytes ? 1 : 0);
   const primary = rightScore > leftScore ? right : left;
   const extra = primary === left ? right : left;
-  const audioTracks = mergeAudioTracks([primary.audioTracks ?? [], extra.audioTracks ?? []]);
+  const mergedTracks = mergeAudioTracks([primary.audioTracks ?? [], extra.audioTracks ?? []]);
+  const partner = (primary.audioTracks?.length ?? 0) > 0 ? extra : primary;
+  const languageList = (partner.audioTracks?.length ?? 0) > 0 ? [] : partner.audioLanguages;
+  const audioTracks = fillOmittedAudio(mergedTracks, languageList);
   const audioLanguages = mergeLanguages(primary.audioLanguages, extra.audioLanguages);
   return {
     container: filledText(primary.container) ?? filledText(extra.container),

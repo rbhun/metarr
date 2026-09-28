@@ -49,6 +49,7 @@ export type AudioTrack = {
   detectedLanguage?: string | null;
   detectedRole?: "commentary" | "short" | null;
   fromFile?: boolean;
+  omittedByPlex?: boolean;
   copies?: Array<{ path: string; ordinal: number }>;
 };
 

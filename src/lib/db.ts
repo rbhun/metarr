@@ -738,7 +738,14 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
     if (!language && !layout && !codec) return [];
     const streamIndex = optionalIndex(track.streamIndex);
     const label = typeof track.label === "string" ? track.label : null;
-    return [{ language, layout, codec, ...(streamIndex != null ? { streamIndex } : {}), ...(label ? { label } : {}) }];
+    return [{
+      language,
+      layout,
+      codec,
+      ...(streamIndex != null ? { streamIndex } : {}),
+      ...(label ? { label } : {}),
+      ...(track.omittedByPlex === true ? { omittedByPlex: true } : {}),
+    }];
   });
 }
 

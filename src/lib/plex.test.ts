@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyDetailedItems, externalSubtitleLacksFile, parsePlexItem } from "@/lib/connectors/plex";
+import { applyDetailedItems, externalSubtitleLacksFile, parsePlexItem, streamLanguageMissing } from "@/lib/connectors/plex";
 
 const movie = {
   ratingKey: "10",
@@ -68,6 +68,79 @@ test("plex writes channel layout as x.y and leaves a missing language blank", ()
   assert.equal(parsed?.audioTracks[0]?.language, null);
   assert.equal(parsed?.audioTracks[0]?.layout, "2.0");
   assert.equal(parsed?.audioTracks[0]?.streamIndex, 0);
+});
+
+test("plex reads a language from the track title when the display title says unknown", () => {
+  const parsed = parsePlexItem({
+    ratingKey: "13",
+    type: "movie",
+    title: "Adjustment",
+    Media: {
+      Part: {
+        file: "/movies/Adjustment.m2ts",
+        container: "m2ts",
+        Stream: [
+          { streamType: 2, displayTitle: "Unknown (AC3 Stereo)", extendedDisplayTitle: "Portuguese (AC3 Stereo)", codec: "ac3", channels: 2 },
+          { streamType: 2, displayTitle: "Unknown (AC3 Stereo)", title: "Czech", codec: "ac3", channels: 2 },
+          { streamType: 2, displayTitle: "Unknown (AC3 Stereo)", title: "Commentary", codec: "ac3", channels: 2 },
+        ],
+      },
+    },
+  });
+  assert.equal(parsed?.audioTracks[0]?.language, "Portuguese");
+  assert.equal(parsed?.audioTracks[1]?.language, "Czech");
+  assert.equal(parsed?.audioTracks[2]?.language, null);
+});
+
+test("a listed audio track with no language still needs the full Plex record", () => {
+  const listed = {
+    ratingKey: "14",
+    type: "movie",
+    title: "Adjustment",
+    Media: {
+      Part: {
+        file: "/movies/Adjustment.m2ts",
+        Stream: [
+          { streamType: 2, language: "English", codec: "dts", channels: 6 },
+          { streamType: 2, displayTitle: "Unknown (AC3 Stereo)", codec: "ac3", channels: 2 },
+        ],
+      },
+    },
+  };
+  assert.equal(streamLanguageMissing(listed), true);
+  assert.equal(streamLanguageMissing(movie), false);
+});
+
+test("plex keeps a language code when the track name is not in English", () => {
+  const parsed = parsePlexItem({
+    ratingKey: "1663",
+    type: "movie",
+    title: "The Adjustment Bureau",
+    Media: {
+      Part: {
+        file: "/movies/50201.m2ts",
+        container: "m2ts",
+        Stream: [
+          { streamType: 2, language: "Português", languageTag: "pt", languageCode: "por", codec: "ac3", channels: 2, displayTitle: "Português (AC3 Stereo)" },
+          { streamType: 2, language: "Čeština", languageTag: "cs", languageCode: "ces", codec: "ac3", channels: 2 },
+          { streamType: 2, language: "Русский", languageTag: "ru", languageCode: "rus", codec: "ac3", channels: 2 },
+          { streamType: 2, language: "ไทย", languageTag: "th", languageCode: "tha", codec: "ac3", channels: 2 },
+          { streamType: 2, language: "Türkçe", languageTag: "tr", languageCode: "tur", codec: "ac3", channels: 2 },
+          { streamType: 3, language: "română", languageTag: "ro", languageCode: "ron", codec: "pgs" },
+          { streamType: 3, language: "slovenščina", languageTag: "sl", languageCode: "slv", codec: "pgs" },
+          { streamType: 3, language: "Unknown", languageCode: "hun", codec: "pgs" },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(
+    parsed?.audioTracks.map((track) => track.language),
+    ["Portuguese", "Czech", "Russian", "Thai", "Turkish"],
+  );
+  assert.deepEqual(
+    parsed?.subtitleTracks.map((track) => track.language),
+    ["Romanian", "Slovenian", "Hungarian"],
+  );
 });
 
 test("plex uses the media audio summary when streams are missing", () => {

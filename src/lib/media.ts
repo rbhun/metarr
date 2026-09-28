@@ -35,6 +35,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   deutsch: "German",
   es: "Spanish",
   spa: "Spanish",
+  espanol: "Spanish",
   fr: "French",
   fra: "French",
   fre: "French",
@@ -51,8 +52,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
   yue: "Chinese",
   pt: "Portuguese",
   por: "Portuguese",
+  portugues: "Portuguese",
   ru: "Russian",
   rus: "Russian",
+  русский: "Russian",
   pl: "Polish",
   pol: "Polish",
   polski: "Polish",
@@ -76,8 +79,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
   cs: "Czech",
   ces: "Czech",
   cze: "Czech",
+  cestina: "Czech",
   tr: "Turkish",
   tur: "Turkish",
+  turkce: "Turkish",
   ar: "Arabic",
   ara: "Arabic",
   arb: "Arabic",
@@ -85,6 +90,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   hin: "Hindi",
   th: "Thai",
   tha: "Thai",
+  ไทย: "Thai",
   uk: "Ukrainian",
   ukr: "Ukrainian",
   he: "Hebrew",
@@ -95,6 +101,12 @@ const LANGUAGE_NAMES: Record<string, string> = {
   ro: "Romanian",
   ron: "Romanian",
   rum: "Romanian",
+  romana: "Romanian",
+  sl: "Slovenian",
+  slv: "Slovenian",
+  slovenian: "Slovenian",
+  slovene: "Slovenian",
+  slovenscina: "Slovenian",
   sk: "Slovak",
   slk: "Slovak",
   hr: "Croatian",
@@ -140,6 +152,7 @@ const LANGUAGE_CODES: Record<string, string> = {
   Hebrew: "heb",
   Greek: "ell",
   Romanian: "ron",
+  Slovenian: "slv",
   Slovak: "slk",
   Croatian: "hrv",
   Serbian: "srp",
@@ -391,13 +404,34 @@ export function languageCode(name: string): string | null {
   return LANGUAGE_CODES[named] ?? null;
 }
 
-export function languageName(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed || /^(und|unknown|null|none|undefined)$/i.test(trimmed)) return null;
-  const key = trimmed.toLowerCase().replace(/_/g, "-");
+const LANGUAGE_BY_NAME = new Map(Object.values(LANGUAGE_NAMES).map((name) => [name.toLowerCase(), name]));
+
+function languageKey(raw: string): string {
+  return raw.trim().toLowerCase().replace(/_/g, "-");
+}
+
+function foldedLanguageKey(raw: string): string {
+  return languageKey(raw).normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+function languageFromKey(key: string): string | null {
   if (LANGUAGE_NAMES[key]) return LANGUAGE_NAMES[key];
   const base = key.split("-")[0] ?? key;
   if (LANGUAGE_NAMES[base]) return LANGUAGE_NAMES[base];
+  return LANGUAGE_BY_NAME.get(key) ?? LANGUAGE_BY_NAME.get(base) ?? null;
+}
+
+export function knownLanguage(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || /^(und|unknown|null|none|undefined)$/i.test(trimmed)) return null;
+  return languageFromKey(languageKey(trimmed)) ?? languageFromKey(foldedLanguageKey(trimmed));
+}
+
+export function languageName(raw: string): string | null {
+  const known = knownLanguage(raw);
+  if (known) return known;
+  const trimmed = raw.trim();
+  if (!trimmed || /^(und|unknown|null|none|undefined)$/i.test(trimmed)) return null;
   if (/^[a-z]{2,3}$/i.test(trimmed)) return trimmed.toLowerCase();
   if (/^[a-z][a-z\s.'-]{1,40}$/i.test(trimmed)) {
     return trimmed
@@ -406,6 +440,53 @@ export function languageName(raw: string): string | null {
       .join(" ");
   }
   return null;
+}
+
+function spokenName(value: string | null): string | null {
+  if (!value) return null;
+  return languageName(value);
+}
+
+/** Place an ordered language list onto tracks. A blank is filled only when one assignment uses every language. */
+export function assignStreamLanguages(tracks: Array<string | null>, languages: string[]): Array<string | null> | null {
+  const named = tracks.map((language) => spokenName(language));
+  const source = languages.map((language) => spokenName(language)).filter((language): language is string => Boolean(language));
+  if (!source.length || named.length > 32 || !named.some((language) => language == null)) return null;
+  const found: Array<Array<string | null>> = [];
+  const walk = (ti: number, si: number, assigned: Array<string | null>) => {
+    if (found.length > 1) return;
+    if (ti === named.length) {
+      if (si === source.length) found.push(assigned);
+      return;
+    }
+    const track = named[ti];
+    if (track) {
+      if (si < source.length && track.toLowerCase() === source[si]!.toLowerCase()) walk(ti + 1, si + 1, [...assigned, track]);
+      if (source.slice(0, si).some((language) => language.toLowerCase() === track.toLowerCase())) walk(ti + 1, si, [...assigned, track]);
+      return;
+    }
+    if (si < source.length) walk(ti + 1, si + 1, [...assigned, source[si]!]);
+    walk(ti + 1, si, [...assigned, null]);
+  };
+  walk(0, 0, []);
+  return found.length === 1 ? found[0]! : null;
+}
+
+export function fillOmittedAudio(tracks: AudioTrack[], languages: string[]): AudioTrack[] {
+  if (!tracks.length || !languages.length || !tracks.some((track) => !track.language)) return tracks;
+  const assigned = assignStreamLanguages(
+    tracks.map((track) => track.language),
+    languages,
+  );
+  if (!assigned) return tracks;
+  let changed = false;
+  const next = tracks.map((track, index) => {
+    const language = assigned[index];
+    if (track.language || !language) return track;
+    changed = true;
+    return { ...track, language, omittedByPlex: true };
+  });
+  return changed ? next : tracks;
 }
 
 export function mergeAudioTracks(groups: AudioTrack[][]): AudioTrack[] {

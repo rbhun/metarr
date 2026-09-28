@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detect3d, detectHdr, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, resolvedResolution, summarizeFiles, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -143,7 +143,41 @@ test("a sample name and a tiny extra file are marked, a feature is not", () => {
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("short"));
 });
 
+test("a blank audio track takes the language Radarr already listed when the order lines up", () => {
+  const tracks = ["English", null, null, "Magyar", null, "Polski", null, null, null, "English"];
+  const radarr = ["English", "Portuguese", "Czech", "Hungarian", "Spanish", "Polish", "Russian", "Thai", "Turkish"];
+  assert.deepEqual(assignStreamLanguages(tracks, radarr), [
+    "English",
+    "Portuguese",
+    "Czech",
+    "Hungarian",
+    "Spanish",
+    "Polish",
+    "Russian",
+    "Thai",
+    "Turkish",
+    "English",
+  ]);
+  const filled = fillOmittedAudio(
+    tracks.map((language, streamIndex) => ({ language, layout: "2.0", codec: "AC3", streamIndex })),
+    radarr,
+  );
+  assert.equal(filled[1]?.language, "Portuguese");
+  assert.equal(filled[1]?.omittedByPlex, true);
+  assert.equal(filled[0]?.omittedByPlex, undefined);
+  assert.equal(filled[3]?.language, "Magyar");
+  assert.equal(assignStreamLanguages([null, "English"], ["English"]), null);
+});
+
 test("a language name maps to the tag stored in a media file", () => {
+  assert.equal(knownLanguage("Português"), "Portuguese");
+  assert.equal(knownLanguage("Čeština"), "Czech");
+  assert.equal(knownLanguage("Español"), "Spanish");
+  assert.equal(knownLanguage("Русский"), "Russian");
+  assert.equal(knownLanguage("ไทย"), "Thai");
+  assert.equal(knownLanguage("Türkçe"), "Turkish");
+  assert.equal(knownLanguage("română"), "Romanian");
+  assert.equal(knownLanguage("slovenščina"), "Slovenian");
   assert.equal(languageCode("Hungarian"), "hun");
   assert.equal(languageCode("hu"), "hun");
   assert.equal(languageCode("English"), "eng");

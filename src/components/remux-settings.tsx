@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
@@ -16,12 +15,6 @@ type RemuxSettings = {
   binary: string;
   hasKey: boolean;
 };
-
-const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
-
-function hourLabel(hour: number): string {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
 
 export function RemuxSettingsCard() {
   const [settings, setSettings] = useState<RemuxSettings | null>(null);
@@ -52,9 +45,6 @@ export function RemuxSettingsCard() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          enabled: settings.enabled,
-          startHour: settings.startHour,
-          endHour: settings.endHour,
           binary: settings.binary,
           licenseKey: licenseKey.trim() || undefined,
           clearKey,
@@ -78,50 +68,10 @@ export function RemuxSettingsCard() {
       <CardHeader>
         <CardTitle>Disc remux</CardTitle>
         <CardDescription>
-          Queued discs run one at a time, and the next starts when the previous one finishes. The queue runs from the start hour until the end hour, and waits while Plex is scanning or playing, or while language detection is using a file. MakeMKV copies every audio and subtitle track into an MKV and leaves the disc in place. The 3D video track is left out. Install makemkvcon on this machine. Path mapping from language detection applies when a Plex path is not local.
+          Queued discs run one at a time, and the next starts when the previous one finishes. The hours are set under Schedule. MakeMKV copies every audio and subtitle track into an MKV and leaves the disc in place. The 3D video track is left out. Install makemkvcon on this machine. Path mapping from language detection applies when a Plex path is not local.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-          <Label htmlFor="remux-enabled">Run queued discs</Label>
-          <Switch
-            id="remux-enabled"
-            checked={settings.enabled}
-            onCheckedChange={(value) => setSettings({ ...settings, enabled: value === true })}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="remux-start">Start hour</Label>
-            <select
-              id="remux-start"
-              value={settings.startHour}
-              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-              onChange={(event) => setSettings({ ...settings, startHour: Number(event.target.value) })}
-            >
-              {HOURS.map((hour) => (
-                <option key={hour} value={hour}>
-                  {hourLabel(hour)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="remux-end">End hour</Label>
-            <select
-              id="remux-end"
-              value={settings.endHour}
-              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-              onChange={(event) => setSettings({ ...settings, endHour: Number(event.target.value) })}
-            >
-              {HOURS.map((hour) => (
-                <option key={hour} value={hour}>
-                  {hourLabel(hour)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
         <div className="space-y-1.5">
           <Label htmlFor="remux-binary">makemkvcon</Label>
           <Input
