@@ -21,12 +21,28 @@ import {
   writeRemuxPause,
 } from "@/lib/remux/store";
 import { getDb } from "@/lib/db";
+import { startSync } from "@/lib/sync";
 
-const globalForRemux = globalThis as { __metarrRemux?: { timer: NodeJS.Timeout | null; working: boolean } };
+/** Plex and Radarr/Sonarr rescan the folder first; the library sync then reads the new MKV. */
+const SYNC_AFTER_MS = 2 * 60 * 1000;
+
+const globalForRemux = globalThis as {
+  __metarrRemux?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null };
+};
 
 function state() {
-  if (!globalForRemux.__metarrRemux) globalForRemux.__metarrRemux = { timer: null, working: false };
+  if (!globalForRemux.__metarrRemux) globalForRemux.__metarrRemux = { timer: null, working: false, syncTimer: null };
   return globalForRemux.__metarrRemux;
+}
+
+/** One library sync shortly after the latest finished remux; retried while another sync is running. */
+function syncSoon(delay = SYNC_AFTER_MS) {
+  const current = state();
+  if (current.syncTimer) clearTimeout(current.syncTimer);
+  current.syncTimer = setTimeout(() => {
+    current.syncTimer = null;
+    if (!startSync().started) syncSoon(60_000);
+  }, delay);
 }
 
 function existsMedia(candidate: string): boolean {
@@ -114,6 +130,7 @@ async function step() {
       }
     }
     finishRemux(db, job.id, "done", [message, told].filter(Boolean).join(" "));
+    if (!rehearsal) syncSoon();
   } catch (caught) {
     if (workDir.current) fs.rmSync(workDir.current, { recursive: true, force: true });
     finishRemux(db, job.id, "failed", friendlyFsError(caught, "Remux failed."));
