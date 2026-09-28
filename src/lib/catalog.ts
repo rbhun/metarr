@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { clearCatalog, loadSourceRecords } from "@/lib/db";
+import { clearCatalog, getMeta, loadSourceRecords, setMeta } from "@/lib/db";
 import { clusterMatches, externalKeys, fallbackKey, type Matchable } from "@/lib/match";
 import {
   bestHdr,
@@ -12,6 +12,7 @@ import {
   normalizeImdb,
   normalizeNumericId,
   normalizeTitle,
+  noteFilePresence,
   reconcileAudio,
   reconcileSubtitles,
   tagFileOrigin,
@@ -20,6 +21,7 @@ import {
   summarizeFiles,
   uniqueLanguages,
   versionsFrom,
+  mergeFilePresence,
 } from "@/lib/media";
 import { enrichmentKey } from "@/lib/online";
 import type { AudioTrack, HdrLabel, MediaFile, SourceDraft, SubtitleTrack, TitleKind } from "@/lib/types";
@@ -169,6 +171,7 @@ function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
     aspectRatio: filledText(primary.aspectRatio) ?? filledText(extra.aspectRatio),
     fileBytes: primary.fileBytes ?? extra.fileBytes ?? null,
     durationMinutes: primary.durationMinutes ?? extra.durationMinutes ?? null,
+    presence: mergeFilePresence(primary.presence, extra.presence),
   };
 }
 
@@ -210,7 +213,7 @@ function filesFrom(records: SourceDraft[]): MediaFile[] {
       files[existing] = mergeMediaFiles(files[existing], normalized);
     }
   }
-  return files;
+  return noteFilePresence(files, records.map((record) => record.connector));
 }
 
 function episodeGroupKey(episode: SourceDraft): string {
@@ -328,6 +331,21 @@ function bestResolution(values: Array<string | null>): string | null {
     if (!best || resolutionRank(value) > resolutionRank(best)) return value;
     return best;
   }, null);
+}
+
+const HOVER_KEY = "source_hover";
+let hoverReady = false;
+
+/** Rebuild stored titles once so language and file tooltips exist without another sync. */
+export function ensureHoverSources(db: Database.Database) {
+  if (hoverReady) return;
+  if (getMeta(db, HOVER_KEY) === "1") {
+    hoverReady = true;
+    return;
+  }
+  rebuildCatalog(db);
+  setMeta(db, HOVER_KEY, "1");
+  hoverReady = true;
 }
 
 export function rebuildCatalog(db: Database.Database) {

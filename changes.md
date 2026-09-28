@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.72
+
+- Show a source tooltip on a language and on the file-type pill, using the labels already stored for that title.
+
+## 0.0.71
+
+- Show a short file or audio track as its own pill, instead of writing short into the audio name.
+
 ## 0.0.70
 
 - Label a finished rip as Saved (or Dry run) on Tasks, instead of "No language", which only applies to language checks.

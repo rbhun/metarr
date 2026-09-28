@@ -26,6 +26,7 @@ import type {
   ProviderSettings,
   SourceDraft,
   SubtitleTrack,
+  FileSources,
   SyncNote,
   TitleKind,
   TrackSources,
@@ -718,6 +719,7 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         flags: Array.isArray(version.flags) ? version.flags.filter((flag): flag is string => flag === "sample" || flag === "short") : [],
         fileBytes: typeof version.fileBytes === "number" ? version.fileBytes : null,
         durationMinutes: typeof version.durationMinutes === "number" ? version.durationMinutes : null,
+        ...(parseFileSources(version.presence) ? { presence: parseFileSources(version.presence) } : {}),
       },
     ];
   });
@@ -726,6 +728,17 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
 function optionalIndex(value: unknown): number | null {
   const index = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function parseFileSources(value: unknown): FileSources | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const sources: FileSources = {};
+  for (const key of ["plex", "radarr", "sonarr", "bazarr", "file"] as const) {
+    if (!(key in record)) continue;
+    sources[key] = record[key] === true ? true : null;
+  }
+  return Object.keys(sources).length ? sources : undefined;
 }
 
 function parseSources(value: unknown): TrackSources | undefined {

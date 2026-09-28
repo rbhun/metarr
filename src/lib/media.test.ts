@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, playableFrom, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -268,4 +268,17 @@ test("a language name maps to the tag stored in a media file", () => {
   assert.equal(languageCode("hu"), "hun");
   assert.equal(languageCode("English"), "eng");
   assert.equal(languageCode("und"), null);
+});
+
+test("a file pill lists which source has that file", () => {
+  const plex = tagFileOrigin(
+    { container: "mkv", path: "/movies/Film.mkv", qualityName: null, resolution: "1080p", hdr: "none", is3d: false, audioLanguages: [], subtitleLanguages: [] },
+    "plex",
+  );
+  const noted = noteFilePresence([plex], ["plex", "radarr"]);
+  assert.equal(noted[0]?.presence?.plex, true);
+  assert.equal(noted[0]?.presence?.radarr, null);
+  assert.equal(presenceTooltip(noted[0]?.presence), "Plex: present\nRadarr: missing\nFile scan: not scanned");
+  const versions = versionsFrom(noted);
+  assert.equal(versions[0]?.presence?.plex, true);
 });

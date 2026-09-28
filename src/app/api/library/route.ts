@@ -1,4 +1,5 @@
-import { clearLibrary, queryLibrary } from "@/lib/db";
+import { ensureHoverSources } from "@/lib/catalog";
+import { clearLibrary, getDb, queryLibrary } from "@/lib/db";
 import { parseRules } from "@/lib/filters";
 import { getSyncStatus } from "@/lib/sync";
 import { NextResponse } from "next/server";
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  if (!getSyncStatus().running) ensureHoverSources(getDb());
   const url = new URL(request.url);
   const kindParam = url.searchParams.get("kind");
   const kind = kindParam === "movie" || kindParam === "series" ? kindParam : "all";

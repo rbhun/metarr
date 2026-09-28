@@ -24,11 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { arrPresence, differingLength, episodeCode, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
+import { arrPresence, differingLength, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
 import { multiPartLabel } from "@/lib/media";
 import type { FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
-import { CONNECTOR_LABEL, type ConnectorId, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
+import { CONNECTOR_LABEL, type ConnectorId, type FileSources, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { LibraryFilters } from "@/components/library-filters";
@@ -169,6 +169,7 @@ function VideoSummary({
   note,
   length,
   part,
+  sources,
 }: {
   container: string | null;
   resolution: string | null;
@@ -182,6 +183,7 @@ function VideoSummary({
   note?: string | null;
   length?: string | null;
   part?: string | null;
+  sources?: FileSources;
 }) {
   return (
     <div>
@@ -189,21 +191,26 @@ function VideoSummary({
         <p className={cn("whitespace-nowrap", playableClass(playableLabel))}>{playableText(playableLabel)}</p>
       ) : null}
       <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} />
+        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} flags={flags} sources={sources} />
         {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
         {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
       </p>
       {length ? <p className="text-[11px] text-muted-foreground">{length}</p> : null}
-      {flags?.length ? (
-        <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">{flags.map((flag) => (flag === "sample" ? "Sample" : "Short")).join(" · ")}</p>
-      ) : null}
       {missing?.length ? <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">Missing {missing.join(", ")}</p> : null}
       {note ? <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">{note}</p> : null}
     </div>
   );
 }
 
-function VersionBands({ versions, wanted }: { versions: MediaVersion[]; wanted: string[] }) {
+function VersionBands({
+  versions,
+  wanted,
+  sourcesFor,
+}: {
+  versions: MediaVersion[];
+  wanted: string[];
+  sourcesFor?: (version: MediaVersion) => FileSources;
+}) {
   const length = differingLength(versions);
   return (
     <div className="divide-y">
@@ -221,6 +228,7 @@ function VersionBands({ versions, wanted }: { versions: MediaVersion[]; wanted: 
             flags={version.flags}
             length={lengthText(version, length)}
             part={multiPartLabel(version.path, version.name)}
+            sources={sourcesFor?.(version)}
           />
           <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
           <div>
@@ -751,6 +759,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   missing={version.missing}
                                   length={lengthText(version, differingLength(title.versions))}
                                   part={multiPartLabel(version.path, version.name, title.title)}
+                                  sources={fileHoverSources(title, data?.configured ?? [], version.presence)}
                                 />
                                 </CellScroll>
                               </TableCell>
@@ -778,6 +787,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   missing={title.versions[0]?.missing}
                                   note={title.playableNote}
                                   part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                  sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                                 />
                                 </CellScroll>
                               </TableCell>
@@ -841,6 +851,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                             <EpisodeList
                               series={title}
                               detail={episodes[title.id]}
+                              configured={data?.configured ?? []}
                               selected={selected}
                               onToggle={toggleSelected}
                               onOpen={(episode) => {
@@ -863,7 +874,11 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                       </div>
                       {title.versions.length > 1 ? (
                         <div className="col-span-2">
-                          <VersionBands versions={title.versions} wanted={title.subtitleWanted} />
+                          <VersionBands
+                            versions={title.versions}
+                            wanted={title.subtitleWanted}
+                            sourcesFor={(version) => fileHoverSources(title, data?.configured ?? [], version.presence)}
+                          />
                         </div>
                       ) : (
                         <>
@@ -881,6 +896,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 missing={title.versions[0]?.missing}
                                 note={title.playableNote}
                                 part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                               />
                             </dd>
                           </div>
@@ -1077,6 +1093,11 @@ function EpisodeRows({
                                 flags={version.flags}
                                 length={lengthText(version, differingLength(episode.versions))}
                                 part={multiPartLabel(version.path, version.name)}
+                                sources={fileHoverSources(
+                                  { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
+                                  configured,
+                                  version.presence,
+                                )}
                               />
                             </CellScroll>
                           </TableCell>
@@ -1103,6 +1124,11 @@ function EpisodeRows({
                                 playableLabel={episode.playableLabel}
                                 missing={episode.versions[0]?.missing}
                                 part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                                sources={fileHoverSources(
+                                  { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
+                                  configured,
+                                  episode.versions[0]?.presence,
+                                )}
                               />
                             </CellScroll>
                           </TableCell>
@@ -1130,12 +1156,14 @@ function EpisodeRows({
 function EpisodeList({
   series,
   detail,
+  configured,
   selected,
   onToggle,
   onOpen,
 }: {
   series: LibraryTitle;
   detail: LibraryEpisode[] | "loading" | "error" | undefined;
+  configured: ConnectorId[];
   selected: Map<string, SelectedRow>;
   onToggle: (row: SelectedRow, on: boolean) => void;
   onOpen: (episode: LibraryEpisode) => void;
@@ -1191,11 +1219,31 @@ function EpisodeList({
                         </p>
                         {episode.versions.length > 1 ? (
                           <div className="mt-1">
-                            <VersionLines versions={episode.versions} />
+                            <VersionLines
+                              versions={episode.versions}
+                              sourcesFor={(version) =>
+                                fileHoverSources(
+                                  { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
+                                  configured,
+                                  version.presence,
+                                )
+                              }
+                            />
                           </div>
                         ) : (
                           <p className="mt-1 flex flex-wrap items-center gap-1 text-muted-foreground">
-                            <MediaPills container={episode.container} resolution={episode.resolution} frameRate={episode.detail?.frameRate} part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)} />
+                            <MediaPills
+                              container={episode.container}
+                              resolution={episode.resolution}
+                              frameRate={episode.detail?.frameRate}
+                              part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                              flags={episode.versions[0]?.flags}
+                              sources={fileHoverSources(
+                                { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
+                                configured,
+                                episode.versions[0]?.presence,
+                              )}
+                            />
                             {episode.qualityName}
                             {episode.versions[0]?.missing.length ? <span className="text-amber-800 dark:text-amber-200">Missing {episode.versions[0].missing.join(", ")}</span> : null}
                           </p>

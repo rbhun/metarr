@@ -1,5 +1,5 @@
 import { languageName, playableName, sourceTooltip } from "@/lib/media";
-import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack, type TrackSources } from "@/lib/types";
+import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type FileSources, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack, type TrackSources } from "@/lib/types";
 
 export function formatWhen(value: string | null | undefined): string {
   if (!value) return "Never synced";
@@ -65,6 +65,25 @@ export function languageHover(sources: TrackSources | undefined, shown: string |
   const report = sourceTooltip(sources, shown);
   const text = [report, note?.trim() ? note : null].filter(Boolean).join("\n");
   return text || undefined;
+}
+
+const FILE_KEYS = ["plex", "radarr", "sonarr", "bazarr", "file"] as const;
+
+/** Per-file presence wins. Title flags fill a connector the stored file did not mention. */
+export function fileHoverSources(
+  flags: { inPlex: boolean; inRadarr?: boolean; inSonarr?: boolean; inBazarr?: boolean },
+  configured: ConnectorId[],
+  stored?: FileSources,
+): FileSources {
+  const sources: FileSources = { plex: flags.inPlex ? true : null };
+  if (configured.includes("radarr") && flags.inRadarr != null) sources.radarr = flags.inRadarr ? true : null;
+  if (configured.includes("sonarr") && flags.inSonarr != null) sources.sonarr = flags.inSonarr ? true : null;
+  if (configured.includes("bazarr") && flags.inBazarr != null) sources.bazarr = flags.inBazarr ? true : null;
+  if (!stored) return sources;
+  for (const key of FILE_KEYS) {
+    if (key in stored) sources[key] = stored[key];
+  }
+  return sources;
 }
 
 export function shownLanguage(track: { language: string | null; detectedLanguage?: string | null }): string | null {

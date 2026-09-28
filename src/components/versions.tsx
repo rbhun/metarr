@@ -8,7 +8,7 @@ import { MediaPills } from "@/components/media-pills";
 import { SubtitleRows } from "@/components/subtitle-rows";
 import { formatBitrate, hdrText } from "@/lib/format";
 import { multiPartLabel } from "@/lib/media";
-import type { MediaVersion } from "@/lib/types";
+import type { FileSources, MediaVersion } from "@/lib/types";
 
 function versionKey(version: MediaVersion, index: number): string {
   return `${version.path ?? version.name}-${index}`;
@@ -20,18 +20,21 @@ function versionHeading(version: MediaVersion): string {
     .join(" · ");
 }
 
-export function VersionLines({ versions }: { versions: MediaVersion[] }) {
+export function VersionLines({
+  versions,
+  sourcesFor,
+}: {
+  versions: MediaVersion[];
+  sourcesFor?: (version: MediaVersion) => FileSources;
+}) {
   return (
     <LineScroll className="space-y-1.5">
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} flags={version.flags} sources={sourcesFor?.(version)} />
             <span><MarkedText text={versionHeading(version)} /></span>
           </p>
-          {version.flags?.length ? (
-            <p className="text-[11px] text-amber-800 dark:text-amber-200">{version.flags.map((flag) => (flag === "sample" ? "Sample" : "Short")).join(" · ")}</p>
-          ) : null}
           {version.missing.length ? (
             <p className="text-[11px] text-amber-800 dark:text-amber-200">Missing {version.missing.join(", ")}</p>
           ) : null}
@@ -71,10 +74,12 @@ export function VersionDetail({
   versions,
   fileBrowserUrl = "",
   fileBrowserRoot = "",
+  sourcesFor,
 }: {
   versions: MediaVersion[];
   fileBrowserUrl?: string;
   fileBrowserRoot?: string;
+  sourcesFor?: (version: MediaVersion) => FileSources;
 }) {
   return (
     <div className="col-span-2 space-y-3">
@@ -83,13 +88,10 @@ export function VersionDetail({
         <div key={versionKey(version, index)} className="space-y-1 rounded-lg border p-2">
           <p className="font-medium">{version.name}</p>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} flags={version.flags} sources={sourcesFor?.(version)} />
             <span><MarkedText text={versionHeading(version)} /></span>
             {version.is3d ? <span>3D</span> : null}
           </p>
-          {version.flags?.length ? (
-            <p className="text-amber-800 dark:text-amber-200">{version.flags.map((flag) => (flag === "sample" ? "Sample" : "Short")).join(" · ")}</p>
-          ) : null}
           {version.missing.length ? (
             <p className="text-amber-800 dark:text-amber-200">Missing {version.missing.join(", ")}</p>
           ) : null}

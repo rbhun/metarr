@@ -1,4 +1,4 @@
-import type { AudioTrack, HdrLabel, MediaDetail, MediaFile, MediaVersion, PlayableLabel, SubtitleTrack, TitleNotes, TrackSources } from "@/lib/types";
+import type { AudioTrack, FileSources, HdrLabel, MediaDetail, MediaFile, MediaVersion, PlayableLabel, SubtitleTrack, TitleNotes, TrackSources } from "@/lib/types";
 
 const VIDEO_EXTENSIONS = new Set([
   "mkv",
@@ -486,8 +486,8 @@ export function withTrackSource<T extends { sources?: TrackSources }>(track: T, 
 }
 
 export function tagFileOrigin(file: MediaFile, connector: "plex" | "radarr" | "sonarr" | "bazarr" | "files"): MediaFile {
-  const origin: MediaFile["origin"] = connector === "files" ? "file" : connector;
-  const tagged = { ...file, origin };
+  const origin: NonNullable<MediaFile["origin"]> = connector === "files" ? "file" : connector;
+  const tagged: MediaFile = { ...file, origin, presence: { ...file.presence, [origin]: true } };
   return {
     ...tagged,
     audioTracks: stampOriginTracks(tagged, tagged.audioTracks ?? []),
@@ -530,6 +530,48 @@ export function sourceTooltip(sources: TrackSources | undefined, shown: string |
     line("Sonarr", sources.sonarr, null),
     line("Bazarr", sources.bazarr, null),
     line("File scan", sources.file, "not scanned"),
+  ].filter((item): item is string => Boolean(item));
+  return lines.length ? lines.join("\n") : null;
+}
+
+const PRESENCE_KEYS = ["plex", "radarr", "sonarr", "bazarr", "file"] as const;
+
+export function mergeFilePresence(left?: FileSources, right?: FileSources): FileSources | undefined {
+  if (!left && !right) return undefined;
+  const merged: FileSources = { ...left };
+  if (!right) return merged;
+  for (const key of PRESENCE_KEYS) {
+    if (!(key in right)) continue;
+    merged[key] = merged[key] === true || right[key] === true ? true : null;
+  }
+  return merged;
+}
+
+/** Mark a connector that knows this title, but not this file, as missing. */
+export function noteFilePresence(files: MediaFile[], connectors: Array<"plex" | "radarr" | "sonarr" | "bazarr" | "files">): MediaFile[] {
+  const seen = new Set(connectors.map((connector) => (connector === "files" ? "file" : connector)));
+  return files.map((file) => {
+    const presence: FileSources = { ...file.presence };
+    for (const key of PRESENCE_KEYS) {
+      if (!seen.has(key) || presence[key] === true) continue;
+      presence[key] = null;
+    }
+    return { ...file, presence };
+  });
+}
+
+export function presenceTooltip(presence: FileSources | undefined): string | null {
+  if (!presence || !PRESENCE_KEYS.some((key) => key in presence)) return null;
+  const line = (label: string, value: boolean | null | undefined, unchecked: string | null) => {
+    if (value === undefined) return unchecked ? `${label}: ${unchecked}` : null;
+    return `${label}: ${value ? "present" : "missing"}`;
+  };
+  const lines = [
+    line("Plex", presence.plex, null),
+    line("Radarr", presence.radarr, null),
+    line("Sonarr", presence.sonarr, null),
+    line("Bazarr", presence.bazarr, null),
+    line("File scan", presence.file, "not scanned"),
   ].filter((item): item is string => Boolean(item));
   return lines.length ? lines.join("\n") : null;
 }
@@ -1031,6 +1073,7 @@ export function versionsFrom(files: MediaFile[]): MediaVersion[] {
       flags: versionFlags(file, files),
       fileBytes: file.fileBytes ?? null,
       durationMinutes: file.durationMinutes ?? null,
+      presence: file.presence,
     }));
 }
 

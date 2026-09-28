@@ -4,6 +4,8 @@ import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { fileLanguageClass, omittedLanguageClass, UnknownLabel } from "@/components/marked-text";
+import { SourceHover } from "@/components/source-hover";
+import { FlagPill } from "@/components/media-pills";
 import { audioTargets } from "@/lib/detect/track";
 import { formatLayout, languageHover } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
@@ -114,36 +116,36 @@ export function AudioTracks({
   if (rows.length === 0) return <p>—</p>;
 
   const items = rows.map((row, index) => {
-        const note = languageHover(row.sources, row.language, row.short ? "This track is only a moment long" : null);
+        const note = languageHover(row.sources, row.language);
+        const hover = note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
         const tone = row.conflict || row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
-        const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}${row.short ? " short" : ""}`;
+        const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}`;
         return (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
           {row.language ? (
             row.targets.length ? (
-              <button
-                type="button"
-                onClick={() => void detectUnknown(row.targets)}
-                title={note || "Listen again"}
-                className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
-              >
-                {text}
-              </button>
+              <SourceHover text={hover}>
+                <button
+                  type="button"
+                  onClick={() => void detectUnknown(row.targets)}
+                  className="cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                >
+                  {text}
+                </button>
+              </SourceHover>
             ) : (
-              <span className={tone} title={note || undefined}>
-                {text}
-              </span>
+              <SourceHover text={hover}>
+                <span className={tone}>{text}</span>
+              </SourceHover>
             )
           ) : (
-            <>
-              <UnknownLabel title={note} onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
-              {row.short ? (
-                <span title="This track is only a moment long" className="text-muted-foreground">
-                  short
-                </span>
-              ) : null}
-            </>
+            <SourceHover text={hover}>
+              <span>
+                <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
+              </span>
+            </SourceHover>
           )}
+          {row.short ? <FlagPill kind="short" /> : null}
           {row.layout ? <span className="font-mono text-[0.92em] tabular-nums">{row.layout}</span> : null}
           <CodecMark codec={row.codec} />
         </p>

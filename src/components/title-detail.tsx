@@ -11,7 +11,7 @@ import { MediaPills } from "@/components/media-pills";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { arrPresence, episodeCode, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText } from "@/lib/format";
+import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText } from "@/lib/format";
 import { multiPartLabel } from "@/lib/media";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
@@ -113,6 +113,11 @@ export function TitleDetail({
         subtitleWanted: episode ? episode.subtitleWanted : title.subtitleWanted,
         versions: episode ? episode.versions : title.versions,
       }
+    : null;
+  const hoverFlags = title
+    ? episode
+      ? { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr }
+      : { inPlex: title.inPlex, inRadarr: title.inRadarr, inSonarr: title.inSonarr, inBazarr: title.inBazarr }
     : null;
 
   return (
@@ -236,7 +241,7 @@ export function TitleDetail({
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Video</dt>
                   <dd className="mt-1 flex flex-wrap items-center gap-1">
-                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, episode?.title ?? title.title)} />
+                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, episode?.title ?? title.title)} sources={hoverFlags ? fileHoverSources(hoverFlags, configured, file?.versions[0]?.presence) : undefined} />
                     <span>{[file?.qualityName, file?.bitrateKbps ? formatBitrate(file.bitrateKbps) : null].filter(Boolean).join(" · ")}</span>
                   </dd>
                 </div>
@@ -302,7 +307,7 @@ export function TitleDetail({
                         {file.detail.files.map((part) => (
                           <dd key={part.name} className="flex flex-wrap items-center gap-1">
                             <span className="break-all">{part.name}</span>
-                            <MediaPills container={part.container} resolution={part.resolution} frameRate={part.frameRate} part={multiPartLabel(part.name)} />
+                            <MediaPills container={part.container} resolution={part.resolution} frameRate={part.frameRate} part={multiPartLabel(part.name)} sources={hoverFlags ? fileHoverSources(hoverFlags, configured, file.versions[0]?.presence) : undefined} />
                           </dd>
                         ))}
                       </div>
@@ -310,7 +315,12 @@ export function TitleDetail({
                   </>
                 ) : null}
                 {file && file.versions.length > 1 ? (
-                  <VersionDetail versions={file.versions} fileBrowserUrl={fileBrowserUrl} fileBrowserRoot={fileBrowserRoot} />
+                  <VersionDetail
+                    versions={file.versions}
+                    fileBrowserUrl={fileBrowserUrl}
+                    fileBrowserRoot={fileBrowserRoot}
+                    sourcesFor={hoverFlags ? (version) => fileHoverSources(hoverFlags, configured, version.presence) : undefined}
+                  />
                 ) : (
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Path</dt>

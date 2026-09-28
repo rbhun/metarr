@@ -48,6 +48,15 @@ export type TrackSources = {
   file?: string | null;
 };
 
+/** True when that source lists the file, null when it was checked and does not. */
+export type FileSources = {
+  plex?: boolean | null;
+  radarr?: boolean | null;
+  sonarr?: boolean | null;
+  bazarr?: boolean | null;
+  file?: boolean | null;
+};
+
 export type AudioTrack = {
   language: string | null;
   layout: string | null;
@@ -91,6 +100,7 @@ export type MediaFile = {
   audioTracks?: AudioTrack[];
   subtitleTracks?: SubtitleTrack[];
   origin?: "plex" | "radarr" | "sonarr" | "bazarr" | "file";
+  presence?: FileSources;
   bitrateKbps?: number | null;
   videoCodec?: string | null;
   videoProfile?: string | null;
@@ -142,6 +152,7 @@ export type MediaVersion = {
   flags: string[];
   fileBytes: number | null;
   durationMinutes: number | null;
+  presence?: FileSources;
 };
 
 export type MediaDetail = TitleNotes & {
