@@ -1,4 +1,4 @@
-import { languageName, playableName, sourceTooltip } from "@/lib/media";
+import { languageName, playableName, sameSpokenLanguage, sourceTooltip } from "@/lib/media";
 import { CONNECTOR_LABEL, type AudioTrack, type ConnectorId, type FileSources, type HdrLabel, type LibraryTitle, type PlayableLabel, type SubtitleTrack, type TrackSources } from "@/lib/types";
 
 export function formatWhen(value: string | null | undefined): string {
@@ -51,9 +51,19 @@ export function formatLayout(layout: string | null | undefined): string | null {
   return layout;
 }
 
-export function languageHover(sources: TrackSources | undefined, shown: string | null, note?: string | null): string | undefined {
+export function languageHover(
+  sources: TrackSources | undefined,
+  shown: string | null,
+  note?: string | null,
+  recognized?: string | null,
+): string | undefined {
+  const metarr = !recognized
+    ? null
+    : shown && sameSpokenLanguage(recognized, shown)
+      ? "Metarr: recognized"
+      : `Metarr: ${languageName(recognized) ?? recognized}`;
   const report = sourceTooltip(sources, shown);
-  const text = [report, note?.trim() ? note : null].filter(Boolean).join("\n");
+  const text = [metarr, report, note?.trim() ? note : null].filter(Boolean).join("\n");
   return text || undefined;
 }
 

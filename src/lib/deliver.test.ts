@@ -43,6 +43,28 @@ test("delivery never overwrites an existing file or removes a .partial it did no
   }
 });
 
+test("a folder that refuses a new file names that folder", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-deliver-"));
+  const fromDir = path.join(root, "work");
+  const season = path.join(root, "Season 01");
+  fs.mkdirSync(fromDir);
+  fs.mkdirSync(season);
+  const source = path.join(fromDir, "episode.mkv");
+  const target = path.join(season, "episode.mkv");
+  fs.writeFileSync(source, "new");
+  fs.writeFileSync(target, "old");
+  fs.chmodSync(season, 0o555);
+  try {
+    assert.throws(() => deliverFile(source, target, { replace: true }), /Cannot write in/);
+    assert.equal(fs.readFileSync(target, "utf8"), "old");
+    assert.equal(fs.readFileSync(source, "utf8"), "new");
+    assert.equal(fs.existsSync(partialPath(target)), false);
+  } finally {
+    fs.chmodSync(season, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a replacing delivery swaps the file in with the requested mode", () => {
   const { root, source, target } = scratch();
   try {

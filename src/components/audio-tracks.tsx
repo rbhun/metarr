@@ -106,17 +106,18 @@ export function AudioTracks({
           omittedByPlex: track.omittedByPlex === true,
           conflict: track.conflict ?? null,
           sources: track.sources,
+          detected: track.detectedLanguage ?? null,
           layout: formatLayout(track.layout),
           codec: track.codec,
           targets: audioTargets(path, track, index, label),
         }))
         .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, omittedByPlex: false, conflict: null, sources: undefined, layout: null, codec: null, targets: [] }));
+    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, omittedByPlex: false, conflict: null, sources: undefined, detected: null, layout: null, codec: null, targets: [] }));
 
   if (rows.length === 0) return <p>—</p>;
 
   const items = rows.map((row, index) => {
-        const note = languageHover(row.sources, row.language);
+        const note = languageHover(row.sources, row.language, null, row.detected);
         const hover = note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
         const tone = row.conflict || row.omittedByPlex ? omittedLanguageClass : row.fromFile ? fileLanguageClass : undefined;
         const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}`;

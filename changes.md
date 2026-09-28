@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.85
+
+- Say on a language label when Metarr recognized it, and name Radarr or Sonarr there when the title is in that app.
+
+## 0.0.84
+
+- If a finished language file cannot be renamed into its folder, copy it in, and name the folder when that write is refused.
+
+## 0.0.83
+
+- Say Radarr or Sonarr is missing on a track when that app has the file and stored no audio language.
+
 ## 0.0.82
 
 - When mkvpropedit cannot open an MKV, copy the streams back into that same file with the language set, and keep mkvpropedit's own reason if that also fails.

@@ -6,6 +6,7 @@ import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
+import { ensureListedSource } from "@/lib/media";
 import { displayLocalTitle, enrichmentKey } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -1109,12 +1110,18 @@ function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections
   return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
 }
 
+function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {
+  if (kind === "series") return inSonarr ? "sonarr" : null;
+  return inRadarr ? "radarr" : null;
+}
+
 function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, detections: Map<string, StoredDetection>): LibraryTitle {
   const path = row.path;
+  const app = listedApp(row.kind, row.in_radarr === 1, row.in_sonarr === 1);
   const versions = parseVersions(row.versions_json).map((version) => ({
     ...version,
-    audioTracks: overlayAudio(version.path, version.audioTracks, detections),
-    subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
+    audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+    subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
   }));
   return {
     id: row.id,
@@ -1140,8 +1147,8 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
-    subtitleTracks: subtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    audioTracks: ensureListedSource(overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    subtitleTracks: ensureListedSource(subtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     posterPath: row.poster_path,
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
@@ -1318,8 +1325,14 @@ function libraryTitles(
   for (const title of titles) {
     const files = grouped.get(title.id);
     if (!files?.length) continue;
-    title.audioTracks = rollupAudio(files);
-    title.subtitleTracks = rollupSubtitles(files);
+    const app = title.inSonarr ? "sonarr" : null;
+    const stamped = files.map((file) => ({
+      path: file.path,
+      audioTracks: ensureListedSource(file.audioTracks, app),
+      subtitleTracks: ensureListedSource(file.subtitleTracks, app),
+    }));
+    title.audioTracks = rollupAudio(stamped);
+    title.subtitleTracks = rollupSubtitles(stamped);
   }
   return titles;
 }
@@ -1361,7 +1374,9 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
        ORDER BY COALESCE(season, 9999), COALESCE(episode, 9999), title`,
     )
     .all(catalogId) as EpisodeRow[];
-  return rows.map((row) => ({
+  return rows.map((row) => {
+    const app = row.in_sonarr === 1 ? "sonarr" : null;
+    return {
     id: row.id,
     season: row.season,
     episode: row.episode,
@@ -1378,20 +1393,21 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections),
-    subtitleTracks: subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections),
+    audioTracks: ensureListedSource(overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    subtitleTracks: ensureListedSource(subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
     versions: parseVersions(row.versions_json).map((version) => ({
       ...version,
-      audioTracks: overlayAudio(version.path, version.audioTracks, detections),
-      subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
+      audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+      subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
     })),
     inPlex: row.in_plex === 1,
     inSonarr: row.in_sonarr === 1,
     inBazarr: row.in_bazarr === 1,
     airDate: row.air_date,
-  }));
+    };
+  });
 }
 
 export function clearLibrary(db = getDb()) {

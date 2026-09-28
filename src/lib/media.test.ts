@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileHoverSources } from "@/lib/format";
-import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { fileHoverSources, languageHover } from "@/lib/format";
+import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -225,6 +225,37 @@ test("a language label names which source has it", () => {
   assert.equal(sourceTooltip(checked[0]?.sources, "English"), "Plex: present\nRadarr: present\nFile scan: present");
   assert.equal(sourceTooltip(checked[1]?.sources, "Portuguese"), "Plex: missing\nRadarr: present\nFile scan: present");
   assert.equal(sourceTooltip({ plex: "Hungarian" }, "Czech"), "Plex: Hungarian\nFile scan: not scanned");
+  assert.equal(
+    languageHover({ plex: null }, "English", null, "English"),
+    "Metarr: recognized\nPlex: missing\nFile scan: not scanned",
+  );
+  const listed = ensureListedSource([{ language: null, sources: { plex: null } }], "radarr");
+  assert.equal(sourceTooltip(listed[0]?.sources, null), "Plex: missing\nRadarr: missing\nFile scan: not scanned");
+  const kept = ensureListedSource([{ language: "English", sources: { plex: "English", radarr: "English" } }], "radarr");
+  assert.equal(sourceTooltip(kept[0]?.sources, "English"), "Plex: present\nRadarr: present\nFile scan: not scanned");
+});
+
+test("a movie Radarr has with no audio language says Radarr is missing", () => {
+  const file = {
+    container: "avi",
+    path: "/movies/The Beach.avi",
+    qualityName: null,
+    resolution: null,
+    hdr: "none" as const,
+    is3d: false,
+    audioLanguages: [] as string[],
+    subtitleLanguages: [] as string[],
+  };
+  const plex = tagFileOrigin(
+    { ...file, audioTracks: [{ language: null, layout: "5.1", codec: "Dolby Digital", streamIndex: 0 }], subtitleTracks: [] },
+    "plex",
+  );
+  const radarr = tagFileOrigin(file, "radarr");
+  const bazarr = tagFileOrigin(file, "bazarr");
+  const named = reconcileAudio(plex, radarr);
+  assert.equal(sourceTooltip(named[0]?.sources, null), "Plex: missing\nRadarr: missing\nFile scan: not scanned");
+  const fromBazarr = reconcileAudio(plex, bazarr);
+  assert.equal(fromBazarr[0]?.sources?.bazarr, undefined);
 });
 
 test("a folder scan keeps the file language and marks a Plex mismatch", () => {

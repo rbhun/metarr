@@ -508,12 +508,22 @@ export function stampOriginTracks<T extends { language: string | null; sources?:
 export function applyListedSource<T extends { language: string | null; sources?: TrackSources }>(tracks: T[], file: MediaFile, languages: string[]): T[] {
   const origin = file.origin;
   if (origin !== "radarr" && origin !== "sonarr" && origin !== "bazarr") return tracks;
-  if (!languages.length) return tracks;
+  // Bazarr does not report audio. An empty list from Radarr or Sonarr means that app read the file and stored no language.
+  if (!languages.length) {
+    if (origin === "bazarr") return tracks;
+    return tracks.map((track) => (track.sources && origin in track.sources ? track : withTrackSource(track, origin, null)));
+  }
   return tracks.map((track) => {
     const named = track.language ? languageName(track.language) ?? track.language : null;
     const listed = Boolean(named && languages.some((language) => sameSpokenLanguage(language, named)));
     return withTrackSource(track, origin, listed && named ? named : null);
   });
+}
+
+/** A movie in Radarr or a series in Sonarr has been checked, even when that app stored no language. */
+export function ensureListedSource<T extends { sources?: TrackSources }>(tracks: T[], app: "radarr" | "sonarr" | null): T[] {
+  if (!app) return tracks;
+  return tracks.map((track) => (track.sources && app in track.sources ? track : { ...track, sources: { ...track.sources, [app]: null } }));
 }
 
 export function sourceTooltip(sources: TrackSources | undefined, shown: string | null): string | null {
