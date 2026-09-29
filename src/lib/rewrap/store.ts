@@ -197,17 +197,17 @@ export function retryFailedRewrap(db: Database.Database, id: number): "retried" 
   return changed.changes === 1 ? "retried" : "missing";
 }
 
+/** One retry per file, from its latest failure; files already queued or converted stay as they are. */
 export function retryAllFailedRewrap(db: Database.Database): number {
   return db
     .prepare(
       `UPDATE rewrap_jobs
        SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
-       WHERE status = 'failed'
+       WHERE id IN (SELECT MAX(id) FROM rewrap_jobs WHERE status = 'failed' GROUP BY path)
          AND NOT EXISTS (
            SELECT 1 FROM rewrap_jobs AS other
            WHERE other.path = rewrap_jobs.path
-             AND other.status IN ('pending', 'running')
-             AND other.id != rewrap_jobs.id
+             AND other.status IN ('pending', 'running', 'done')
          )`,
     )
     .run().changes;

@@ -110,7 +110,7 @@ async function step() {
     }
     const mainName = `${safeBaseName(job.label)}.mkv`;
     if (fs.existsSync(path.join(directory, mainName))) {
-      finishRemux(db, job.id, "failed", `${mainName} already exists next to the disc.`);
+      finishRemux(db, job.id, "done", `Already converted: ${mainName} is next to the disc. Nothing was written.`);
       return;
     }
     workDir.current = remuxWorkDirectory(db.name, job.id);

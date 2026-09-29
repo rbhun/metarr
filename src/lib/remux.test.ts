@@ -26,6 +26,7 @@ import {
   finishRemux,
   hasImmediateRemux,
   KEEP_ALL_SELECTION,
+  retryAllFailedRemux,
   retryFailedRemux,
   listRemuxJobs,
   readRemuxSettings,
@@ -336,4 +337,29 @@ test("a MakeMKV crash still leaves its output and debug log for the job", async 
   assert.match(text, /info-output.txt[\s\S]*AACS directory not present[\s\S]*\[stopped by SIGSEGV\]/);
   assert.match(text, /info-debug.txt =====\ndebug line/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("Redo all brings back each failed disc once and leaves converted discs alone", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const fail = (filePath: string) => {
+    enqueuePaths(db, [{ path: filePath, label: "Disc" }], false);
+    const job = claimNextRemux(db);
+    assert.ok(job);
+    finishRemux(db, job.id, "failed", "boom");
+    return job.id;
+  };
+  for (let i = 0; i < 6; i += 1) fail("/movies/First Dates.iso");
+  const latest = fail("/movies/Other.iso");
+  fail("/movies/Done.iso");
+  enqueuePaths(db, [{ path: "/movies/Done.iso", label: "Disc" }], false);
+  const done = claimNextRemux(db);
+  assert.ok(done);
+  finishRemux(db, done.id, "done", null);
+  assert.equal(retryAllFailedRemux(db), 2);
+  const pending = listRemuxJobs(db, { status: "pending", page: 1, pageSize: 50 }).jobs;
+  assert.deepEqual(pending.map((job) => job.path).sort(), ["/movies/First Dates.iso", "/movies/Other.iso"]);
+  assert.ok(pending.some((job) => job.id === latest));
+  assert.equal(retryAllFailedRemux(db), 0);
+  db.close();
 });

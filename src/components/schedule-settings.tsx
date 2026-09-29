@@ -12,6 +12,13 @@ import { useEffect, useState } from "react";
 
 type Hours = { enabled: boolean; startHour: number; endHour: number };
 
+type Clock = { timeZone: string; now: string; setting: string | null };
+
+function timeZones(current: string): string[] {
+  const all = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+  return all.includes(current) || !current ? all : [current, ...all];
+}
+
 type SyncSchedule = { enabled: boolean; intervalHours: number };
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -52,10 +59,18 @@ export function ScheduleSettings() {
   const [remux, setRemux] = useState<Hours | null>(null);
   const [rewrap, setRewrap] = useState<Hours | null>(null);
   const [busy, setBusy] = useState(false);
+  const [clock, setClock] = useState<Clock | null>(null);
+  const [zone, setZone] = useState("");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void Promise.all([
+        fetch("/api/clock", { cache: "no-store" }).then(async (response) => {
+          if (!response.ok) return;
+          const body = (await response.json()) as Clock;
+          setClock(body);
+          setZone(body.setting ?? body.timeZone);
+        }),
         fetch("/api/sync", { cache: "no-store" }).then(async (response) => {
           if (!response.ok) return;
           const body = (await response.json()) as { schedule?: SyncSchedule };
@@ -99,8 +114,66 @@ export function ScheduleSettings() {
     }
   }
 
+  async function saveZone(value: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/clock", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeZone: value }),
+      });
+      const body = (await response.json().catch(() => null)) as (Clock & { error?: string }) | null;
+      if (!response.ok || !body) throw new Error(body?.error || "Could not save the time zone.");
+      setClock(body);
+      setZone(body.setting ?? body.timeZone);
+      toast.success(`Schedules now use ${body.timeZone}.`);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not save the time zone.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      {clock ? (
+        <Card size="sm" className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Clock</CardTitle>
+            <CardDescription>
+              Every schedule below uses the server clock: {clock.timeZone}, now {clock.now}.
+              {clock.timeZone !== browserZone ? ` This browser is on ${browserZone}.` : null}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-end gap-2">
+            <div className="min-w-56 flex-1 space-y-1.5">
+              <Label htmlFor="time-zone">Time zone</Label>
+              <select
+                id="time-zone"
+                value={zone}
+                className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                onChange={(event) => setZone(event.target.value)}
+              >
+                {timeZones(zone).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button type="button" size="sm" disabled={busy} onClick={() => void saveZone(zone)}>
+              Save time zone
+            </Button>
+            {clock.timeZone !== browserZone ? (
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void saveZone(browserZone)}>
+                Use {browserZone}
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
       <Card size="sm">
         <CardHeader>
           <CardTitle>Library resync</CardTitle>

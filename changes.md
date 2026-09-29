@@ -1,5 +1,11 @@
 # Changes
 
+## 0.0.110
+
+- Check the MakeMKV program's own version when deploying. 0.0.107 relabelled the saved 2.0.0 copy as 1.18.4 instead of building 1.18.4, so Blu-rays kept crashing.
+- Redo all brings back each failed rip once, from its latest failure, and skips discs that are already converted. A disc converted before counts as done, not failed.
+- Settings → Schedules shows the server clock and time zone, and lets you pick the time zone. The container ran on UTC, so the windows were two hours off.
+
 ## 0.0.109
 
 - Put All / Movies / Series on the same row as Filters and Add filter so the library toolbar uses one line on a phone.

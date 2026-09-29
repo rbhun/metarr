@@ -187,17 +187,17 @@ export function retryFailedRemux(db: Database.Database, id: number): "retried" |
   return changed.changes === 1 ? "retried" : "missing";
 }
 
+/** One retry per file, from its latest failure; files already queued or converted stay as they are. */
 export function retryAllFailedRemux(db: Database.Database): number {
   return db
     .prepare(
       `UPDATE remux_jobs
        SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
-       WHERE status = 'failed'
+       WHERE id IN (SELECT MAX(id) FROM remux_jobs WHERE status = 'failed' GROUP BY path)
          AND NOT EXISTS (
            SELECT 1 FROM remux_jobs AS other
            WHERE other.path = remux_jobs.path
-             AND other.status IN ('pending', 'running')
-             AND other.id != remux_jobs.id
+             AND other.status IN ('pending', 'running', 'done')
          )`,
     )
     .run().changes;
