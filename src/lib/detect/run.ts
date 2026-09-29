@@ -11,7 +11,7 @@ import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import type { DetectJob } from "@/lib/detect/store";
 import { readPgsImages, scaleBitmap, writePng } from "@/lib/detect/pgs";
-import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
@@ -323,14 +323,19 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
     const listenSlice = async (window: { start: number; end: number } | null, index: number): Promise<"timeout" | "heard"> => {
       const wav = path.join(directory, `clip-${index}.wav`);
       if (!window) return "heard";
+      let sawTimeout = false;
       for (const filter of mix ? [mix, null] : [null]) {
         try {
-          await ffmpegSlice(file, window.start, window.end, audioSliceArgs(job.ordinal, wav, filter), 40_000);
+          await ffmpegSlice(file, window.start, window.end, audioSliceArgs(job.ordinal, wav, filter), 45_000);
           if (present(wav, 8_000)) break;
         } catch (caught) {
-          if (caught instanceof Error && /timed out/.test(caught.message)) return "timeout";
+          if (caught instanceof Error && /timed out/.test(caught.message)) {
+            sawTimeout = true;
+            continue;
+          }
         }
       }
+      if (!present(wav, 8_000) && sawTimeout) return "timeout";
       return hearFile(wav);
     };
     const listen = async (offset: number, index: number): Promise<"timeout" | "heard"> => {
@@ -364,12 +369,12 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       const outcome = await listen(transport ? offset : clipStart(offset, heard.start), index);
       if (outcome === "timeout") {
         timedOut = true;
-        break;
+        continue;
       }
       if (agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
-    if (transport && samples.length === 0 && !readSample && !timedOut) {
-      const outcome = await listenSlice(openingWindow(fileSize, packetBytes(file)), 2);
+    if (transport && samples.length === 0 && !readSample) {
+      const outcome = await listenSlice(openingWindow(fileSize, packetBytes(file)), sampleOffsets(heard.duration).length);
       if (outcome === "timeout") timedOut = true;
     }
     if (samples.length === 0) {
@@ -460,14 +465,45 @@ async function collectPgs(file: string, ordinal: number, directory: string, star
   return { bitmaps, timedOut };
 }
 
+/** An indexed file can hand over the whole PGS track. A disc stream has to be sliced. */
+async function demuxPgsTrack(file: string, ordinal: number, directory: string): Promise<{ bitmaps: ReturnType<typeof readPgsImages>; timedOut: boolean }> {
+  const sup = path.join(directory, "track.sup");
+  clearDirectory(directory);
+  try {
+    await runCommand("ffmpeg", pgsDemuxArgs(file, ordinal, sup), 120_000);
+  } catch (error) {
+    const failed = error instanceof Error ? error : new Error(String(error));
+    if (/timed out/i.test(failed.message)) return { bitmaps: [], timedOut: true };
+    if (/empty|nothing was written/i.test(failed.message)) return { bitmaps: [], timedOut: false };
+    throw failed;
+  }
+  if (!fs.existsSync(sup) || fs.statSync(sup).size < 32) return { bitmaps: [], timedOut: false };
+  const bitmaps = readPgsImages(fs.readFileSync(sup), 24);
+  fs.rmSync(sup, { force: true });
+  return { bitmaps, timedOut: false };
+}
+
 async function pgsFrames(file: string, ordinal: number, directory: string): Promise<{ frames: string[]; forced: boolean }> {
   const duration = await durationSeconds(file);
-  let { bitmaps, timedOut } = await collectPgs(file, ordinal, directory, sampleOffsets(duration), 45);
+  let bitmaps: ReturnType<typeof readPgsImages> = [];
+  let timedOut = false;
   let cues = 0;
+  if (!isTransportStream(file)) {
+    ({ bitmaps, timedOut } = await demuxPgsTrack(file, ordinal, directory));
+  }
+  if (bitmaps.length < 4 && !timedOut) {
+    const windowed = await collectPgs(file, ordinal, directory, sampleOffsets(duration), 45);
+    bitmaps.push(...windowed.bitmaps);
+    timedOut = windowed.timedOut;
+  }
   if (bitmaps.length < 4 && !timedOut) {
     const found = await subtitleCues(file, ordinal);
     cues = found.count;
-    if (bitmaps.length === 0) ({ bitmaps, timedOut } = await collectPgs(file, ordinal, directory, found.starts, 8));
+    if (bitmaps.length === 0 && found.starts.length > 0) {
+      const atCues = await collectPgs(file, ordinal, directory, found.starts, 8);
+      bitmaps.push(...atCues.bitmaps);
+      timedOut = atCues.timedOut;
+    }
   }
   if (bitmaps.length === 0 && timedOut) throw new Error("ffmpeg timed out.");
   const frames = spread(bitmaps, 8).map((bitmap) => scaleBitmap(bitmap, 3));

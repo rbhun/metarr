@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.100
+
+- Copy a PGS track out of an MKV in one pass, and keep trying a Blu-ray audio slice after a slow read, so idle overnight checks do not miss the same samples again.
+
 ## 0.0.99
 
 - Rewrap AVI files into MKV with ffmpeg, without re-encoding, so seeking works and audio languages can be stored. AVIs get their own list in Rips (to rewrap and already rewrapped), their own hours and settings, a Rewraps tab in Tasks, and a Rewrap to MKV button in the library.

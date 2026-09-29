@@ -21,9 +21,10 @@ export function clipStart(programOffset: number, mediaStart: number | null): num
   return Math.round((start + programOffset) * 1000) / 1000;
 }
 
-const WINDOW_SECONDS = 30;
-const UNKNOWN_WINDOW = 160 * 1024 * 1024;
-const OPENING_BYTES = 16 * 1024 * 1024;
+/** Twelve seconds of programme is enough for Whisper and stays small on a 4K disc over NFS. */
+const WINDOW_SECONDS = 12;
+const UNKNOWN_WINDOW = 24 * 1024 * 1024;
+const OPENING_BYTES = 8 * 1024 * 1024;
 
 export function isTransportStream(file: string): boolean {
   return /\.m2ts$/i.test(file) || /\.ts$/i.test(file);
@@ -101,6 +102,8 @@ export function audioSliceArgs(ordinal: number, wav: string, mix: string | null 
     "pipe:0",
     "-map",
     `0:a:${ordinal}`,
+    "-t",
+    "20",
     ...(mix ? ["-af", mix] : []),
     "-ac",
     "1",

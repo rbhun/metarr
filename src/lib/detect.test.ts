@@ -27,7 +27,7 @@ import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeF
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
-import { cueSampleStarts, pgsCopyArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
@@ -224,6 +224,7 @@ test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packet
   assert.ok(opening);
   assert.equal(opening.start, 0);
   assert.equal(opening.end % 192, 0);
+  assert.ok(opening.end <= 8 * 1024 * 1024);
   assert.equal(languageFromProbeTags({ language: "por" }), "Portuguese");
   assert.equal(languageFromProbeTags({ language: "hun" }), "Hungarian");
   assert.equal(languageFromProbeTags({ language: "und" }), null);
@@ -274,6 +275,11 @@ test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packet
   assert.equal(slice.includes("-ss"), false);
   assert.equal(slice[slice.indexOf("-i") + 1], "pipe:0");
   assert.equal(slice[slice.indexOf("-map") + 1], "0:a:0");
+  assert.ok(slice.indexOf("-t") > slice.indexOf("-i"));
+  assert.equal(slice[slice.indexOf("-t") + 1], "20");
+  const unknown = tsWindow(40_000_000_000, null, 600, 192);
+  assert.ok(unknown);
+  assert.ok(unknown.end - unknown.start <= 24 * 1024 * 1024);
 });
 
 test("a sparse subtitle is sampled where its cues are", () => {
@@ -289,6 +295,11 @@ test("a pgs subtitle is copied out of the video instead of decoding the picture"
   assert.equal(args.at(-2), "sup");
   assert.ok(args.indexOf("-t") < args.indexOf("-i"));
   assert.equal(args[args.indexOf("-t") + 1], "45");
+  const whole = pgsDemuxArgs("/movies/Backrooms.mkv", 0, "/tmp/track.sup");
+  assert.equal(whole.includes("-ss"), false);
+  assert.equal(whole[whole.indexOf("-map") + 1], "0:s:0");
+  assert.equal(whole[whole.indexOf("-c") + 1], "copy");
+  assert.equal(whole.at(-2), "sup");
 });
 
 test("a vobsub picture is drawn as an image and cropped to the text", () => {
