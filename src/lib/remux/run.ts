@@ -65,13 +65,32 @@ export function makemkvFailure(output: string, code: number | null, signal: Node
   return last ? `${exit} MakeMKV gave no reason; its last message was: ${last}` : exit;
 }
 
-function runMakeMkv(binary: string, args: string[], home: string, onLine: (line: string) => void): Promise<string> {
+/** MakeMKV's own debug log and everything it printed, per step, for Tasks → MakeMKV log. */
+function saveOutput(logDir: string | undefined, step: string, output: string, code: number | null, signal: NodeJS.Signals | null) {
+  if (!logDir) return;
+  try {
+    const ending = code === 0 ? "exit 0" : code != null ? `exit ${code}` : `stopped by ${signal ?? "unknown signal"}`;
+    fs.writeFileSync(path.join(logDir, `${step}-output.txt`), `${output}\n[${ending}]\n`);
+  } catch {
+    // The log is only for diagnosis.
+  }
+}
+
+function runMakeMkv(
+  binary: string,
+  args: string[],
+  home: string,
+  onLine: (line: string) => void,
+  logDir?: string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!binary.trim()) {
       reject(new Error("makemkvcon is not set. Enter its path in Settings → Disc remux."));
       return;
     }
-    const wrapped = idle(binary, ["--robot", "--minlength=0", ...args]);
+    const step = args[0] ?? "run";
+    const debug = logDir ? [`--debug=${path.join(logDir, `${step}-debug.txt`)}`] : [];
+    const wrapped = idle(binary, ["--robot", "--minlength=0", ...debug, ...args]);
     const child = spawn(wrapped.command, wrapped.args, {
       env: { ...process.env, HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
@@ -111,6 +130,7 @@ function runMakeMkv(binary: string, args: string[], home: string, onLine: (line:
       );
     });
     child.on("close", (code, signal) => {
+      saveOutput(logDir, step, output, code, signal);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -131,11 +151,12 @@ export async function ripDisc(options: {
   extras: boolean;
   home: string;
   dryRun?: boolean;
+  logDir?: string;
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
-  const { binary, source, outputDir, workDir, label, extras, home, onProgress } = options;
+  const { binary, source, outputDir, workDir, label, extras, home, onProgress, logDir } = options;
   onProgress(0, "Reading the disc");
-  const info = await runMakeMkv(binary, ["info", source], home, () => undefined);
+  const info = await runMakeMkv(binary, ["info", source], home, () => undefined, logDir);
   const titles = parseDiscTitles(info);
   const main = longestTitle(titles);
   if (!main) throw new Error("MakeMKV did not find a title on this disc.");
@@ -156,7 +177,7 @@ export async function ripDisc(options: {
       if (percent < 100 && now - lastWrite < 2_000) return;
       lastWrite = now;
       onProgress(percent, `Remuxing ${percent}%`);
-    });
+    }, logDir);
     onProgress(100, "Saving files");
     const produced = listMkv(workDir);
     const plan = planRemuxFiles(outputDir, label, produced, extras, (file) => fs.existsSync(file));

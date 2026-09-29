@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.105
+
+- Save MakeMKV's output and debug log for each disc job and link it from Tasks as "MakeMKV log", so a crash can be diagnosed without the server console.
+
 ## 0.0.104
 
 - Install mmccextr, the MakeMKV helper that was left out of the saved MakeMKV copy, and point a MakeMKV crash at the key first, since a missing or expired key is the usual cause on Blu-ray.

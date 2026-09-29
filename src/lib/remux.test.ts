@@ -15,7 +15,8 @@ import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
-import { makemkvFailure, makemkvMessages } from "@/lib/remux/run";
+import { makemkvFailure, makemkvMessages, ripDisc } from "@/lib/remux/run";
+import { prepareMakemkvLogDir, readMakemkvLog } from "@/lib/remux/logs";
 import { makemkvSource, outputDirectory } from "@/lib/remux/source";
 import {
   claimNextRemux,
@@ -286,4 +287,52 @@ test("a MakeMKV failure shows the real reason, not the routine ISO lines", () =>
   const profile = [...ISO_START, 'MSG:1011,0,1,"Profile parsing error: default profile missing, using builtin default","%1","x"'].join("\n");
   assert.match(makemkvFailure(profile, null, "SIGSEGV"), /^MakeMKV crashed \(SIGSEGV\)\. .*MakeMKV key is missing or expired.*last message was: Profile parsing error/);
   assert.match(makemkvFailure("", null, "SIGKILL"), /ran out of memory/);
+});
+
+test("MakeMKV logs are kept per job under the data folder and old ones are pruned", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-mkvlog-"));
+  const dbName = path.join(dir, "metarr.db");
+  for (let id = 1; id <= 32; id += 1) prepareMakemkvLogDir(dbName, id);
+  const jobs = fs.readdirSync(path.join(dir, "makemkv-logs"));
+  assert.equal(jobs.length, 30);
+  assert.ok(!jobs.includes("job-1") && !jobs.includes("job-2"));
+  assert.equal(readMakemkvLog(dbName, 32), null);
+  const log = prepareMakemkvLogDir(dbName, 32)!;
+  fs.writeFileSync(path.join(log, "info-output.txt"), "MSG:1005,0,1,\"hello\"\n");
+  assert.match(readMakemkvLog(dbName, 32) ?? "", /===== info-output.txt =====\nMSG:1005/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a MakeMKV crash still leaves its output and debug log for the job", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-mkvcrash-"));
+  const fake = path.join(dir, "makemkvcon");
+  fs.writeFileSync(
+    fake,
+    [
+      "#!/bin/sh",
+      'for arg in "$@"; do case "$arg" in --debug=*) echo "debug line" > "${arg#--debug=}";; esac; done',
+      'echo \'MSG:3007,0,0,"AACS directory not present, assuming unencrypted disc","x"\'',
+      "kill -SEGV $$",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const logDir = prepareMakemkvLogDir(path.join(dir, "metarr.db"), 7)!;
+  await assert.rejects(
+    ripDisc({
+      binary: fake,
+      source: "iso:/nowhere.iso",
+      outputDir: dir,
+      workDir: path.join(dir, "work"),
+      label: "Disc",
+      extras: false,
+      home: dir,
+      logDir,
+      onProgress: () => undefined,
+    }),
+    /SIGSEGV/,
+  );
+  const text = readMakemkvLog(path.join(dir, "metarr.db"), 7) ?? "";
+  assert.match(text, /info-output.txt[\s\S]*AACS directory not present[\s\S]*\[stopped by SIGSEGV\]/);
+  assert.match(text, /info-debug.txt =====\ndebug line/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

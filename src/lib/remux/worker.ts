@@ -10,6 +10,7 @@ import { assertWritableDiscFolder, discFolderProblem, friendlyFsError, remuxWork
 import { safeBaseName } from "@/lib/remux/place";
 import { outputDirectory, makemkvSource } from "@/lib/remux/source";
 import { ripDisc } from "@/lib/remux/run";
+import { prepareMakemkvLogDir } from "@/lib/remux/logs";
 import {
   claimNextRemux,
   finishRemux,
@@ -123,6 +124,7 @@ async function step() {
       extras: job.extras,
       home,
       dryRun: rehearsal,
+      logDir: prepareMakemkvLogDir(db.name, job.id),
       onProgress: (percent, text) => updateRemuxProgress(db, job.id, percent, text),
     });
     let told = "";

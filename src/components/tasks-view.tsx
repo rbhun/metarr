@@ -380,6 +380,16 @@ export function TasksView() {
                       Open Rips
                     </Link>
                   ) : null}
+                  {job.queue === "remux" && job.status !== "pending" ? (
+                    <a
+                      href={`/api/remux/log?id=${job.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      MakeMKV log
+                    </a>
+                  ) : null}
                 </div>
               </article>
             ))}
