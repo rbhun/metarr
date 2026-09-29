@@ -147,6 +147,7 @@ export function TasksView() {
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [redoing, setRedoing] = useState<string | null>(null);
+  const [redoingAll, setRedoingAll] = useState(false);
 
   const writeQuery = useCallback(
     (next: { status?: StatusFilter; page?: number; queue?: QueueFilter }) => {
@@ -199,7 +200,7 @@ export function TasksView() {
   }, [error, loading, page, total, writeQuery]);
 
   async function redoJob(job: TaskJob) {
-    if (job.status !== "failed" || redoing) return;
+    if (job.status !== "failed" || redoing || redoingAll) return;
     setRedoing(job.key);
     try {
       const response = await fetch("/api/tasks", {
@@ -218,13 +219,50 @@ export function TasksView() {
     }
   }
 
+  async function redoAllFailed() {
+    const count = tabCount(totals, "failed");
+    if (count < 1 || redoingAll || redoing || status !== "failed") return;
+    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "AVI" : "AVIs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
+    const shown = count.toLocaleString("en");
+    const when =
+      queue === "language" || queue === "all"
+        ? " Language checks wait for the overnight window."
+        : queue === "remux" || queue === "rewrap"
+          ? " They wait for their schedule window."
+          : "";
+    if (!window.confirm(`Queue ${shown} failed ${noun} again?${when}`)) return;
+    setRedoingAll(true);
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queue, all: true }),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; retried?: number } | null;
+      if (!response.ok) throw new Error(body?.error || "Those tasks could not be redone.");
+      const retried = typeof body?.retried === "number" ? body.retried : count;
+      toast.success(
+        retried === 0
+          ? "Nothing to queue."
+          : queue === "language" || queue === "all"
+            ? `${retried.toLocaleString("en")} queued for the next language window.`
+            : `${retried.toLocaleString("en")} queued again.`,
+      );
+      await load();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Those tasks could not be redone.");
+    } finally {
+      setRedoingAll(false);
+    }
+  }
+
   async function clearFiltered() {
     const count = tabCount(totals, status);
     if (count < 1 || clearing || status === "running" || status === "all") return;
     const name = (TABS.find(([value]) => value === status)?.[1] ?? status).toLowerCase();
     const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "AVI" : "AVIs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
-    if (!window.confirm(`Remove ${shown} ${name} ${noun} from the list? Languages already found stay. A job that is already running will finish.`)) return;
+    if (!window.confirm(`Remove ${shown} ${name} ${noun} from the list? Languages already found stay. Cleared failures are not checked again until you redo them. A job that is already running will finish.`)) return;
     setClearing(true);
     try {
       const response = await fetch(`/api/tasks?queue=${queue}&status=${status}`, { method: "DELETE" });
@@ -256,11 +294,18 @@ export function TasksView() {
                 Language checks, disc remuxes, and AVI rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
-            {status !== "running" && status !== "all" && tabCount(totals, status) > 0 ? (
-              <Button size="sm" variant="outline" onClick={() => void clearFiltered()} disabled={clearing}>
-                Clear
-              </Button>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {status === "failed" && tabCount(totals, "failed") > 0 ? (
+                <Button size="sm" variant="outline" onClick={() => void redoAllFailed()} disabled={redoingAll || Boolean(redoing)}>
+                  {redoingAll ? "Queuing…" : "Redo all"}
+                </Button>
+              ) : null}
+              {status !== "running" && status !== "all" && tabCount(totals, status) > 0 ? (
+                <Button size="sm" variant="outline" onClick={() => void clearFiltered()} disabled={clearing}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
           </div>
           <p className="text-sm text-muted-foreground">{queueSummary(totals) || "No tasks yet."}</p>
           <div className="flex flex-wrap gap-1.5">

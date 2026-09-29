@@ -197,6 +197,22 @@ export function retryFailedRewrap(db: Database.Database, id: number): "retried" 
   return changed.changes === 1 ? "retried" : "missing";
 }
 
+export function retryAllFailedRewrap(db: Database.Database): number {
+  return db
+    .prepare(
+      `UPDATE rewrap_jobs
+       SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
+       WHERE status = 'failed'
+         AND NOT EXISTS (
+           SELECT 1 FROM rewrap_jobs AS other
+           WHERE other.path = rewrap_jobs.path
+             AND other.status IN ('pending', 'running')
+             AND other.id != rewrap_jobs.id
+         )`,
+    )
+    .run().changes;
+}
+
 export function releaseRunningRewrap(db: Database.Database) {
   db.prepare(`UPDATE rewrap_jobs SET status = 'pending', started_at = NULL, progress = NULL WHERE status = 'running'`).run();
 }

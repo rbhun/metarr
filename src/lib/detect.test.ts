@@ -14,7 +14,7 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, reopenForWrite, retryFailedJob, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
@@ -590,6 +590,26 @@ test("redoing a failed language check queues that same track now", () => {
   assert.equal(again?.id, job!.id);
   assert.equal(again?.priority, "immediate");
   assert.equal(retryFailedJob(db, job!.id), "missing");
+  db.close();
+});
+
+test("redoing every failed language check puts them on the overnight queue", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/a.mkv", kind: "subtitle", ordinal: 0, label: "A", format: "PGS", placement: "internal", streamLabel: null },
+    { path: "/b.mkv", kind: "audio", ordinal: 1, label: "B", format: "AC3", placement: "internal", streamLabel: null },
+  ], "window");
+  const first = claimNextJob(db, true);
+  finishJob(db, first!.id, "failed", "No subtitle images could be read.");
+  const second = claimNextJob(db, true);
+  finishJob(db, second!.id, "failed", "The audio sample could not be read in time.");
+  assert.equal(retryAllFailedJobs(db), 2);
+  const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
+  assert.equal(waiting.total, 2);
+  assert.ok(waiting.jobs.every((row) => row.priority === "window"));
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  assert.equal(retryAllFailedJobs(db), 0);
   db.close();
 });
 

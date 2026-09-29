@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.102
+
+- Add Redo all on the Failed list in Tasks, so hundreds of failed language checks can go back on the overnight queue without clicking each one. Clearing failed jobs still only hides them.
+
 ## 0.0.101
 
 - Add Settings → Update Metarr: the button asks a small systemd helper on the host to run deploy.sh, and shows its progress and log, so updates no longer need the console. deploy.sh installs the helper the next time it runs.

@@ -1,7 +1,7 @@
-import { clearJobs, detectCounts, jobTotals as languageTotals, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
-import { clearRemuxJobs, remuxCounts, remuxTotals, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
+import { clearJobs, detectCounts, jobTotals as languageTotals, retryAllFailedJobs, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
+import { clearRemuxJobs, remuxCounts, remuxTotals, retryAllFailedRemux, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
-import { clearRewrapJobs, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
+import { clearRewrapJobs, retryAllFailedRewrap, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
 import { kickRewrapWorker, startRewrapWorker } from "@/lib/rewrap/worker";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
@@ -57,10 +57,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const queue = record.queue === "language" || record.queue === "remux" || record.queue === "rewrap" ? record.queue : null;
+  const queue =
+    record.queue === "all" || record.queue === "language" || record.queue === "remux" || record.queue === "rewrap" ? record.queue : null;
+  const redoAll = record.all === true;
   const id = typeof record.id === "number" && Number.isInteger(record.id) && record.id > 0 ? record.id : null;
-  if (!queue || !id) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
+  if (!queue) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
   const db = getDb();
+  if (redoAll) {
+    let retried = 0;
+    if (queue === "all" || queue === "language") retried += retryAllFailedJobs(db);
+    if (queue === "all" || queue === "remux") retried += retryAllFailedRemux(db);
+    if (queue === "all" || queue === "rewrap") retried += retryAllFailedRewrap(db);
+    if (retried > 0) {
+      kickDetectWorker();
+      kickRemuxWorker();
+      kickRewrapWorker();
+    }
+    return NextResponse.json({ result: "retried", retried, totals: taskTotalsFor(db, queue) });
+  }
+  if (queue === "all" || !id) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
   const result = queue === "language" ? retryFailedJob(db, id) : queue === "rewrap" ? retryFailedRewrap(db, id) : retryFailedRemux(db, id);
   if (result === "missing") return NextResponse.json({ error: "That failed task is no longer there." }, { status: 404 });
   if (result === "retried") {

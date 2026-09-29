@@ -179,6 +179,25 @@ export function retryFailedJob(db: Database.Database, id: number): "retried" | "
   return changed.changes === 1 ? "retried" : "missing";
 }
 
+/** Put every failed language check back on the overnight queue. */
+export function retryAllFailedJobs(db: Database.Database): number {
+  return db
+    .prepare(
+      `UPDATE detect_jobs
+       SET status = 'pending', priority = 'window', message = NULL, started_at = NULL, finished_at = NULL
+       WHERE status = 'failed'
+         AND NOT EXISTS (
+           SELECT 1 FROM detect_jobs AS other
+           WHERE other.path = detect_jobs.path
+             AND other.kind = detect_jobs.kind
+             AND other.ordinal = detect_jobs.ordinal
+             AND other.status IN ('pending', 'running')
+             AND other.id != detect_jobs.id
+         )`,
+    )
+    .run().changes;
+}
+
 export function finishJob(db: Database.Database, id: number, status: "done" | "failed" | "skipped", message: string | null) {
   db.prepare(`UPDATE detect_jobs SET status = ?, message = ?, finished_at = ? WHERE id = ?`).run(status, message, new Date().toISOString(), id);
 }
