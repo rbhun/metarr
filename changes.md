@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.108
+
+- Clear the library top bar: move Fill missing metadata to Settings, drop the duplicate Clear library button, and tuck quick filters behind a toggle so the phone layout stays usable.
+
 ## 0.0.107
 
 - Install MakeMKV 1.18.4 instead of 2.0.0. MakeMKV 2.0.0 crashes (SIGSEGV) on every unencrypted Blu-ray image or folder, key or not, while 1.18.4 reads them with the same beta key. Deploy now rebuilds MakeMKV when the saved copy is another version.

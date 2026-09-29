@@ -271,6 +271,50 @@ export function SettingsView() {
     }
   }
 
+  async function fillMissingMetadata() {
+    setBusy("fill-metadata");
+    let found = 0;
+    let missing = 0;
+    let errors = 0;
+    let limitNote: string | null = null;
+    try {
+      for (let step = 0; step < 40; step += 1) {
+        const response = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+          found?: number;
+          missing?: number;
+          errors?: number;
+          remaining?: number;
+          processed?: number;
+          message?: string | null;
+          omdbStopped?: boolean;
+        } | null;
+        if (!response.ok) throw new Error(body?.error || "Lookup failed.");
+        found += body?.found ?? 0;
+        missing += body?.missing ?? 0;
+        errors += body?.errors ?? 0;
+        if (body?.message) limitNote = body.message;
+        if (body?.omdbStopped) break;
+        if (!body?.processed) break;
+        if (!body.remaining) break;
+      }
+      bump();
+      const parts = [`${found} found`, missing ? `${missing} unmatched` : "", errors ? `${errors} failed` : ""].filter(Boolean);
+      toast.success(
+        `Lookup finished. ${parts.join(", ")}.${limitNote ? ` ${limitNote}` : ""} Nothing was written back to Plex or the *arr apps.`,
+      );
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function clearStoredLibrary() {
     if (!window.confirm("Remove every title stored in Metarr? Addresses and keys stay. Nothing is deleted on Plex or the *arr apps.")) return;
     setBusy("clear-library");
@@ -647,6 +691,21 @@ export function SettingsView() {
             );
           })}
         </div>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Fill missing metadata</CardTitle>
+            <CardDescription>
+              Looks up titles that have not been found yet with the online sources above. Results stay in the local database.
+              Nothing is written back to Plex or the *arr apps. Selected titles can still be refreshed from the library.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button size="sm" variant="outline" onClick={() => void fillMissingMetadata()} disabled={busy === "fill-metadata"}>
+              {busy === "fill-metadata" ? "Looking up…" : "Fill missing metadata"}
+            </Button>
+          </CardContent>
+        </Card>
 
         <Separator />
 

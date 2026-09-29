@@ -110,7 +110,7 @@ The Docker image builds MakeMKV (headless, version set by the `MAKEMKV_VERSION` 
 
 ## Online sources
 
-In Settings, add a TMDB key, an OMDb key, or both, and turn **Use when looking up** on. On the library page, **Fill missing metadata** looks up titles that have not been found yet. **Look up selected** and the detail panel refresh specific titles. OMDb supplies the rating when both sources match. A title the sources cannot match is left as-is and is not retried until you look it up again.
+In Settings, add a TMDB key, an OMDb key, or both, and turn **Use when looking up** on. **Fill missing metadata** in Settings looks up titles that have not been found yet. **Look up selected** and the detail panel on the library page refresh specific titles. OMDb supplies the rating when both sources match. A title the sources cannot match is left as-is and is not retried until you look it up again.
 
 ## Out of scope
 

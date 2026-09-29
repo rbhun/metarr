@@ -11,7 +11,8 @@ import {
 } from "@/lib/filters";
 import { CONTENT_RATING_OPTIONS, languageOptions } from "@/lib/media";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
+import { useState } from "react";
 
 const FIELD_LABEL: Record<FilterField, string> = {
   language: "Any language",
@@ -213,6 +214,11 @@ export function LibraryFilters({
   rules: FilterRule[];
   onChange: (rules: FilterRule[]) => void;
 }) {
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const activePresets = PRESETS.filter((preset) =>
+    rules.some((rule) => rule.field === preset.rule.field && rule.op === preset.rule.op && rule.value === preset.rule.value),
+  ).length;
+
   function update(id: string, patch: Partial<FilterRule>) {
     onChange(rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)));
   }
@@ -232,23 +238,15 @@ export function LibraryFilters({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        {PRESETS.map((preset) => {
-          const on = rules.some((rule) => rule.field === preset.rule.field && rule.op === preset.rule.op && rule.value === preset.rule.value);
-          return (
-            <Button
-              key={preset.label}
-              size="sm"
-              variant={on ? "default" : "outline"}
-              aria-pressed={on}
-              onClick={() => {
-                if (on) onChange(rules.filter((rule) => !(rule.field === preset.rule.field && rule.op === preset.rule.op && rule.value === preset.rule.value)));
-                else add(preset.rule);
-              }}
-            >
-              {preset.label}
-            </Button>
-          );
-        })}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={presetsOpen}
+          onClick={() => setPresetsOpen((open) => !open)}
+        >
+          Quick filters{activePresets ? ` (${activePresets})` : ""}
+          <ChevronDown className={cn("size-3.5 transition-transform", presetsOpen && "rotate-180")} />
+        </Button>
         <Button size="sm" variant="outline" onClick={() => add()}>
           Add filter
         </Button>
@@ -258,6 +256,27 @@ export function LibraryFilters({
           </Button>
         ) : null}
       </div>
+      {presetsOpen ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PRESETS.map((preset) => {
+            const on = rules.some((rule) => rule.field === preset.rule.field && rule.op === preset.rule.op && rule.value === preset.rule.value);
+            return (
+              <Button
+                key={preset.label}
+                size="sm"
+                variant={on ? "default" : "outline"}
+                aria-pressed={on}
+                onClick={() => {
+                  if (on) onChange(rules.filter((rule) => !(rule.field === preset.rule.field && rule.op === preset.rule.op && rule.value === preset.rule.value)));
+                  else add(preset.rule);
+                }}
+              >
+                {preset.label}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
       {rules.length ? (
         <div className="flex flex-col gap-1.5">
           {rules.map((rule) => (

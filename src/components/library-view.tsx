@@ -375,22 +375,6 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     return () => controller.abort();
   }, [epoch, openId]);
 
-  async function clearLibrary() {
-    if (!window.confirm("Remove every title stored in Metarr? Addresses and keys stay. Nothing is deleted on Plex or the *arr apps.")) return;
-    const response = await fetch("/api/library", { method: "DELETE" });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      toast.error(body?.error || "The library could not be cleared.");
-      return;
-    }
-    setSelected(new Map());
-    setDetail(null);
-    setDetailEpisode(null);
-    setOffset(0);
-    bump();
-    toast.success("Library cleared. Server settings were kept.");
-  }
-
   async function loadDemo() {
     const response = await fetch("/api/demo", { method: "POST" });
     if (response.ok) bump();
@@ -544,24 +528,11 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <DetectStatus />
             <RemuxStatus />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span>{data?.stats.total ?? 0} titles</span>
-              <span>{data?.stats.missing ?? 0} missing</span>
-              <span>{data?.stats.notInPlex ?? 0} not in Plex</span>
-              <span>{data?.stats.notPlayable ?? 0} not playable</span>
-            </div>
-            <Button size="sm" variant="outline" disabled={lookupBusy || (data?.stats.total ?? 0) === 0} onClick={() => void lookup(null)}>
-              {lookupBusy ? "Looking up…" : "Fill missing metadata"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={(data?.stats.total ?? 0) === 0 || status?.running}
-              onClick={() => void clearLibrary()}
-            >
-              Clear library
-            </Button>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span>{data?.stats.total ?? 0} titles</span>
+            <span>{data?.stats.missing ?? 0} missing</span>
+            <span>{data?.stats.notInPlex ?? 0} not in Plex</span>
+            <span>{data?.stats.notPlayable ?? 0} not playable</span>
           </div>
         </div>
         {data?.demo ? (
