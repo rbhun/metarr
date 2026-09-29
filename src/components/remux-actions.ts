@@ -6,18 +6,35 @@ export async function enqueueRemuxPaths(paths: Array<{ path: string; label?: str
   return enqueueRemuxBody({ paths, extras });
 }
 
+/** Starts now instead of waiting for the overnight window. */
+export async function convertNow(titles: number[], episodes: number[]): Promise<string> {
+  return enqueueRemuxBody({ titles, episodes, extras: false, immediate: true });
+}
+
 async function enqueueRemuxBody(body: Record<string, unknown>): Promise<string> {
   const response = await fetch("/api/remux", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const payload = (await response.json().catch(() => null)) as { error?: string; added?: number; skipped?: number; already?: number } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    error?: string;
+    added?: number;
+    skipped?: number;
+    already?: number;
+    promoted?: number;
+  } | null;
   if (!response.ok) throw new Error(payload?.error || "Could not queue the disc remux.");
   const added = payload?.added ?? 0;
   const skipped = payload?.skipped ?? 0;
   const already = payload?.already ?? 0;
-  if (added === 0 && already === 0) return "None of the selected files are disc images.";
+  const promoted = payload?.promoted ?? 0;
+  const immediate = body.immediate === true;
+  if (added === 0 && already === 0 && promoted === 0) return "None of the selected files are disc images.";
+  if (immediate) {
+    if (added === 0 && promoted === 0) return "That disc is already converting or waiting to start now.";
+    return "Converting now. Follow it in Tasks. One disc runs at a time, so it waits for any rip already running.";
+  }
   if (added === 0) return "Those discs are already in the queue.";
   const discs = added === 1 ? "1 disc" : `${added} discs`;
   const extra = body.extras === true ? " Extras are saved beside the movie." : " Only the longest title is saved.";

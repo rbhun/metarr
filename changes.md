@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.98
+
+- Add a Convert button to the library panel for disc titles; it remuxes right away instead of waiting for the overnight window.
+
 ## 0.0.97
 
 - Show the real reason a MakeMKV remux failed instead of its routine ISO status lines, and point to the MakeMKV key when Blu-ray needs one.

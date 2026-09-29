@@ -13,6 +13,7 @@ import { ripDisc } from "@/lib/remux/run";
 import {
   claimNextRemux,
   finishRemux,
+  hasImmediateRemux,
   readRemuxSettings,
   releaseRunningRemux,
   remuxCounts,
@@ -57,24 +58,27 @@ function existsMedia(candidate: string): boolean {
 async function step() {
   const db = getDb();
   const settings = readRemuxSettings(db);
-  if (!settings.enabled) {
-    writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "off" : null);
-    return;
+  const urgent = hasImmediateRemux(db);
+  if (!urgent) {
+    if (!settings.enabled) {
+      writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "off" : null);
+      return;
+    }
+    const open = inDetectWindow(new Date().getHours(), settings.startHour, settings.endHour);
+    if (!open) {
+      writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "window" : null);
+      return;
+    }
+    if (await plexLibraryBusy(db)) {
+      writeRemuxPause(db, "plex");
+      return;
+    }
+    if (detectCounts(db).running > 0) {
+      writeRemuxPause(db, "detect");
+      return;
+    }
   }
-  const open = inDetectWindow(new Date().getHours(), settings.startHour, settings.endHour);
-  if (!open) {
-    writeRemuxPause(db, remuxCounts(db).waiting > 0 ? "window" : null);
-    return;
-  }
-  if (await plexLibraryBusy(db)) {
-    writeRemuxPause(db, "plex");
-    return;
-  }
-  if (detectCounts(db).running > 0) {
-    writeRemuxPause(db, "detect");
-    return;
-  }
-  const job = claimNextRemux(db);
+  const job = claimNextRemux(db, urgent);
   if (!job) {
     writeRemuxPause(db, null);
     return;

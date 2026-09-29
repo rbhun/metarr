@@ -12,12 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatList, formatRating, formatRuntime, hdrText, playableText } from "@/lib/format";
-import { multiPartLabel } from "@/lib/media";
+import { isDiscImage, multiPartLabel } from "@/lib/media";
+import { convertedFileFor } from "@/lib/remux/discs";
+import { convertNow } from "@/components/remux-actions";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
 import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export function GenreLines({ genres }: { genres: string[] }) {
@@ -52,6 +55,8 @@ export function TitleDetail({
 }) {
   const [arrBusy, setArrBusy] = useState<"open" | "search" | "plex" | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
+  const [convertBusy, setConvertBusy] = useState(false);
+  const router = useRouter();
   async function detectNow() {
     if (!title) return;
     setDetectBusy(true);
@@ -124,6 +129,23 @@ export function TitleDetail({
         versions: episode ? episode.versions : title.versions,
       }
     : null;
+  const hasDisc = file
+    ? isDiscImage(file.container, file.path) || file.versions.some((version) => isDiscImage(version.container, version.path))
+    : false;
+  const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
+  async function convertDisc() {
+    if (!title) return;
+    setConvertBusy(true);
+    try {
+      toast.success(await convertNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
+        action: { label: "Tasks", onClick: () => router.push("/tasks") },
+      });
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start the conversion.");
+    } finally {
+      setConvertBusy(false);
+    }
+  }
   const hoverFlags = title
     ? episode
       ? { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr }
@@ -151,9 +173,16 @@ export function TitleDetail({
                   ? ` · ${title.online.originalTitle}`
                   : ""}
               </SheetDescription>
-              <Button size="sm" variant="outline" className="mt-2 w-fit" disabled={detectBusy} onClick={() => void detectNow()}>
-                {detectBusy ? "Queuing…" : "Detect languages now"}
-              </Button>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" className="w-fit" disabled={detectBusy} onClick={() => void detectNow()}>
+                  {detectBusy ? "Queuing…" : "Detect languages now"}
+                </Button>
+                {canConvert ? (
+                  <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void convertDisc()} title="Remux the disc to MKV now, without waiting for the overnight window">
+                    {convertBusy ? "Starting…" : "Convert"}
+                  </Button>
+                ) : null}
+              </div>
             </SheetHeader>
             <div className="flex gap-4 px-4">
               {title.online?.posterUrl || title.posterPath ? (

@@ -33,6 +33,7 @@ type JobRow = {
   path: string;
   label: string;
   extras: number;
+  immediate?: number;
   status: string;
   message: string | null;
   progress: number | null;
@@ -102,15 +103,20 @@ export function writeRemuxPause(db: Database.Database, pause: RemuxPause | null)
   setMetaValue(db, "remux_pause", pause);
 }
 
-export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: boolean): { added: number; skipped: number; already: number } {
-  const existing = db.prepare(`SELECT 1 AS ok FROM remux_jobs WHERE path = ? AND status IN ('pending', 'running')`);
+export type EnqueueResult = { added: number; skipped: number; already: number; promoted: number };
+
+/** `immediate` jobs skip the schedule window and the busy pauses; a waiting job for the same disc is moved up. */
+export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: boolean, immediate = false): EnqueueResult {
+  const existing = db.prepare(`SELECT status, immediate FROM remux_jobs WHERE path = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`);
+  const promote = db.prepare(`UPDATE remux_jobs SET immediate = 1 WHERE path = ? AND status = 'pending'`);
   const insert = db.prepare(
-    `INSERT INTO remux_jobs (path, label, extras, status, created_at) VALUES (?, ?, ?, 'pending', ?)`,
+    `INSERT INTO remux_jobs (path, label, extras, status, created_at, immediate) VALUES (?, ?, ?, 'pending', ?, ?)`,
   );
   const now = new Date().toISOString();
   let added = 0;
   let skipped = 0;
   let already = 0;
+  let promoted = 0;
   const write = db.transaction(() => {
     for (const file of files) {
       const discs = discsFromFile(file);
@@ -119,17 +125,23 @@ export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: b
         continue;
       }
       for (const disc of discs) {
-        if (existing.get(disc.path)) {
-          already += 1;
+        const row = existing.get(disc.path) as { status: string; immediate: number } | undefined;
+        if (row) {
+          if (immediate && row.status === "pending" && row.immediate !== 1) {
+            promote.run(disc.path);
+            promoted += 1;
+          } else {
+            already += 1;
+          }
           continue;
         }
-        insert.run(disc.path, disc.label, extras ? 1 : 0, now);
+        insert.run(disc.path, disc.label, extras ? 1 : 0, now, immediate ? 1 : 0);
         added += 1;
       }
     }
   });
   write();
-  return { added, skipped, already };
+  return { added, skipped, already, promoted };
 }
 
 function mapJob(row: JobRow): RemuxJob {
@@ -143,8 +155,15 @@ function mapJob(row: JobRow): RemuxJob {
   };
 }
 
-export function claimNextRemux(db: Database.Database): RemuxJob | null {
-  const row = db.prepare(`SELECT * FROM remux_jobs WHERE status = 'pending' ORDER BY id LIMIT 1`).get() as JobRow | undefined;
+export function hasImmediateRemux(db: Database.Database): boolean {
+  return Boolean(db.prepare(`SELECT 1 AS ok FROM remux_jobs WHERE status = 'pending' AND immediate = 1 LIMIT 1`).get());
+}
+
+/** Immediate jobs first; with `onlyImmediate`, scheduled jobs keep waiting for their window. */
+export function claimNextRemux(db: Database.Database, onlyImmediate = false): RemuxJob | null {
+  const row = db
+    .prepare(`SELECT * FROM remux_jobs WHERE status = 'pending' ${onlyImmediate ? "AND immediate = 1" : ""} ORDER BY immediate DESC, id LIMIT 1`)
+    .get() as JobRow | undefined;
   if (!row) return null;
   const changed = db
     .prepare(`UPDATE remux_jobs SET status = 'running', started_at = ?, message = 'Waiting to start', progress = 0 WHERE id = ? AND status = 'pending'`)
@@ -279,7 +298,8 @@ export function enqueuePaths(
   db: Database.Database,
   paths: Array<{ path: string; label?: string }>,
   extras: boolean,
-): { added: number; skipped: number; already: number } {
+  immediate = false,
+): EnqueueResult {
   const files: ScanFile[] = paths.map((item) => {
     const filePath = item.path.trim();
     return {
@@ -292,7 +312,7 @@ export function enqueuePaths(
       versions: [],
     };
   });
-  return enqueueDiscs(db, files, extras);
+  return enqueueDiscs(db, files, extras, immediate);
 }
 
 export function remuxIsRunning(db: Database.Database): boolean {
