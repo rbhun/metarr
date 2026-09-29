@@ -44,6 +44,7 @@ type TaskJob = {
   startedAt: string | null;
   finishedAt: string | null;
   titleId?: number | null;
+  waiting?: string | null;
 };
 
 type JobTotals = { pending: number; running: number; done: number; failed: number; skipped: number };
@@ -91,7 +92,7 @@ function taskState(job: TaskJob): string {
     }
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
-  if (job.status === "pending") return job.priority === "window" ? "Waiting for the window" : "Starting";
+  if (job.status === "pending") return job.waiting ?? (job.priority === "window" ? "Waiting for the window" : "Starting");
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
   if (job.queue === "remux" || job.queue === "rewrap") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
