@@ -41,7 +41,7 @@ echo "Running as ${METARR_UID}:${METARR_GID}, umask ${UMASK:-002}$( [ "${METARR_
 # binaries are not already on this machine. Later deploys copy the saved copy.
 install_makemkv() {
   version=$(sed -n 's/^ARG MAKEMKV_VERSION=//p' "$root/Dockerfile.makemkv" | head -n 1)
-  [ -n "$version" ] || version=2.0.0
+  [ -n "$version" ] || version=1.18.4
   dest="$root/vendor/makemkv"
   complete() { [ -x "$dest/bin/makemkvcon" ] && [ -x "$dest/bin/mmccextr" ] && [ -f "$dest/share/appdata.tar" ]; }
   if complete && [ "$(cat "$dest/VERSION" 2>/dev/null || true)" = "$version" ]; then
@@ -66,8 +66,10 @@ install_makemkv() {
     docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /usr/bin/mmccextr /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/ && cp -aL /usr/share/MakeMKV/. /export/share/'
   }
 
+  # The image carries share/METARR_VERSION, so an image with another MakeMKV
+  # version is rebuilt instead of copied.
   image=$(current_image)
-  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon && test -x /usr/bin/mmccextr && test -f /usr/share/MakeMKV/appdata.tar'; then
+  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c "test -x /usr/bin/makemkvcon && test -x /usr/bin/mmccextr && test -f /usr/share/MakeMKV/appdata.tar && [ \"\$(cat /usr/share/MakeMKV/METARR_VERSION 2>/dev/null)\" = '${version}' ]"; then
     echo "MakeMKV is already in the current image. Copying it out."
     extract_makemkv "$image" || rm -rf "$dest"
   fi
@@ -81,6 +83,7 @@ install_makemkv() {
     exit 1
   fi
   printf '%s\n' "$version" > "$dest/VERSION"
+  printf '%s\n' "$version" > "$dest/share/METARR_VERSION"
   echo "MakeMKV ${version} is installed."
 }
 

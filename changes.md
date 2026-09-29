@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.107
+
+- Install MakeMKV 1.18.4 instead of 2.0.0. MakeMKV 2.0.0 crashes (SIGSEGV) on every unencrypted Blu-ray image or folder, key or not, while 1.18.4 reads them with the same beta key. Deploy now rebuilds MakeMKV when the saved copy is another version.
+
 ## 0.0.106
 
 - Copy MakeMKV's own debug log into the job's MakeMKV log. MakeMKV ignores the log path it is given and writes the file to its home folder instead, so the log link showed only MakeMKV's printed output.

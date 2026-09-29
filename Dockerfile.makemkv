@@ -1,14 +1,20 @@
-# Built only when vendor/makemkv is missing. The app image copies those binaries
-# and does not pull this Debian base on later deploys.
+# Built only when vendor/makemkv is missing or holds another version. The app
+# image copies those binaries and does not pull this Debian base on later deploys.
 FROM debian:bookworm-slim
-ARG MAKEMKV_VERSION=2.0.0
+# 2.0.0 crashes (SIGSEGV) on every unencrypted Blu-ray image or folder right
+# after "AACS directory not present"; 1.18.4 reads the same discs.
+ARG MAKEMKV_VERSION=1.18.4
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     build-essential pkg-config ca-certificates curl \
     libc6-dev libssl-dev libexpat1-dev libavcodec-dev zlib1g-dev \
   && mkdir /build && cd /build \
-  && curl -fsSLO "https://www.makemkv.com/download/makemkv-oss-${MAKEMKV_VERSION}.tar.gz" \
-  && curl -fsSLO "https://www.makemkv.com/download/makemkv-bin-${MAKEMKV_VERSION}.tar.gz" \
+  && for part in oss bin; do \
+       file="makemkv-${part}-${MAKEMKV_VERSION}.tar.gz"; \
+       curl -fsSLO "https://www.makemkv.com/download/${file}" \
+         || curl -fsSLO "https://www.makemkv.com/download/old/${file}" \
+         || exit 1; \
+     done \
   && tar xzf "makemkv-oss-${MAKEMKV_VERSION}.tar.gz" \
   && tar xzf "makemkv-bin-${MAKEMKV_VERSION}.tar.gz" \
   && cd "makemkv-oss-${MAKEMKV_VERSION}" \
