@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.109
+
+- Put All / Movies / Series on the same row as Filters and Add filter so the library toolbar uses one line on a phone.
+
 ## 0.0.108
 
 - Clear the library top bar: move Fill missing metadata to Settings, drop the duplicate Clear library button, and tuck quick filters behind a toggle so the phone layout stays usable.

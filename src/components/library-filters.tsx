@@ -12,7 +12,7 @@ import {
 import { CONTENT_RATING_OPTIONS, languageOptions } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { ChevronDown, X } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 const FIELD_LABEL: Record<FilterField, string> = {
   language: "Any language",
@@ -210,9 +210,11 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
 export function LibraryFilters({
   rules,
   onChange,
+  leading,
 }: {
   rules: FilterRule[];
   onChange: (rules: FilterRule[]) => void;
+  leading?: ReactNode;
 }) {
   const [presetsOpen, setPresetsOpen] = useState(false);
   const activePresets = PRESETS.filter((preset) =>
@@ -237,21 +239,23 @@ export function LibraryFilters({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {leading}
         <Button
           size="sm"
           variant="outline"
+          className="shrink-0"
           aria-expanded={presetsOpen}
           onClick={() => setPresetsOpen((open) => !open)}
         >
-          Quick filters{activePresets ? ` (${activePresets})` : ""}
+          Filters{activePresets ? ` (${activePresets})` : ""}
           <ChevronDown className={cn("size-3.5 transition-transform", presetsOpen && "rotate-180")} />
         </Button>
-        <Button size="sm" variant="outline" onClick={() => add()}>
+        <Button size="sm" variant="outline" className="shrink-0" onClick={() => add()}>
           Add filter
         </Button>
         {rules.length ? (
-          <Button size="sm" variant="ghost" onClick={() => onChange([])}>
+          <Button size="sm" variant="ghost" className="shrink-0" onClick={() => onChange([])}>
             Clear
           </Button>
         ) : null}

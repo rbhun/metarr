@@ -550,38 +550,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             ))}
           </div>
         ) : null}
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search titles"
-              aria-label="Search titles"
-              className="pl-8"
-            />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(
-              [
-                ["all", "All"],
-                ["movie", "Movies"],
-                ["series", "Series"],
-              ] as const
-            ).map(([value, label]) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={kind === value ? "default" : "outline"}
-                onClick={() => {
-                  setKind(value);
-                  setOffset(0);
-                }}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
+        <div className="relative min-w-0">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search titles"
+            aria-label="Search titles"
+            className="pl-8"
+          />
         </div>
         <LibraryFilters
           rules={rules}
@@ -589,6 +566,30 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             setRules(next);
             setOffset(0);
           }}
+          leading={(
+            <>
+              {(
+                [
+                  ["all", "All"],
+                  ["movie", "Movies"],
+                  ["series", "Series"],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  className="shrink-0"
+                  variant={kind === value ? "default" : "outline"}
+                  onClick={() => {
+                    setKind(value);
+                    setOffset(0);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </>
+          )}
         />
         {selected.size > 0 ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
