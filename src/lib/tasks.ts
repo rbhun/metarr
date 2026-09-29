@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import { jobTotals as detectTotals, listJobs as listDetectJobs, type DetectJobStatus } from "@/lib/detect/store";
 import { outputDirectory } from "@/lib/remux/source";
-import { listRemuxJobs, remuxTotals, type RemuxJobStatus } from "@/lib/remux/store";
-import { listRewrapJobs, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
+import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
+import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
 import { titleIdForPath } from "@/lib/title-link";
 
 export type TaskQueue = "language" | "remux" | "rewrap";
@@ -24,6 +24,16 @@ export type TaskJob = {
   startedAt: string | null;
   finishedAt: string | null;
   titleId?: number | null;
+  /** Why a pending job is not running yet, as last recorded by its worker. */
+  waiting?: string | null;
+};
+
+const WAITING: Record<RemuxPause | RewrapPause, string> = {
+  window: "Waiting for the window",
+  plex: "Waiting: Plex is busy",
+  detect: "Waiting: language detection is running",
+  remux: "Waiting: a disc remux is running",
+  off: "Waiting: switched off in Settings",
 };
 
 export type TaskTotals = {
@@ -108,10 +118,12 @@ function mapDetect(status: DetectJobStatus | null, page: number, pageSize: numbe
 
 function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listRemuxJobs(db, { status, page, pageSize });
+  const pause = readRemuxPause(db);
   return {
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `remux:${job.id}`,
+      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
       queue: "remux" as const,
       id: job.id,
       path: job.path,
@@ -130,10 +142,12 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
 
 function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listRewrapJobs(db, { status, page, pageSize });
+  const pause = readRewrapPause(db);
   return {
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `rewrap:${job.id}`,
+      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
       queue: "rewrap" as const,
       id: job.id,
       path: job.path,

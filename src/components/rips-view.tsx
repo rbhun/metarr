@@ -30,7 +30,7 @@ type RemuxBody = {
   settings: { startHour: number; endHour: number };
   counts: { waiting: number; running: number };
   totals?: JobTotals;
-  pause: "window" | "plex" | "detect" | null;
+  pause: "window" | "plex" | "detect" | "off" | null;
   discs?: DiscCandidate[];
   latest?: { label: string; status: "done" | "failed"; message: string | null } | null;
   error?: string;
@@ -50,6 +50,7 @@ function queueSummary(totals: JobTotals, pause: RemuxBody["pause"], settings: Re
   const base = parts.join(" · ") || "No remux jobs yet.";
   if (pause === "plex" && totals.pending) return `${base} · Plex is busy`;
   if (pause === "detect" && totals.pending) return `${base} · language detection is using the disk`;
+  if (pause === "off" && totals.pending) return `${base} · disc remux is off in Settings`;
   if (pause === "window" && totals.pending) {
     return `${base} · waiting for ${hourLabel(settings.startHour)}–${hourLabel(settings.endHour)}`;
   }
