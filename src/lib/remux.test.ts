@@ -10,14 +10,14 @@ import type { ScanFile } from "@/lib/detect/targets";
 import { insertSourceRecords, migrate, queryLibrary } from "@/lib/db";
 import { titleIdForPath } from "@/lib/title-link";
 import { demoRecords } from "@/lib/demo";
-import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWorkDirectory, writeAccessDeniedMessage } from "@/lib/remux/access";
+import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWorkDirectory, unreadablePathMessage, writeAccessDeniedMessage } from "@/lib/remux/access";
 import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
 import { makemkvFailure, makemkvMessages, ripDisc } from "@/lib/remux/run";
 import { prepareMakemkvLogDir, readMakemkvLog } from "@/lib/remux/logs";
-import { makemkvSource, outputDirectory } from "@/lib/remux/source";
+import { makemkvSource, outputDirectory, resolveDiscPath } from "@/lib/remux/source";
 import {
   claimNextRemux,
   clearPendingRemux,
@@ -369,4 +369,25 @@ test("Redo all brings back each failed disc once and leaves converted discs alon
   assert.ok(pending.some((job) => job.id === latest));
   assert.equal(retryAllFailedRemux(db), 0);
   db.close();
+});
+
+test("a DVD whose listed VOB is gone still opens from its VIDEO_TS folder", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dvd-"));
+  const videoTs = path.join(dir, "Movies", "A Walk in the Clouds (1995)", "VIDEO_TS");
+  fs.mkdirSync(videoTs, { recursive: true });
+  const exists = (candidate: string) => fs.existsSync(candidate);
+  const listed = path.join(videoTs, "VIDEO_TS.VOB");
+  const local = resolveDiscPath(listed, [], exists);
+  assert.equal(local, listed);
+  assert.equal(makemkvSource(local!), `file:${path.dirname(videoTs)}`);
+  const plexPath = "/data/Movies/A Walk in the Clouds (1995)/VIDEO_TS/VIDEO_TS.VOB";
+  assert.equal(resolveDiscPath(plexPath, [{ from: "/data", to: dir }], exists), listed);
+  assert.equal(resolveDiscPath(path.join(dir, "Gone.iso"), [], exists), null);
+  assert.equal(resolveDiscPath(path.join(dir, "Movies", "Gone (2000)", "VIDEO_TS", "VIDEO_TS.VOB"), [], exists), null);
+  assert.match(
+    unreadablePathMessage(path.join(dir, "Movies", "Gone (2000)", "VIDEO_TS", "VIDEO_TS.VOB")),
+    /^Gone \(2000\) is not in .*Movies\. It was moved, renamed or removed/,
+  );
+  assert.match(unreadablePathMessage("/nowhere-metarr/Movies/x.iso"), /\/nowhere-metarr does not exist inside Metarr/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

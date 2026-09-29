@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const text = readMakemkvLog(getDb().name, id);
   if (!text) {
     return new Response(
-      `No MakeMKV log for job ${id}. Logs are saved from version 0.0.105 on; redo the task to get one.`,
+      `No MakeMKV log for job ${id}. MakeMKV did not run for it: the task stopped before MakeMKV started, and the task's own message says why. (Jobs that ran before version 0.0.105 have no log either.)`,
       { status: 404, headers },
     );
   }

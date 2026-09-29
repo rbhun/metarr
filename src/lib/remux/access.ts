@@ -30,6 +30,33 @@ export function missingPathMessage(target: string): string {
   return `Cannot write next to the disc at ${resolved}.`;
 }
 
+/** Why a queued file cannot be read: the first part of the path that is missing or refused. */
+export function unreadablePathMessage(target: string): string {
+  const resolved = path.resolve(target);
+  const parts = resolved.split(path.sep).filter(Boolean);
+  let current: string = path.sep;
+  for (const [index, part] of parts.entries()) {
+    const next = path.join(/*turbopackIgnore: true*/ current, part);
+    try {
+      fs.statSync(/*turbopackIgnore: true*/ next);
+    } catch (caught) {
+      const code = (caught as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        if (index < 2) {
+          return `${next} does not exist inside Metarr. Mount the media folder at the same path, or add a path mapping in Settings if Plex uses a different path.`;
+        }
+        return `${part} is not in ${current}. It was moved, renamed or removed after the last library sync; sync the library, then queue it again.`;
+      }
+      if (code === "EACCES" || code === "EPERM") {
+        return `Metarr (uid ${process.getuid?.() ?? "unknown"}, gid ${process.getgid?.() ?? "unknown"}) may not open ${next}: permission denied.`;
+      }
+      return `${next}: ${caught instanceof Error ? caught.message : "cannot be opened."}`;
+    }
+    current = next;
+  }
+  return `${resolved} exists but could not be opened.`;
+}
+
 function folderModeOwner(directory: string): string {
   try {
     const stat = fs.statSync(/*turbopackIgnore: true*/ directory);

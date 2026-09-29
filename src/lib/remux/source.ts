@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 
 function folderBefore(filePath: string, marker: string): string | null {
   const normalized = filePath.replace(/\\/g, "/");
@@ -35,4 +36,17 @@ export function outputDirectory(filePath: string): string | null {
   if (source.startsWith("iso:")) return path.dirname(source.slice(4));
   if (source.startsWith("file:")) return source.slice(5);
   return null;
+}
+
+/**
+ * Local path for a queued disc. MakeMKV opens the disc folder, so when the listed
+ * file is gone (VIDEO_TS.VOB is optional on DVDs) its folder is enough.
+ */
+export function resolveDiscPath(filePath: string, maps: PathMap[], exists: (candidate: string) => boolean): string | null {
+  const direct = resolveMediaPath(filePath, maps, exists);
+  if (direct) return direct;
+  if (!makemkvSource(filePath)?.startsWith("file:")) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  const folder = resolveMediaPath(path.posix.dirname(normalized), maps, exists);
+  return folder ? path.posix.join(folder, path.posix.basename(normalized)) : null;
 }

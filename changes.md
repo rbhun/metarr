@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.112
+
+- A DVD whose listed file is gone (VIDEO_TS.VOB is optional) now converts from its VIDEO_TS folder. When a disc really cannot be opened, the task says which part of the path is missing or refused, and the MakeMKV log page says MakeMKV never ran for that job.
+
 ## 0.0.111
 
 - Show why a waiting disc remux or AVI rewrap has not started (Plex busy, language detection running, outside the window, or switched off) in Tasks instead of "Starting", and say so on Rips when disc remux is switched off.

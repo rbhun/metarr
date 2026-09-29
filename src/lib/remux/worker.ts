@@ -1,14 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { detectCounts, readDetectSettings } from "@/lib/detect/store";
-import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
 import { announceFolder } from "@/lib/announce";
 import { dryRun } from "@/lib/dry-run";
-import { assertWritableDiscFolder, discFolderProblem, friendlyFsError, remuxWorkDirectory } from "@/lib/remux/access";
+import { assertWritableDiscFolder, discFolderProblem, friendlyFsError, remuxWorkDirectory, unreadablePathMessage } from "@/lib/remux/access";
 import { safeBaseName } from "@/lib/remux/place";
-import { outputDirectory, makemkvSource } from "@/lib/remux/source";
+import { outputDirectory, makemkvSource, resolveDiscPath } from "@/lib/remux/source";
 import { ripDisc } from "@/lib/remux/run";
 import { prepareMakemkvLogDir } from "@/lib/remux/logs";
 import {
@@ -87,9 +86,9 @@ async function step() {
   writeRemuxPause(db, null);
   const workDir = { current: "" };
   try {
-    const local = resolveMediaPath(job.path, readDetectSettings(db).pathMaps, existsMedia);
+    const local = resolveDiscPath(job.path, readDetectSettings(db).pathMaps, existsMedia);
     if (!local) {
-      finishRemux(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
+      finishRemux(db, job.id, "failed", `Cannot open ${job.path}: ${unreadablePathMessage(job.path)}`);
       return;
     }
     const source = makemkvSource(local);
