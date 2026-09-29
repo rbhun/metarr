@@ -6,6 +6,7 @@ import { FolderScanCard } from "@/components/folder-scan-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
 import { RewrapSettingsCard } from "@/components/rewrap-settings";
 import { ScheduleSettings } from "@/components/schedule-settings";
+import { UpdateCard } from "@/components/update-card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -309,6 +310,8 @@ export function SettingsView() {
             Keys live in the local SQLite file, not in the repository.
           </p>
         </div>
+
+        <UpdateCard />
 
         {error ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm">

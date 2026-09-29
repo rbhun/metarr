@@ -84,6 +84,50 @@ install_makemkv() {
 
 install_makemkv
 
+# Settings → Update Metarr drops run/deploy-request; a systemd path unit on this
+# machine sees it and runs scripts/deploy-watch.sh, which runs this script.
+install_ui_deploy() {
+  mkdir -p "$root/run"
+  chown "$METARR_UID:$METARR_GID" "$root/run"
+  chmod 0775 "$root/run"
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    rm -f "$root/run/watcher"
+    echo "systemd is not running here, so Settings → Update Metarr stays off. Deploy from the console instead."
+    return
+  fi
+  cat > /etc/systemd/system/metarr-deploy.path <<EOF
+[Unit]
+Description=Watch for Metarr update requests from Settings
+
+[Path]
+PathExists=$root/run/deploy-request
+Unit=metarr-deploy.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat > /etc/systemd/system/metarr-deploy.service <<EOF
+[Unit]
+Description=Update Metarr (requested from Settings)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh $root/scripts/deploy-watch.sh
+TimeoutStartSec=3600
+EOF
+  systemctl daemon-reload
+  if systemctl enable --now metarr-deploy.path >/dev/null 2>&1; then
+    printf '%s\n' "$root" > "$root/run/watcher"
+    chmod 644 "$root/run/watcher"
+    echo "Settings → Update Metarr is on (systemd unit metarr-deploy.path)."
+  else
+    rm -f "$root/run/watcher"
+    echo "Could not start metarr-deploy.path, so Settings → Update Metarr stays off." >&2
+  fi
+}
+
+install_ui_deploy
+
 docker compose up --build -d
 
 i=0

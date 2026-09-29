@@ -59,6 +59,8 @@ sudo /opt/metarr/deploy.sh
 
 From another computer: `ssh <plex-vm> sudo /opt/metarr/deploy.sh`.
 
+After that first run, **Settings → Update Metarr** does the same from the browser. `deploy.sh` installs a small systemd helper on the host (`metarr-deploy.path` and `metarr-deploy.service`). The button only leaves a request file in `run/`, which is mounted into the container. The helper sees it, runs `deploy.sh`, and writes the log and the result back into `run/` for Settings to show. The container never gets Docker access or root on the host. Without systemd, the button stays off and deploys go through the console.
+
 ## Settings
 
 Open **Settings** from the sidebar (or go to `/settings`).

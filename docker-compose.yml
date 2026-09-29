@@ -17,11 +17,14 @@ services:
       METARR_DRY_RUN: "${METARR_DRY_RUN:-0}"
       # Remux and retag work files. On the NAS, outside every library folder, so Plex and the *arr apps never see them.
       METARR_SCRATCH: "${METARR_SCRATCH:-/mnt/media/.metarr-work}"
+      # Settings → Update Metarr leaves a request here; the host's metarr-deploy.path runs deploy.sh.
+      METARR_RUN_DIR: /app/run
     # Low CPU weight so Plex playback transcodes always win; tools also run under ionice -c3 / nice 19.
     cpu_shares: 128
     volumes:
       - metarr-data:/app/data
       - /mnt/media:/mnt/media
+      - ./run:/app/run
     restart: unless-stopped
 
 volumes:

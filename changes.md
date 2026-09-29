@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.101
+
+- Add Settings → Update Metarr: the button asks a small systemd helper on the host to run deploy.sh, and shows its progress and log, so updates no longer need the console. deploy.sh installs the helper the next time it runs.
+
 ## 0.0.100
 
 - Copy a PGS track out of an MKV in one pass, and keep trying a Blu-ray audio slice after a slow read, so idle overnight checks do not miss the same samples again.

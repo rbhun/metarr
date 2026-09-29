@@ -24,6 +24,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Update requests and deploy logs shared with the container
+/run/
+
 # MakeMKV binaries copied out of the image, or downloaded by deploy.sh
 /vendor/
 
