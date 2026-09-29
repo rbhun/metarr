@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.99
+
+- Rewrap AVI files into MKV with ffmpeg, without re-encoding, so seeking works and audio languages can be stored. AVIs get their own list in Rips (to rewrap and already rewrapped), their own hours and settings, a Rewraps tab in Tasks, and a Rewrap to MKV button in the library.
+
 ## 0.0.98
 
 - Add a Convert button to the library panel for disc titles; it remuxes right away instead of waiting for the overnight window.

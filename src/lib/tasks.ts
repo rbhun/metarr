@@ -2,9 +2,10 @@ import type Database from "better-sqlite3";
 import { jobTotals as detectTotals, listJobs as listDetectJobs, type DetectJobStatus } from "@/lib/detect/store";
 import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, remuxTotals, type RemuxJobStatus } from "@/lib/remux/store";
+import { listRewrapJobs, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
 import { titleIdForPath } from "@/lib/title-link";
 
-export type TaskQueue = "language" | "remux";
+export type TaskQueue = "language" | "remux" | "rewrap";
 export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type TaskStatusFilter = TaskStatus | "all";
 
@@ -46,15 +47,22 @@ function addTotals(left: TaskTotals, right: { pending: number; running: number; 
 export function taskTotalsFor(db: Database.Database, queue: TaskQueue | "all"): TaskTotals {
   const language = detectTotals(db);
   const remux = remuxTotals(db);
+  const rewrap = rewrapTotals(db);
   if (queue === "language") {
     return { pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped };
   }
   if (queue === "remux") {
     return { pending: remux.pending, running: remux.running, done: remux.done, failed: remux.failed, skipped: 0 };
   }
+  if (queue === "rewrap") {
+    return { pending: rewrap.pending, running: rewrap.running, done: rewrap.done, failed: rewrap.failed, skipped: 0 };
+  }
   return addTotals(
-    { pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped },
-    remux,
+    addTotals(
+      { pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped },
+      remux,
+    ),
+    rewrap,
   );
 }
 
@@ -120,8 +128,30 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
   };
 }
 
-function mergeJobs(language: TaskJob[], remux: TaskJob[], status: TaskStatusFilter): TaskJob[] {
-  const merged = [...language, ...remux];
+function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
+  const list = listRewrapJobs(db, { status, page, pageSize });
+  return {
+    total: list.total,
+    jobs: list.jobs.map((job) => ({
+      key: `rewrap:${job.id}`,
+      queue: "rewrap" as const,
+      id: job.id,
+      path: job.path,
+      label: job.label,
+      status: job.status,
+      message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
+      priority: null,
+      detail: "AVI to MKV · no re-encoding",
+      progress: job.progress,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+    })),
+  };
+}
+
+function mergeJobs(lists: TaskJob[][], status: TaskStatusFilter): TaskJob[] {
+  const merged = lists.flat();
   if (status === "pending") return merged.sort((a, b) => a.id - b.id || a.key.localeCompare(b.key));
   if (status === "all") {
     return merged.sort(
@@ -169,14 +199,20 @@ function pageOfTaskJobs(
     return mapRemux(status, page, pageSize, db);
   }
 
+  if (query.queue === "rewrap") {
+    if (status === "skipped") return { jobs: [], total: 0 };
+    return mapRewrap(status, page, pageSize, db);
+  }
+
   if (status === "skipped") return mapDetect("skipped", page, pageSize, db);
 
   // Pull enough from each side to page correctly after a merged sort.
   const need = page * pageSize;
   const language = mapDetect(status, 1, need, db);
   const remux = mapRemux(status, 1, need, db);
-  const merged = mergeJobs(language.jobs, remux.jobs, query.status);
-  const total = language.total + remux.total;
+  const rewrap = mapRewrap(status, 1, need, db);
+  const merged = mergeJobs([language.jobs, remux.jobs, rewrap.jobs], query.status);
+  const total = language.total + remux.total + rewrap.total;
   const start = (page - 1) * pageSize;
   return { jobs: merged.slice(start, start + pageSize), total };
 }

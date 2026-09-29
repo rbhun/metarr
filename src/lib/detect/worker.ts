@@ -24,6 +24,7 @@ import {
 } from "@/lib/detect/store";
 import { targetsFromFiles } from "@/lib/detect/targets";
 import { remuxIsRunning } from "@/lib/remux/store";
+import { rewrapIsRunning } from "@/lib/rewrap/store";
 import { getDb } from "@/lib/db";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
@@ -55,7 +56,7 @@ async function step() {
   if (!waiting && !hasUnwritten(db) && !hasUncheckedTags(db) && !hasFormatRefresh(db)) return;
   if (counts.immediate === 0) {
     if (await plexIsBusy(db)) return;
-    if (remuxIsRunning(db)) return;
+    if (remuxIsRunning(db) || rewrapIsRunning(db)) return;
     if (await applyNextSaved(db, settings.pathMaps)) return;
     if (await confirmNextSaved(db, settings.pathMaps)) return;
     if (await refreshNextFormat(db)) return;
