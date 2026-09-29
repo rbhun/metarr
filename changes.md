@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.108
+
+- Show why a waiting disc remux or AVI rewrap has not started (Plex busy, language detection running, outside the window, or switched off) in Tasks instead of "Starting", and say so on Rips when disc remux is switched off.
+
 ## 0.0.107
 
 - Install MakeMKV 1.18.4 instead of 2.0.0. MakeMKV 2.0.0 crashes (SIGSEGV) on every unencrypted Blu-ray image or folder, key or not, while 1.18.4 reads them with the same beta key. Deploy now rebuilds MakeMKV when the saved copy is another version.
