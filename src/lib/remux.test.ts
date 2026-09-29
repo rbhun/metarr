@@ -310,12 +310,13 @@ test("a MakeMKV crash still leaves its output and debug log for the job", async 
     fake,
     [
       "#!/bin/sh",
-      'for arg in "$@"; do case "$arg" in --debug=*) echo "debug line" > "${arg#--debug=}";; esac; done',
+      'echo "debug line" >> "$HOME/MakeMKV_log.txt"',
       'echo \'MSG:3007,0,0,"AACS directory not present, assuming unencrypted disc","x"\'',
       "kill -SEGV $$",
     ].join("\n"),
     { mode: 0o755 },
   );
+  fs.writeFileSync(path.join(dir, "MakeMKV_log.txt"), "stale\n");
   const logDir = prepareMakemkvLogDir(path.join(dir, "metarr.db"), 7)!;
   await assert.rejects(
     ripDisc({

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.106
+
+- Copy MakeMKV's own debug log into the job's MakeMKV log. MakeMKV ignores the log path it is given and writes the file to its home folder instead, so the log link showed only MakeMKV's printed output.
+
 ## 0.0.105
 
 - Save MakeMKV's output and debug log for each disc job and link it from Tasks as "MakeMKV log", so a crash can be diagnosed without the server console.

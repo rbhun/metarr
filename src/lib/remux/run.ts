@@ -65,12 +65,25 @@ export function makemkvFailure(output: string, code: number | null, signal: Node
   return last ? `${exit} MakeMKV gave no reason; its last message was: ${last}` : exit;
 }
 
+const HOME_LOG = "MakeMKV_log.txt";
+
 /** MakeMKV's own debug log and everything it printed, per step, for Tasks → MakeMKV log. */
-function saveOutput(logDir: string | undefined, step: string, output: string, code: number | null, signal: NodeJS.Signals | null) {
+function saveOutput(
+  logDir: string | undefined,
+  home: string,
+  step: string,
+  output: string,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+) {
   if (!logDir) return;
   try {
     const ending = code === 0 ? "exit 0" : code != null ? `exit ${code}` : `stopped by ${signal ?? "unknown signal"}`;
     fs.writeFileSync(path.join(logDir, `${step}-output.txt`), `${output}\n[${ending}]\n`);
+    // MakeMKV ignores the --debug path and writes its log into HOME, replacing it on every run.
+    const own = path.join(home, HOME_LOG);
+    const debug = path.join(logDir, `${step}-debug.txt`);
+    if (!fs.existsSync(debug) && fs.existsSync(own)) fs.copyFileSync(own, debug);
   } catch {
     // The log is only for diagnosis.
   }
@@ -90,6 +103,7 @@ function runMakeMkv(
     }
     const step = args[0] ?? "run";
     const debug = logDir ? [`--debug=${path.join(logDir, `${step}-debug.txt`)}`] : [];
+    if (logDir) fs.rmSync(path.join(home, HOME_LOG), { force: true });
     const wrapped = idle(binary, ["--robot", "--minlength=0", ...debug, ...args]);
     const child = spawn(wrapped.command, wrapped.args, {
       env: { ...process.env, HOME: home },
@@ -130,7 +144,7 @@ function runMakeMkv(
       );
     });
     child.on("close", (code, signal) => {
-      saveOutput(logDir, step, output, code, signal);
+      saveOutput(logDir, home, step, output, code, signal);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
