@@ -28,7 +28,7 @@ function clock(seconds: number): string {
 
 /** Status lines MakeMKV prints on every ISO run; they never explain a failure. */
 const ROUTINE =
-  /^(Using library|Operation successfully completed|The program can't find any usable optical drives|Using direct disc access mode|AACS directory not present|Loaded content hash table|MakeMKV v\S+ \S+ started|Title #?\d+ .*(was added|skipped)|File .* was added as title)/i;
+  /^(Using library|Operation successfully completed|The program can't find any usable optical drives|Using direct disc access mode|AACS directory not present|Loaded content hash table|Profile parsing error|MakeMKV v\S+ \S+ started|Title #?\d+ .*(was added|skipped)|File .* was added as title)/i;
 const LICENSE = /(too old|registration key|evaluation period|expired|shareware)/i;
 
 /** MSG:code,flags,count,"message","format",params… — only the first quoted field is the text. */
@@ -42,10 +42,20 @@ export function makemkvMessages(output: string): string[] {
   return messages;
 }
 
-export function makemkvFailure(output: string, code: number | null): string {
+function stopped(code: number | null, signal: NodeJS.Signals | null): string {
+  if (code != null) return `MakeMKV exited with code ${code}.`;
+  if (signal === "SIGKILL") return "MakeMKV was killed (SIGKILL), usually because the machine or container ran out of memory.";
+  if (signal === "SIGSEGV" || signal === "SIGABRT" || signal === "SIGBUS" || signal === "SIGILL") {
+    return `MakeMKV crashed (${signal}). Its data files may be missing from the image; run deploy.sh again to reinstall MakeMKV.`;
+  }
+  if (signal) return `MakeMKV was stopped by ${signal}.`;
+  return "MakeMKV stopped without an exit code.";
+}
+
+export function makemkvFailure(output: string, code: number | null, signal: NodeJS.Signals | null = null): string {
   const messages = makemkvMessages(output);
   const useful = messages.filter((line) => !ROUTINE.test(line));
-  const exit = code == null ? "MakeMKV stopped without an exit code." : `MakeMKV exited with code ${code}.`;
+  const exit = stopped(code, signal);
   if (useful.some((line) => LICENSE.test(line))) {
     const said = useful.filter((line) => LICENSE.test(line)).slice(-1)[0];
     return `${said} Blu-ray needs a MakeMKV key (DVDs do not): paste the current beta key or your registration key in Settings → Disc remux, then redo this task.`;
@@ -100,14 +110,14 @@ function runMakeMkv(binary: string, args: string[], home: string, onLine: (line:
         ),
       );
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (code === 0) resolve(output);
       else if (code === 127) {
         reject(new Error(`${binary} was not found where Metarr runs. Rebuild the Docker image (it includes MakeMKV), or set the full path in Settings → Disc remux.`));
-      } else reject(new Error(makemkvFailure(output, code)));
+      } else reject(new Error(makemkvFailure(output, code, signal)));
     });
   });
 }

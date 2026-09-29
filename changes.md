@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.103
+
+- Install MakeMKV's data files (the default profile and Blu-ray data in appdata.tar) with the binaries, and say which signal stopped MakeMKV instead of "stopped without an exit code".
+
 ## 0.0.102
 
 - Add Redo all on the Failed list in Tasks, so hundreds of failed language checks can go back on the overnight queue without clicking each one. Clearing failed jobs still only hides them.

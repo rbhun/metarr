@@ -43,7 +43,8 @@ install_makemkv() {
   version=$(sed -n 's/^ARG MAKEMKV_VERSION=//p' "$root/Dockerfile.makemkv" | head -n 1)
   [ -n "$version" ] || version=2.0.0
   dest="$root/vendor/makemkv"
-  if [ -x "$dest/bin/makemkvcon" ] && [ "$(cat "$dest/VERSION" 2>/dev/null || true)" = "$version" ]; then
+  complete() { [ -x "$dest/bin/makemkvcon" ] && [ -f "$dest/share/appdata.tar" ]; }
+  if complete && [ "$(cat "$dest/VERSION" 2>/dev/null || true)" = "$version" ]; then
     echo "MakeMKV ${version} is already installed."
     return
   fi
@@ -60,21 +61,22 @@ install_makemkv() {
   extract_makemkv() {
     image=$1
     rm -rf "$dest"
-    mkdir -p "$dest/bin" "$dest/lib"
-    docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/'
+    mkdir -p "$dest/bin" "$dest/lib" "$dest/share"
+    # share/ holds appdata.tar: the default profile and the Blu-ray data files.
+    docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/ && cp -aL /usr/share/MakeMKV/. /export/share/'
   }
 
   image=$(current_image)
-  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon'; then
+  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon && test -f /usr/share/MakeMKV/appdata.tar'; then
     echo "MakeMKV is already in the current image. Copying it out."
     extract_makemkv "$image" || rm -rf "$dest"
   fi
-  if [ ! -x "$dest/bin/makemkvcon" ]; then
+  if ! complete; then
     echo "MakeMKV ${version} is missing. Downloading it."
     docker build -f "$root/Dockerfile.makemkv" -t "metarr-makemkv:${version}" "$root"
     extract_makemkv "metarr-makemkv:${version}"
   fi
-  if [ ! -x "$dest/bin/makemkvcon" ]; then
+  if ! complete; then
     echo "MakeMKV could not be installed." >&2
     exit 1
   fi

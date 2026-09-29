@@ -46,8 +46,10 @@ ENV HF_HOME=/app/data/whisper
 # deploy.sh fills vendor/makemkv. A later build does not download MakeMKV again.
 COPY vendor/makemkv/bin/ /usr/bin/
 COPY vendor/makemkv/lib/ /usr/lib/
+COPY vendor/makemkv/share/ /usr/share/MakeMKV/
 RUN chmod 755 /usr/bin/makemkvcon /usr/bin/mmgplsrv \
   && ldconfig \
+  && test -f /usr/share/MakeMKV/appdata.tar \
   && ! ldd /usr/bin/makemkvcon /usr/bin/mmgplsrv /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 | grep "not found"
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./

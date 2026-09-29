@@ -283,4 +283,7 @@ test("a MakeMKV failure shows the real reason, not the routine ISO lines", () =>
     "MakeMKV exited with code 1. MakeMKV gave no reason; its last message was: AACS directory not present, assuming unencrypted disc",
   );
   assert.equal(makemkvFailure("", null), "MakeMKV stopped without an exit code.");
+  const profile = [...ISO_START, 'MSG:1011,0,1,"Profile parsing error: default profile missing, using builtin default","%1","x"'].join("\n");
+  assert.match(makemkvFailure(profile, null, "SIGSEGV"), /^MakeMKV crashed \(SIGSEGV\)\. .*deploy\.sh again.*last message was: Profile parsing error/);
+  assert.match(makemkvFailure("", null, "SIGKILL"), /ran out of memory/);
 });
