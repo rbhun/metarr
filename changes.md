@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.104
+
+- Install mmccextr, the MakeMKV helper that was left out of the saved MakeMKV copy, and point a MakeMKV crash at the key first, since a missing or expired key is the usual cause on Blu-ray.
+
 ## 0.0.103
 
 - Install MakeMKV's data files (the default profile and Blu-ray data in appdata.tar) with the binaries, and say which signal stopped MakeMKV instead of "stopped without an exit code".

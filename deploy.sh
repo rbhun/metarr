@@ -43,7 +43,7 @@ install_makemkv() {
   version=$(sed -n 's/^ARG MAKEMKV_VERSION=//p' "$root/Dockerfile.makemkv" | head -n 1)
   [ -n "$version" ] || version=2.0.0
   dest="$root/vendor/makemkv"
-  complete() { [ -x "$dest/bin/makemkvcon" ] && [ -f "$dest/share/appdata.tar" ]; }
+  complete() { [ -x "$dest/bin/makemkvcon" ] && [ -x "$dest/bin/mmccextr" ] && [ -f "$dest/share/appdata.tar" ]; }
   if complete && [ "$(cat "$dest/VERSION" 2>/dev/null || true)" = "$version" ]; then
     echo "MakeMKV ${version} is already installed."
     return
@@ -63,11 +63,11 @@ install_makemkv() {
     rm -rf "$dest"
     mkdir -p "$dest/bin" "$dest/lib" "$dest/share"
     # share/ holds appdata.tar: the default profile and the Blu-ray data files.
-    docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/ && cp -aL /usr/share/MakeMKV/. /export/share/'
+    docker run --rm --entrypoint sh -v "$dest:/export" "$image" -c 'cp -aL /usr/bin/makemkvcon /usr/bin/mmgplsrv /usr/bin/mmccextr /export/bin/ && cp -aL /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 /export/lib/ && cp -aL /usr/share/MakeMKV/. /export/share/'
   }
 
   image=$(current_image)
-  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon && test -f /usr/share/MakeMKV/appdata.tar'; then
+  if [ -n "$image" ] && docker run --rm --entrypoint sh "$image" -c 'test -x /usr/bin/makemkvcon && test -x /usr/bin/mmccextr && test -f /usr/share/MakeMKV/appdata.tar'; then
     echo "MakeMKV is already in the current image. Copying it out."
     extract_makemkv "$image" || rm -rf "$dest"
   fi

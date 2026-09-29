@@ -46,7 +46,7 @@ function stopped(code: number | null, signal: NodeJS.Signals | null): string {
   if (code != null) return `MakeMKV exited with code ${code}.`;
   if (signal === "SIGKILL") return "MakeMKV was killed (SIGKILL), usually because the machine or container ran out of memory.";
   if (signal === "SIGSEGV" || signal === "SIGABRT" || signal === "SIGBUS" || signal === "SIGILL") {
-    return `MakeMKV crashed (${signal}). Its data files may be missing from the image; run deploy.sh again to reinstall MakeMKV.`;
+    return `MakeMKV crashed (${signal}). For a Blu-ray this usually means the MakeMKV key is missing or expired: paste the current beta key in Settings → Disc remux. If a key is set, update Metarr so MakeMKV is reinstalled.`;
   }
   if (signal) return `MakeMKV was stopped by ${signal}.`;
   return "MakeMKV stopped without an exit code.";
