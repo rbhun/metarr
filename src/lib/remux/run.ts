@@ -26,17 +26,33 @@ function clock(seconds: number): string {
   return `${hours}:${String(minutes).padStart(2, "0")}`;
 }
 
-function makemkvFailure(output: string, code: number | null): string {
-  const messages = output
-    .split(/\r?\n/)
-    .map((line) => /^MSG:[^,]*,[^,]*,[^,]*,"(.*)"\s*$/.exec(line.trim())?.[1] ?? "")
-    .filter(Boolean)
-    .map((line) => line.replace(/\\"/g, '"'));
-  const useful = messages.filter((line) => !/^(This application|Using library|Operation successfully completed)/i.test(line));
-  const quoted = (useful.length ? useful : messages).slice(-3).join(" ").trim();
-  if (quoted) return quoted;
-  if (code == null) return "MakeMKV stopped without an exit code.";
-  return `MakeMKV exited with code ${code}.`;
+/** Status lines MakeMKV prints on every ISO run; they never explain a failure. */
+const ROUTINE =
+  /^(Using library|Operation successfully completed|The program can't find any usable optical drives|Using direct disc access mode|AACS directory not present|Loaded content hash table|MakeMKV v\S+ \S+ started|Title #?\d+ .*(was added|skipped)|File .* was added as title)/i;
+const LICENSE = /(too old|registration key|evaluation period|expired|shareware)/i;
+
+/** MSG:code,flags,count,"message","format",params… — only the first quoted field is the text. */
+export function makemkvMessages(output: string): string[] {
+  const messages: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const match = /^MSG:[^,]*,[^,]*,[^,]*,"((?:[^"\\]|\\.)*)"/.exec(raw.trim());
+    const text = match?.[1]?.replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim();
+    if (text && messages.at(-1) !== text) messages.push(text);
+  }
+  return messages;
+}
+
+export function makemkvFailure(output: string, code: number | null): string {
+  const messages = makemkvMessages(output);
+  const useful = messages.filter((line) => !ROUTINE.test(line));
+  const exit = code == null ? "MakeMKV stopped without an exit code." : `MakeMKV exited with code ${code}.`;
+  if (useful.some((line) => LICENSE.test(line))) {
+    const said = useful.filter((line) => LICENSE.test(line)).slice(-1)[0];
+    return `${said} Blu-ray needs a MakeMKV key (DVDs do not): paste the current beta key or your registration key in Settings → Disc remux, then redo this task.`;
+  }
+  if (useful.length) return `${useful.slice(-3).join(" ")} (${exit})`;
+  const last = messages.slice(-1)[0];
+  return last ? `${exit} MakeMKV gave no reason; its last message was: ${last}` : exit;
 }
 
 function runMakeMkv(binary: string, args: string[], home: string, onLine: (line: string) => void): Promise<string> {

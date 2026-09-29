@@ -15,6 +15,7 @@ import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
+import { makemkvFailure, makemkvMessages } from "@/lib/remux/run";
 import { makemkvSource, outputDirectory } from "@/lib/remux/source";
 import {
   claimNextRemux,
@@ -234,4 +235,31 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(listRemuxJobs(db, { status: "failed", page: 1, pageSize: 10 }).total, 0);
   assert.ok(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 10 }).jobs.some((row) => row.label === "Fail (1999)"));
   db.close();
+});
+
+const ISO_START = [
+  'MSG:1005,0,1,"MakeMKV v1.18.1 linux(x64-release) started","%1 started","MakeMKV v1.18.1 linux(x64-release)"',
+  'MSG:2003,0,0,"The program can\'t find any usable optical drives.","The program can\'t find any usable optical drives."',
+  'MSG:3007,0,0,"Using direct disc access mode","Using direct disc access mode"',
+  'MSG:3025,0,0,"AACS directory not present, assuming unencrypted disc","AACS directory not present, assuming unencrypted disc"',
+];
+
+test("a MakeMKV failure shows the real reason, not the routine ISO lines", () => {
+  assert.deepEqual(makemkvMessages(ISO_START.join("\n")).slice(1), [
+    "The program can't find any usable optical drives.",
+    "Using direct disc access mode",
+    "AACS directory not present, assuming unencrypted disc",
+  ]);
+  const expired = [
+    ...ISO_START,
+    'MSG:5021,260,1,"This application version is too old. Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the application.","%1","x"',
+  ].join("\n");
+  assert.match(makemkvFailure(expired, 1), /^This application version is too old\..*Blu-ray needs a MakeMKV key .*Settings → Disc remux/);
+  const failed = [...ISO_START, 'MSG:5010,0,0,"Failed to open disc","Failed to open disc"'].join("\n");
+  assert.equal(makemkvFailure(failed, 2), "Failed to open disc (MakeMKV exited with code 2.)");
+  assert.equal(
+    makemkvFailure(ISO_START.join("\n"), 1),
+    "MakeMKV exited with code 1. MakeMKV gave no reason; its last message was: AACS directory not present, assuming unencrypted disc",
+  );
+  assert.equal(makemkvFailure("", null), "MakeMKV stopped without an exit code.");
 });

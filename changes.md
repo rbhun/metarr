@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.97
+
+- Show the real reason a MakeMKV remux failed instead of its routine ISO status lines, and point to the MakeMKV key when Blu-ray needs one.
+
 ## 0.0.96
 
 - Write a recognized language into the file when a folder scan finds that track unlabeled.
