@@ -33,8 +33,10 @@ import { getDb } from "@/lib/db";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
 
-export function finishedStatus(outcome: { language: string | null; message?: string | null }): "done" | "failed" {
-  return outcome.language ? "done" : "failed";
+export function finishedStatus(outcome: { language: string | null; message?: string | null }): "done" | "failed" | "skipped" {
+  if (outcome.language) return "done";
+  if (outcome.message?.startsWith("Plex did not name this subtitle file")) return "skipped";
+  return "failed";
 }
 
 function state() {

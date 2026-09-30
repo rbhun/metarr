@@ -578,7 +578,7 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
       language: null,
       role: null,
       confidence: 0,
-      message: "Plex did not name this subtitle file, so the video was not read as text.",
+      message: "Plex did not name this subtitle file, so the video was not read as text. Put a matching .srt beside the video (same title) or refresh Plex.",
     };
   }
   let raw = "";

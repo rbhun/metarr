@@ -132,6 +132,35 @@ test("an untagged sidecar takes its language from the file name and is not a thi
   assert.equal(languageFromSubtitleName("movie.you.srt"), null);
 });
 
+test("an external subtitle with no path is not queued against the video file", () => {
+  const file: ScanFile = {
+    label: "21 (2008)",
+    path: "/mnt/media/Movies/21 (2008)/refined-21.mkv",
+    container: "mkv",
+    playableLabel: "video",
+    audioTracks: [],
+    subtitleTracks: [{ language: null, placement: "external", format: "SRT", forced: false }],
+    versions: [],
+  };
+  assert.deepEqual(targetsFromFiles([file], false, new Set()), []);
+  assert.deepEqual(subtitleTargets(file.path, file.subtitleTracks[0]!, 0, file.label), []);
+});
+
+test("a differently named video still picks up a sidecar that shares the title stem", () => {
+  const video = "/mnt/media/Movies/21 (2008)/21 (2008).mkv";
+  const names = ["21 (2008).mkv", "21 2008.en.srt", "notes.txt"];
+  const tracks = assignSidecars(video, [{ language: null, placement: "external", format: "SRT", forced: false }], names);
+  assert.equal(tracks[0]?.file?.endsWith("21 2008.en.srt"), true);
+  assert.equal(tracks[0]?.language, "English");
+  const release = "/mnt/media/Movies/21 (2008)/refined-21.mkv";
+  const releaseTracks = assignSidecars(
+    release,
+    [{ language: null, placement: "external", format: "SRT", forced: false }],
+    ["refined-21.mkv", "refined-21.srt"],
+  );
+  assert.equal(releaseTracks[0]?.file?.endsWith("refined-21.srt"), true);
+});
+
 test("a stale bare Plex subtitle path rematches language-tagged sidecars and skips detection", () => {
   const video = "/mnt/media/Movies/10 Things I Hate About You (1999)/10 Things I Hate About You 1999.avi";
   const names = [
@@ -671,7 +700,13 @@ test("redoing every failed language check puts them on the overnight queue", () 
 });
 
 test("an unread subtitle file is a failed check, not a finished one", () => {
-  assert.equal(finishedStatus({ language: null, message: "Plex did not name this subtitle file, so the video was not read as text." }), "failed");
+  assert.equal(
+    finishedStatus({
+      language: null,
+      message: "Plex did not name this subtitle file, so the video was not read as text. Put a matching .srt beside the video (same title) or refresh Plex.",
+    }),
+    "skipped",
+  );
   assert.equal(finishedStatus({ language: null, message: "The subtitle file is not readable text." }), "failed");
   assert.equal(finishedStatus({ language: null, message: "This language cannot be reliably recognized." }), "failed");
   assert.equal(finishedStatus({ language: "Hungarian", message: null }), "done");

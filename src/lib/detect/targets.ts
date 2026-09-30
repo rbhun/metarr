@@ -79,6 +79,8 @@ function targetsOnFile(file: ScanFile, rescan: boolean, scanned: Set<string>): D
     });
     item.subtitleTracks.forEach((track, index) => {
       if (track.language || track.placement === "burn-in") return;
+      // Plex external with no path cannot be read from the video file as text.
+      if (track.placement === "external" && !track.file) return;
       const external = track.placement === "external" && track.file;
       if (external && languageFromSubtitleName(path.basename(track.file!))) return;
       const mediaPath = external ? track.file! : item.path;

@@ -34,6 +34,7 @@ export function subtitleTarget(path: string | null, track: SubtitleTrack, index:
 
 export function subtitleTargets(mediaPath: string | null, track: SubtitleTrack, index: number, label: string): DetectTarget[] {
   if (track.language || track.detectedLanguage || track.placement === "burn-in") return [];
+  if (track.placement === "external" && !track.file) return [];
   const external = track.placement === "external" && track.file ? track.file : null;
   if (external && languageFromSubtitleName(path.basename(external))) return [];
   const copies = track.copies?.length

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { subtitleStem } from "@/lib/detect/paths";
 import { languageName, languageOptions } from "@/lib/media";
 import type { SubtitleTrack } from "@/lib/types";
 
@@ -32,13 +33,16 @@ export function languageFromSubtitleName(fileName: string): string | null {
 export type Sidecar = { file: string; language: string | null };
 
 function subtitleNames(videoPath: string, names: string[]): string[] {
+  const base = path.basename(videoPath);
   const stem = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
   if (!stem) return [];
   const subs = names.filter((name) => SUBTITLE_EXT.test(path.basename(name)));
   const matched = subs.filter((name) => path.basename(name).toLowerCase().startsWith(stem));
   if (matched.length > 0) return matched;
+  const videoKey = subtitleStem(base);
+  const byStem = videoKey ? subs.filter((name) => subtitleStem(path.basename(name)) === videoKey) : [];
+  if (byStem.length > 0) return byStem;
   if (subs.length !== 1) return [];
-  const base = path.basename(videoPath);
   const otherVideo = names.some((name) => VIDEO_EXT.test(name) && path.basename(name) === name && name !== base);
   return otherVideo ? [] : subs;
 }

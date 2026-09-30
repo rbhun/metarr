@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.118
+
+- Do not queue language checks for a Plex external subtitle with no file path (that was trying to read the video as text). Match sidecars by title stem when the video uses a different base name, such as `refined-21.mkv` beside `refined-21.en.srt`.
+
 ## 0.0.117
 
 - Drop stale Plex subtitle paths that are gone from disk, rematch them to language-tagged sidecars in the folder, and skip language checks when the file name already has a language (for example `.hun.srt` / `.en.hi.srt`).
