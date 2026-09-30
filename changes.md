@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.119
+
+- Read picture subtitles (PGS) on Blu-ray `.m2ts` files from byte slices instead of a timestamp seek, which read the disc from the start and could time out. One slow sample no longer stops the others, and a full timeout says the share was slow and Redo tries again.
+
 ## 0.0.118
 
 - Do not queue language checks for a Plex external subtitle with no file path (that was trying to read the video as text). Match sidecars by title stem when the video uses a different base name, such as `refined-21.mkv` beside `refined-21.en.srt`.

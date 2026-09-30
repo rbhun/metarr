@@ -39,7 +39,13 @@ export function packetBytes(file: string): number {
  * A disc file has no index, so a timestamp seek reads the 4K picture from the
  * start. The same moment is a short aligned slice of the file instead.
  */
-export function tsWindow(size: number, duration: number | null, programOffset: number, packet: number): { start: number; end: number } | null {
+export function tsWindow(
+  size: number,
+  duration: number | null,
+  programOffset: number,
+  packet: number,
+  windowSeconds = WINDOW_SECONDS,
+): { start: number; end: number } | null {
   if (size < packet * 2 || packet < 1) return null;
   const ratio = duration != null && duration > programOffset
     ? programOffset / duration
@@ -48,7 +54,7 @@ export function tsWindow(size: number, duration: number | null, programOffset: n
       : programOffset >= TEN_MINUTES
         ? 0.12
         : 0.5;
-  const span = duration != null && duration > 0 ? Math.ceil((WINDOW_SECONDS / duration) * size) : UNKNOWN_WINDOW;
+  const span = duration != null && duration > 0 ? Math.ceil((windowSeconds / duration) * size) : UNKNOWN_WINDOW;
   const bytes = Math.min(size, Math.max(span, packet * 64));
   let start = Math.floor(size * Math.min(ratio, 0.98));
   if (start + bytes > size) start = Math.max(0, size - bytes);

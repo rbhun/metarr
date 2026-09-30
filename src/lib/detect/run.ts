@@ -11,7 +11,7 @@ import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import type { DetectJob } from "@/lib/detect/store";
 import { readPgsImages, scaleBitmap, writePng } from "@/lib/detect/pgs";
-import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
@@ -442,27 +442,45 @@ async function subtitleCues(file: string, ordinal: number): Promise<{ starts: nu
   }
 }
 
-async function collectPgs(file: string, ordinal: number, directory: string, starts: number[], seconds: number): Promise<{ bitmaps: ReturnType<typeof readPgsImages>; timedOut: boolean }> {
+/**
+ * A disc stream has no index, so `-ss` reads the picture from the start of the file.
+ * There each window is a byte slice piped into ffmpeg, like the audio samples.
+ * A slow window does not stop the others; only all of them timing out counts.
+ */
+async function collectPgs(
+  file: string,
+  ordinal: number,
+  directory: string,
+  starts: number[],
+  seconds: number,
+  duration: number | null,
+): Promise<{ bitmaps: ReturnType<typeof readPgsImages>; timedOut: boolean }> {
   const sup = path.join(directory, "track.sup");
   const bitmaps = [];
-  let timedOut = false;
+  const transport = isTransportStream(file);
+  const size = transport ? fs.statSync(file).size : 0;
+  let tried = 0;
+  let timeouts = 0;
   for (const start of starts) {
     clearDirectory(directory);
-    timedOut = false;
+    const window = transport ? tsWindow(size, duration, start, packetBytes(file), seconds) : null;
+    if (transport && !window) continue;
+    tried += 1;
     try {
-      await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup, seconds), 90_000);
+      if (window) await ffmpegSlice(file, window.start, window.end, pgsSliceArgs(ordinal, sup), 90_000);
+      else await runCommand("ffmpeg", pgsCopyArgs(file, ordinal, start, sup, seconds), 90_000);
     } catch (error) {
       const failed = error instanceof Error ? error : new Error(String(error));
-      timedOut = /timed out/i.test(failed.message);
-      if (!timedOut && !/empty|nothing was written/i.test(failed.message)) throw failed;
+      if (/timed out/i.test(failed.message)) timeouts += 1;
+      else if (!transport && !/empty|nothing was written/i.test(failed.message)) throw failed;
     }
     if (fs.existsSync(sup) && fs.statSync(sup).size >= 32) {
       bitmaps.push(...readPgsImages(fs.readFileSync(sup), 12));
       fs.rmSync(sup, { force: true });
     }
-    if (bitmaps.length >= 4 || timedOut) break;
+    if (bitmaps.length >= 4) break;
   }
-  return { bitmaps, timedOut };
+  return { bitmaps, timedOut: tried > 0 && timeouts === tried };
 }
 
 /** An indexed file can hand over the whole PGS track. A disc stream has to be sliced. */
@@ -492,7 +510,7 @@ async function pgsFrames(file: string, ordinal: number, directory: string): Prom
     ({ bitmaps, timedOut } = await demuxPgsTrack(file, ordinal, directory));
   }
   if (bitmaps.length < 4 && !timedOut) {
-    const windowed = await collectPgs(file, ordinal, directory, sampleOffsets(duration), 45);
+    const windowed = await collectPgs(file, ordinal, directory, sampleOffsets(duration), isTransportStream(file) ? 30 : 45, duration);
     bitmaps.push(...windowed.bitmaps);
     timedOut = windowed.timedOut;
   }
@@ -500,12 +518,14 @@ async function pgsFrames(file: string, ordinal: number, directory: string): Prom
     const found = await subtitleCues(file, ordinal);
     cues = found.count;
     if (bitmaps.length === 0 && found.starts.length > 0) {
-      const atCues = await collectPgs(file, ordinal, directory, found.starts, 8);
+      const atCues = await collectPgs(file, ordinal, directory, found.starts, 8, duration);
       bitmaps.push(...atCues.bitmaps);
       timedOut = atCues.timedOut;
     }
   }
-  if (bitmaps.length === 0 && timedOut) throw new Error("ffmpeg timed out.");
+  if (bitmaps.length === 0 && timedOut) {
+    throw new Error("Reading subtitle images from this file took too long every time. The share may have been slow; Redo tries again.");
+  }
   const frames = spread(bitmaps, 8).map((bitmap) => scaleBitmap(bitmap, 3));
   frames.forEach((image, index) => writePng(path.join(directory, `cue-${index}.png`), image));
   return {

@@ -47,6 +47,31 @@ export function pgsCopyArgs(file: string, ordinal: number, startSeconds: number,
   ];
 }
 
+/** Copy PGS from a transport-stream slice already positioned on stdin. */
+export function pgsSliceArgs(ordinal: number, output: string): string[] {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "mpegts",
+    "-probesize",
+    "5000000",
+    "-analyzeduration",
+    "5000000",
+    "-i",
+    "pipe:0",
+    "-map",
+    `0:s:${ordinal}`,
+    "-c",
+    "copy",
+    "-f",
+    "sup",
+    output,
+  ];
+}
+
 export function vobsubExtractArgs(file: string, ordinal: number, startSeconds: number, output: string): string[] {
   return [
     "-hide_banner",

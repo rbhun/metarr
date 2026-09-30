@@ -27,7 +27,7 @@ import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeF
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths } from "@/lib/detect/publish";
-import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
@@ -387,6 +387,21 @@ test("a pgs subtitle is copied out of the video instead of decoding the picture"
   assert.equal(whole[whole.indexOf("-map") + 1], "0:s:0");
   assert.equal(whole[whole.indexOf("-c") + 1], "copy");
   assert.equal(whole.at(-2), "sup");
+});
+
+test("a disc pgs window is a byte slice on stdin, not a timestamp seek", () => {
+  const args = pgsSliceArgs(3, "/tmp/track.sup");
+  assert.equal(args.includes("-ss"), false);
+  assert.equal(args[args.indexOf("-f") + 1], "mpegts");
+  assert.equal(args[args.indexOf("-i") + 1], "pipe:0");
+  assert.equal(args[args.indexOf("-map") + 1], "0:s:3");
+  assert.equal(args.at(-2), "sup");
+  const size = 30_000_000_000;
+  const audio = tsWindow(size, 6_360, 600, 192)!;
+  const subtitle = tsWindow(size, 6_360, 600, 192, 30)!;
+  assert.equal(subtitle.start, audio.start);
+  assert.ok(subtitle.end - subtitle.start > audio.end - audio.start);
+  assert.equal(subtitle.start % 192, 0);
 });
 
 test("a vobsub picture is drawn as an image and cropped to the text", () => {
