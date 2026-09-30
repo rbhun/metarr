@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.115
+
+- Run overnight language checks before writing earlier results into files. A backlog of tag writes was clearing the pause reason so Tasks said Queued while nothing was ever claimed.
+
 ## 0.0.114
 
 - Fix the Docker build after the language waiting reason: pass the database into writeDetectPause.

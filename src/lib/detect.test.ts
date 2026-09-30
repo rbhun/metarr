@@ -58,6 +58,8 @@ test("a language pause reason is shown on waiting window jobs", () => {
   assert.equal(listed.jobs[0]?.waiting, "Waiting for the window");
   writeDetectPause(db, "plex");
   assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, "Waiting: Plex is busy");
+  writeDetectPause(db, "write");
+  assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, "Waiting: writing a language into a file");
   writeDetectPause(db, null);
   assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, null);
   db.close();

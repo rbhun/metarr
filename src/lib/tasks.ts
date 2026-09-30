@@ -34,6 +34,7 @@ const WAITING: Record<RemuxPause | RewrapPause | DetectPause, string> = {
   detect: "Waiting: language detection is running",
   remux: "Waiting: a disc remux is running",
   off: "Waiting: switched off in Settings",
+  write: "Waiting: writing a language into a file",
 };
 
 export type TaskTotals = {

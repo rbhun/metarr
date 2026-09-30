@@ -40,6 +40,13 @@ function state() {
   return globalForDetect.__metarrDetect;
 }
 
+async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<typeof readDetectSettings>["pathMaps"]): Promise<boolean> {
+  if (await applyNextSaved(db, pathMaps)) return true;
+  if (await confirmNextSaved(db, pathMaps)) return true;
+  if (await refreshNextFormat(db)) return true;
+  return false;
+}
+
 async function step() {
   const db = getDb();
   applyTimeZone(db);
@@ -56,34 +63,49 @@ async function step() {
   }
   const counts = detectCounts(db);
   const urgent = counts.immediate > 0;
+  /** Overnight (and click-now) checks must not wait behind a backlog of file tag writes. */
+  const detectReady = urgent || (settings.enabled && open && counts.window > 0);
+
   if (!urgent) {
     if (!settings.enabled) {
       writeDetectPause(db, counts.window > 0 ? "off" : null);
+      if (!detectReady) {
+        if (await runFollowUps(db, settings.pathMaps)) {
+          if (counts.window > 0) writeDetectPause(db, "off");
+          return;
+        }
+        return;
+      }
     } else if (!open) {
       writeDetectPause(db, counts.window > 0 ? "window" : null);
+      if (await runFollowUps(db, settings.pathMaps)) {
+        if (counts.window > 0) writeDetectPause(db, "window");
+        return;
+      }
+      return;
     } else if (await plexIsBusy(db)) {
       writeDetectPause(db, "plex");
       return;
     } else if (remuxIsRunning(db) || rewrapIsRunning(db)) {
       writeDetectPause(db, "remux");
       return;
-    } else {
+    } else if (!detectReady) {
+      if (await runFollowUps(db, settings.pathMaps)) {
+        writeDetectPause(db, "write");
+        return;
+      }
       writeDetectPause(db, null);
-      if (await applyNextSaved(db, settings.pathMaps)) return;
-      if (await confirmNextSaved(db, settings.pathMaps)) return;
-      if (await refreshNextFormat(db)) return;
-    }
-    if (!settings.enabled || !open) {
-      if (!hasUnwritten(db) && !hasUncheckedTags(db) && !hasFormatRefresh(db)) return;
-      if (await applyNextSaved(db, settings.pathMaps)) return;
-      if (await confirmNextSaved(db, settings.pathMaps)) return;
-      if (await refreshNextFormat(db)) return;
       return;
     }
   }
+
   const job = claimNextJob(db, Boolean(settings.enabled && open));
   if (!job) {
-    if (urgent || (settings.enabled && open)) writeDetectPause(db, null);
+    if (await runFollowUps(db, settings.pathMaps)) {
+      writeDetectPause(db, "write");
+      return;
+    }
+    writeDetectPause(db, null);
     return;
   }
   writeDetectPause(db, null);
