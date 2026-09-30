@@ -1,5 +1,4 @@
-import path from "node:path";
-import { languageFromSubtitleName } from "@/lib/detect/sidecars";
+import { fileBaseName, languageFromSubtitleName } from "@/lib/detect/subtitle-name";
 import type { DetectTarget } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 
@@ -36,7 +35,7 @@ export function subtitleTargets(mediaPath: string | null, track: SubtitleTrack, 
   if (track.language || track.detectedLanguage || track.placement === "burn-in") return [];
   if (track.placement === "external" && !track.file) return [];
   const external = track.placement === "external" && track.file ? track.file : null;
-  if (external && languageFromSubtitleName(path.basename(external))) return [];
+  if (external && languageFromSubtitleName(fileBaseName(external))) return [];
   const copies = track.copies?.length
     ? track.copies
     : external

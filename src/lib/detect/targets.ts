@@ -1,6 +1,6 @@
 import path from "node:path";
 import { isTransportStream } from "@/lib/detect/audio";
-import { languageFromSubtitleName } from "@/lib/detect/sidecars";
+import { languageFromSubtitleName } from "@/lib/detect/subtitle-name";
 import { isDiscImage } from "@/lib/media";
 import type { AudioTrack, MediaVersion, SubtitleTrack } from "@/lib/types";
 

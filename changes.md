@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.120
+
+- Fix the Docker build after 0.0.117: the subtitle name check that the library page uses pulled server-only file code into the browser bundle.
+
 ## 0.0.119
 
 - Read picture subtitles (PGS) on Blu-ray `.m2ts` files from byte slices instead of a timestamp seek, which read the disc from the start and could time out. One slow sample no longer stops the others, and a full timeout says the share was slow and Redo tries again.

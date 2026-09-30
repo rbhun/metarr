@@ -1,34 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { subtitleStem } from "@/lib/detect/paths";
-import { languageName, languageOptions } from "@/lib/media";
+import { isSubtitleFile, languageFromSubtitleName } from "@/lib/detect/subtitle-name";
+import { languageName } from "@/lib/media";
 import type { SubtitleTrack } from "@/lib/types";
+
+export { isSubtitleFile, languageFromSubtitleName };
 
 const SUBTITLE_EXT = /\.(srt|ass|ssa|vtt|sub|idx)$/i;
 const VIDEO_EXT = /\.(mkv|mp4|avi|m4v|ts|wmv|mov|m2ts|mts|mpg|mpeg|webm)$/i;
-const SKIP_TOKEN = /^(forced|sdh|cc|foreign|normal|default|hi)$/i;
-const KNOWN = new Set(languageOptions().map((name) => name.toLowerCase()));
 const listed = new Map<string, string[]>();
-
-export function isSubtitleFile(file: string): boolean {
-  return SUBTITLE_EXT.test(file);
-}
-
-export function languageFromSubtitleName(fileName: string): string | null {
-  const stem = fileName.replace(SUBTITLE_EXT, "");
-  const parts = stem.split(/[._\-\s]+/).filter(Boolean);
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    const token = parts[index];
-    if (!token || SKIP_TOKEN.test(token)) continue;
-    const named = languageName(token);
-    if (!named) continue;
-    const tokenKey = token.toLowerCase();
-    const namedKey = named.toLowerCase();
-    if (KNOWN.has(tokenKey)) return languageOptions().find((option) => option.toLowerCase() === tokenKey) ?? named;
-    if (KNOWN.has(namedKey) && namedKey !== tokenKey) return named;
-  }
-  return null;
-}
 
 export type Sidecar = { file: string; language: string | null };
 
