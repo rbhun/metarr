@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { migrate } from "@/lib/db";
-import { candidateFromVersions, languagesOnlyIn, pairCandidates, type MergeVersionView } from "@/lib/merge/candidates";
+import { rebuildCatalog } from "@/lib/catalog";
+import { migrate, insertSourceRecords } from "@/lib/db";
+import { demoRecords } from "@/lib/demo";
+import { candidateFromVersions, languagesOnlyIn, listMergeCandidates, pairCandidates, type MergeVersionView } from "@/lib/merge/candidates";
 import {
   durationsCloseMinutes,
   durationsCloseSeconds,
@@ -223,6 +225,19 @@ test("probe JSON keeps stream languages", () => {
   );
   assert.equal(probe.duration, 100.5);
   assert.equal(probe.streams[1]!.language, "hun");
+});
+
+test("the demo library exposes a merge candidate with complementary audio", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const candidates = listMergeCandidates(db, "Blade");
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]!.label.includes("Blade Runner 2049"), true);
+  assert.equal(candidates[0]!.videoFrom, "left");
+  assert.ok(candidates[0]!.audioOnlyRight.includes("Hungarian") || candidates[0]!.audioOnlyLeft.includes("Hungarian"));
+  db.close();
 });
 
 test("merge queue is manual and can be turned off", () => {
