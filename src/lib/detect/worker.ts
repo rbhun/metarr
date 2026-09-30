@@ -58,17 +58,17 @@ async function step() {
   const urgent = counts.immediate > 0;
   if (!urgent) {
     if (!settings.enabled) {
-      writeDetectPause(counts.window > 0 ? "off" : null);
+      writeDetectPause(db, counts.window > 0 ? "off" : null);
     } else if (!open) {
-      writeDetectPause(counts.window > 0 ? "window" : null);
+      writeDetectPause(db, counts.window > 0 ? "window" : null);
     } else if (await plexIsBusy(db)) {
-      writeDetectPause("plex");
+      writeDetectPause(db, "plex");
       return;
     } else if (remuxIsRunning(db) || rewrapIsRunning(db)) {
-      writeDetectPause("remux");
+      writeDetectPause(db, "remux");
       return;
     } else {
-      writeDetectPause(null);
+      writeDetectPause(db, null);
       if (await applyNextSaved(db, settings.pathMaps)) return;
       if (await confirmNextSaved(db, settings.pathMaps)) return;
       if (await refreshNextFormat(db)) return;
@@ -83,10 +83,10 @@ async function step() {
   }
   const job = claimNextJob(db, Boolean(settings.enabled && open));
   if (!job) {
-    if (urgent || (settings.enabled && open)) writeDetectPause(null);
+    if (urgent || (settings.enabled && open)) writeDetectPause(db, null);
     return;
   }
-  writeDetectPause(null);
+  writeDetectPause(db, null);
   try {
     const local = resolveMediaPath(job.path, settings.pathMaps, (candidate) => {
       try {

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.114
+
+- Fix the Docker build after the language waiting reason: pass the database into writeDetectPause.
+
 ## 0.0.113
 
 - Language checks in Tasks now say why they are waiting (outside the window, Plex busy, a remux running, or switched off), instead of always showing "Waiting for the window". Check Settings → Schedules → Clock: the container used UTC, so a 01–06 window stayed closed until 03:00 local time.
