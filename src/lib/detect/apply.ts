@@ -9,6 +9,7 @@ import { idle } from "@/lib/idle";
 import { scratchRoot } from "@/lib/scratch";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { markTagChecked, markWritten, reopenForWrite } from "@/lib/detect/store";
 import { languageName } from "@/lib/media";
@@ -64,9 +65,12 @@ export function commandFailureText(command: string, stdout: string, stderr: stri
   return detail || `${command} could not change the file.`;
 }
 
-function skipSentence(reason: "unknown-language" | "container" | "already-named"): string {
+function skipSentence(reason: "unknown-language" | "container" | "already-named", file: string): string {
   if (reason === "unknown-language") return "This language has no tag a media file can store, so the file was left unchanged.";
   if (reason === "already-named") return "The subtitle file name already includes a language, so it was left unchanged.";
+  if (canRewrap(null, file)) {
+    return "This container cannot store a track language, so the file was left unchanged. Metarr keeps the language, and Rewrap to MKV on the title writes it into an MKV copy.";
+  }
   return "This container cannot store a track language, so the file was left unchanged.";
 }
 
@@ -211,7 +215,7 @@ export async function writeFinding(
         };
       }
     }
-    return unchanged(job, skipSentence(plan.reason));
+    return unchanged(job, skipSentence(plan.reason, localFile));
   }
 
   try {

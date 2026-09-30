@@ -229,7 +229,7 @@ export function TasksView() {
   async function redoAllFailed() {
     const count = tabCount(totals, "failed");
     if (count < 1 || redoingAll || redoing || status !== "failed") return;
-    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "AVI" : "AVIs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
+    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "file" : "files") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
     const when =
       queue === "language" || queue === "all"
@@ -267,7 +267,7 @@ export function TasksView() {
     const count = tabCount(totals, status);
     if (count < 1 || clearing || status === "running" || status === "all") return;
     const name = (TABS.find(([value]) => value === status)?.[1] ?? status).toLowerCase();
-    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "AVI" : "AVIs") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
+    const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "file" : "files") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
     if (!window.confirm(`Remove ${shown} ${name} ${noun} from the list? Languages already found stay. Cleared failures are not checked again until you redo them. A job that is already running will finish.`)) return;
     setClearing(true);
@@ -298,7 +298,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Language checks, disc remuxes, and AVI rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
+                Language checks, disc remuxes, and MKV rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -361,7 +361,7 @@ export function TasksView() {
                       )}
                     </h2>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {job.queue === "remux" ? "Rip" : job.queue === "rewrap" ? "AVI rewrap" : "Language"}
+                      {job.queue === "remux" ? "Rip" : job.queue === "rewrap" ? "MKV rewrap" : "Language"}
                       {job.detail ? ` · ${job.detail}` : ""}
                     </p>
                   </div>

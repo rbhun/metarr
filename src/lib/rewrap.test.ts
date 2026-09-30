@@ -8,9 +8,10 @@ import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { avisFromFile } from "@/lib/rewrap/candidates";
 import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, type Probe } from "@/lib/rewrap/run";
-import { isAvi, rewrappedPathFor, rewrapTarget } from "@/lib/rewrap/source";
+import { canRewrap, isAvi, rewrappedPathFor, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
+  parseLanguages,
   enqueueRewraps,
   finishRewrap,
   finishedRewrapPaths,
@@ -99,7 +100,7 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.equal(enqueueRewraps(db, [{ path: "/m/Film.avi" }], true).already, 1);
   assert.equal(hasImmediateRewrap(db), true);
   const first = claimNextRewrap(db, true);
-  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", label: "Film (1999)", languages: ["hun"] });
+  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [] });
   finishRewrap(db, first!.id, "done", "Saved Film.mkv.");
   const old = claimNextRewrap(db);
   assert.equal(old?.label, "Old.avi");
@@ -132,7 +133,64 @@ test("library AVIs carry their title name and known audio languages", () => {
       },
     ] as never,
   });
-  assert.deepEqual(avis, [{ path: "/m/Film.avi", label: "Film (1999)", languages: ["hun", "English"] }]);
+  assert.deepEqual(avis, [{ path: "/m/Film.avi", label: "Film (1999)", languages: ["hun", "English"], subtitleLanguages: [] }]);
+});
+
+test("a loose M2TS is rewrapped with its audio and subtitle languages, but a Blu-ray stream file is not", () => {
+  assert.equal(canRewrap(null, "/m/Kwai (1957)/00336.m2ts"), true);
+  assert.equal(canRewrap(null, "/m/Show/episode.ts"), true);
+  assert.equal(canRewrap(null, "/m/Kwai (1957)/BDMV/STREAM/00336.m2ts"), false);
+  assert.equal(canRewrap(null, "/m/Film.mkv"), false);
+  assert.equal(sourceKind("/m/00336.m2ts"), "M2TS");
+  assert.equal(sourceKind("/m/Film.divx"), "AVI");
+
+  const [item] = avisFromFile({
+    label: "The Bridge on the River Kwai (1957)",
+    path: "/m/Kwai (1957)/00336.m2ts",
+    container: "m2ts",
+    playableLabel: "video",
+    audioTracks: [{ language: "English", layout: null, codec: "pcm_bluray" }],
+    subtitleTracks: [
+      { language: null, placement: "internal", format: "PGS", forced: false, streamIndex: 0, detectedLanguage: "Spanish" },
+      { language: "French", placement: "internal", format: "PGS", forced: false, streamIndex: 1 },
+      { language: "Hungarian", placement: "external", format: "SRT", forced: false, file: "/m/Kwai (1957)/00336.hu.srt" },
+    ],
+    versions: [],
+  });
+  assert.deepEqual(item?.subtitleLanguages, ["Spanish", "French"]);
+
+  const plan = rewrapArgs(
+    "in.m2ts",
+    "out.mkv",
+    {
+      duration: 9000,
+      streams: [
+        { index: 0, codecType: "video", codecName: "h264" },
+        { index: 1, codecType: "audio", codecName: "pcm_bluray" },
+        { index: 2, codecType: "subtitle", codecName: "hdmv_pgs_subtitle" },
+        { index: 3, codecType: "subtitle", codecName: "hdmv_pgs_subtitle" },
+      ],
+    },
+    { languages: item!.languages!, subtitleLanguages: item!.subtitleLanguages, firstLanguage: "" },
+  );
+  const args = plan.args.join(" ");
+  assert.match(args, /-map 0:0 -map 0:1 -map 0:2 -map 0:3 -c copy/);
+  assert.match(args, /-c:a:0 flac/);
+  assert.match(args, /-metadata:s:s:0 language=spa/);
+  assert.match(args, /-metadata:s:s:1 language=fre|-metadata:s:s:1 language=fra/);
+  assert.deepEqual([plan.subtitles, plan.converted], [2, 1]);
+});
+
+test("a queued job keeps subtitle languages, and older jobs with only audio still load", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueRewraps(db, [{ path: "/m/00336.m2ts", languages: ["English"], subtitleLanguages: ["Spanish", null] }]);
+  db.prepare(`INSERT INTO rewrap_jobs (path, label, languages, immediate, status, created_at) VALUES ('/m/Old.avi', 'Old', '["hun"]', 0, 'pending', '2026-01-01')`).run();
+  assert.deepEqual(claimNextRewrap(db)?.subtitleLanguages, ["Spanish", null]);
+  const old = claimNextRewrap(db);
+  assert.deepEqual([old?.languages, old?.subtitleLanguages], [["hun"], []]);
+  assert.deepEqual(parseLanguages("not json"), { audio: [], subtitles: [] });
+  db.close();
 });
 
 const hasFfmpeg = (() => {
@@ -194,6 +252,44 @@ test("a real Xvid AVI rewraps into an MKV beside it and the AVI stays", { skip: 
     );
     const dry = await rewrapAvi({ source: avi, workDir: path.join(root, "work", "job-3"), languages: [], firstLanguage: "", dryRun: true, onProgress: () => undefined });
     assert.match(dry, /^Dry run: would copy 1 video stream, 2 audio tracks into .*Film \(1999\)\.mkv/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a real M2TS with Blu-ray PCM rewraps into an MKV with languages", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-ts-"));
+  try {
+    const source = path.join(root, "00336.m2ts");
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi", "-i", "testsrc=size=320x240:rate=24:duration=4",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=4:sample_rate=48000",
+      "-f", "lavfi", "-i", "sine=frequency=660:duration=4:sample_rate=48000",
+      "-map", "0", "-map", "1", "-map", "2",
+      "-c:v", "mpeg2video", "-c:a:0", "pcm_bluray", "-c:a:1", "ac3", "-mpegts_m2ts_mode", "1",
+      source,
+    ]);
+    const message = await rewrapAvi({
+      source,
+      workDir: path.join(root, "work", "job-1"),
+      languages: ["English", "Spanish"],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    assert.match(message, /Saved 00336\.mkv with 1 video stream, 2 audio tracks\. 1 PCM audio track is stored as lossless FLAC\. The M2TS was left in place\./);
+    const streams = JSON.parse(
+      execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name:stream_tags=language", "-of", "json", path.join(root, "00336.mkv")]).toString(),
+    ).streams as Array<{ codec_name: string; tags?: { language?: string } }>;
+    assert.deepEqual(
+      streams.map((stream) => [stream.codec_name, stream.tags?.language ?? null]),
+      [
+        ["mpeg2video", null],
+        ["flac", "eng"],
+        ["ac3", "spa"],
+      ],
+    );
+    assert.ok(fs.existsSync(source));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

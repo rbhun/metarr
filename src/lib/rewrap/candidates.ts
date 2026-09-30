@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 import { filesForLibrary, filesForSelection } from "@/lib/detect/files";
 import type { ScanFile } from "@/lib/detect/targets";
-import type { AudioTrack } from "@/lib/types";
+import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
-import { isAvi, rewrappedPathFor } from "@/lib/rewrap/source";
+import { canRewrap, rewrappedPathFor } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
   path: string;
@@ -18,16 +18,27 @@ function trackLanguages(tracks: AudioTrack[]): Array<string | null> {
   return tracks.map((track) => track.language || track.detectedLanguage || null);
 }
 
-/** Every AVI on a library file, with the audio languages Metarr already knows for it. */
+/** Languages of the subtitle streams inside the file, by stream order. Sidecar files keep their own names. */
+export function subtitleStreamLanguages(tracks: SubtitleTrack[]): Array<string | null> {
+  const languages: Array<string | null> = [];
+  tracks
+    .filter((track) => track.placement === "internal")
+    .forEach((track, index) => {
+      languages[track.streamIndex ?? index] = track.language || track.detectedLanguage || null;
+    });
+  return Array.from(languages, (language) => language ?? null);
+}
+
+/** Every AVI or loose transport stream on a library file, with the languages Metarr already knows for it. */
 export function avisFromFile(file: ScanFile): RewrapItem[] {
   const found: RewrapItem[] = [];
-  const push = (filePath: string | null, container: string | null, tracks: AudioTrack[]) => {
-    if (!filePath || !isAvi(container, filePath)) return;
+  const push = (filePath: string | null, container: string | null, audio: AudioTrack[], subtitles: SubtitleTrack[]) => {
+    if (!filePath || !canRewrap(container, filePath)) return;
     if (found.some((item) => item.path === filePath)) return;
-    found.push({ path: filePath, label: file.label, languages: trackLanguages(tracks) });
+    found.push({ path: filePath, label: file.label, languages: trackLanguages(audio), subtitleLanguages: subtitleStreamLanguages(subtitles) });
   };
-  push(file.path, file.container, file.audioTracks);
-  for (const version of file.versions) push(version.path, version.container, version.audioTracks);
+  push(file.path, file.container, file.audioTracks, file.subtitleTracks);
+  for (const version of file.versions) push(version.path, version.container, version.audioTracks, version.subtitleTracks ?? []);
   return found;
 }
 

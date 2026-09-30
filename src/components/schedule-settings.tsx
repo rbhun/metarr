@@ -324,7 +324,7 @@ export function ScheduleSettings() {
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle>Run queued AVI rewraps</CardTitle>
+          <CardTitle>Run queued MKV rewraps</CardTitle>
           <CardDescription>
             A separate queue from the discs. It runs from the start hour until the end hour, and waits while a disc remux runs, Plex is playing, or
             language detection is using a file. Rewrap now in Rips or the library starts one right away.
@@ -332,7 +332,7 @@ export function ScheduleSettings() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-            <Label htmlFor="schedule-rewrap">Run queued AVI rewraps</Label>
+            <Label htmlFor="schedule-rewrap">Run queued MKV rewraps</Label>
             <Switch id="schedule-rewrap" checked={rewrap.enabled} onCheckedChange={(value) => setRewrap({ ...rewrap, enabled: value === true })} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -356,7 +356,7 @@ export function ScheduleSettings() {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(rewrap),
                 }),
-                "AVI rewrap hours saved on this machine.",
+                "MKV rewrap hours saved on this machine.",
               )
             }
           >

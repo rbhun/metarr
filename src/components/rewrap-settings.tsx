@@ -35,11 +35,11 @@ export function RewrapSettingsCard() {
         body: JSON.stringify({ firstLanguage: firstLanguage ?? "" }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; settings?: { firstLanguage: string } } | null;
-      if (!response.ok) throw new Error(body?.error || "Could not save AVI rewrap.");
+      if (!response.ok) throw new Error(body?.error || "Could not save MKV rewrap.");
       if (body?.settings) setFirstLanguage(body.settings.firstLanguage);
-      toast.success("AVI rewrap settings saved on this machine.");
+      toast.success("MKV rewrap settings saved on this machine.");
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "Could not save AVI rewrap.");
+      toast.error(caught instanceof Error ? caught.message : "Could not save MKV rewrap.");
     } finally {
       setBusy(false);
     }
@@ -48,11 +48,11 @@ export function RewrapSettingsCard() {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>AVI rewrap</CardTitle>
+        <CardTitle>MKV rewrap</CardTitle>
         <CardDescription>
-          ffmpeg copies an AVI into an MKV with the same name beside it, without re-encoding. Every video and audio track is kept. Audio languages Metarr
-          already knows are written onto the tracks. Sidecar subtitles keep matching because the name stays the same. The AVI is never removed. The hours
-          are set under Schedule.
+          ffmpeg copies an AVI or a loose M2TS or TS file into an MKV with the same name beside it, without re-encoding. Every video and audio track is
+          kept. Audio and subtitle languages Metarr already knows are written onto the tracks. Sidecar subtitles keep matching because the name stays the
+          same. The original is never removed. The hours are set under Schedule.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -61,7 +61,7 @@ export function RewrapSettingsCard() {
           <Input
             id="rewrap-first-language"
             value={firstLanguage}
-            placeholder="Leave empty to keep the AVI's order"
+            placeholder="Leave empty to keep the file's order"
             onChange={(event) => setFirstLanguage(event.target.value)}
           />
           <p className="text-xs text-muted-foreground">Tracks in this language move to the front and become the default. Tracks with no known language keep their place after them.</p>

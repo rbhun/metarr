@@ -18,6 +18,8 @@ export type RewrapItem = {
   label?: string;
   /** Known language per audio track, in file order; null where unknown. */
   languages?: Array<string | null>;
+  /** Known language per subtitle stream inside the file, in file order. */
+  subtitleLanguages?: Array<string | null>;
 };
 
 export type RewrapJob = {
@@ -25,6 +27,7 @@ export type RewrapJob = {
   path: string;
   label: string;
   languages: Array<string | null>;
+  subtitleLanguages: Array<string | null>;
 };
 
 export type RewrapJobStatus = "pending" | "running" | "done" | "failed";
@@ -141,7 +144,10 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
         continue;
       }
       const label = item.label?.trim() || path.basename(filePath) || filePath;
-      insert.run(filePath, label, JSON.stringify(item.languages ?? []), immediate ? 1 : 0, now);
+      const languages = item.subtitleLanguages?.length
+        ? { audio: item.languages ?? [], subtitles: item.subtitleLanguages }
+        : (item.languages ?? []);
+      insert.run(filePath, label, JSON.stringify(languages), immediate ? 1 : 0, now);
       added += 1;
     }
   });
@@ -149,13 +155,20 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   return { added, already, promoted };
 }
 
-function parseLanguages(raw: string): Array<string | null> {
+function languageList(value: unknown): Array<string | null> {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => (typeof item === "string" && item.trim() ? item.trim() : null));
+}
+
+/** Older jobs stored only the audio list; newer ones store audio and subtitles together. */
+export function parseLanguages(raw: string): { audio: Array<string | null>; subtitles: Array<string | null> } {
   try {
     const value = JSON.parse(raw) as unknown;
-    if (!Array.isArray(value)) return [];
-    return value.map((item) => (typeof item === "string" && item.trim() ? item.trim() : null));
+    if (Array.isArray(value)) return { audio: languageList(value), subtitles: [] };
+    const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+    return { audio: languageList(record.audio), subtitles: languageList(record.subtitles) };
   } catch {
-    return [];
+    return { audio: [], subtitles: [] };
   }
 }
 
@@ -173,7 +186,8 @@ export function claimNextRewrap(db: Database.Database, onlyImmediate = false): R
     .prepare(`UPDATE rewrap_jobs SET status = 'running', started_at = ?, message = 'Waiting to start', progress = 0 WHERE id = ? AND status = 'pending'`)
     .run(new Date().toISOString(), row.id);
   if (changed.changes !== 1) return null;
-  return { id: row.id, path: row.path, label: row.label, languages: parseLanguages(row.languages) };
+  const languages = parseLanguages(row.languages);
+  return { id: row.id, path: row.path, label: row.label, languages: languages.audio, subtitleLanguages: languages.subtitles };
 }
 
 export function updateRewrapProgress(db: Database.Database, id: number, progress: number, message: string) {

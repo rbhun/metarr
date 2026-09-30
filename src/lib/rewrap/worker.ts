@@ -9,8 +9,9 @@ import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
+import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
-import { isAvi } from "@/lib/rewrap/source";
+import { canRewrap, sourceKind } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   finishRewrap,
@@ -48,8 +49,18 @@ export function rewrapWorkDirectory(databasePath: string, jobId: number): string
   return path.join(scratchRoot(databasePath), "rewrap-work", `job-${jobId}`);
 }
 
-function aviText(message: string): string {
-  return message.replace(/next to the disc|beside the disc/g, "next to the AVI");
+function sourceText(message: string, kind: string): string {
+  return message.replace(/next to the disc|beside the disc/g, `next to the ${kind}`);
+}
+
+/** Languages recognized after the job was queued are written too. */
+function currentLanguages(db: ReturnType<typeof getDb>, filePath: string): { languages: Array<string | null>; subtitleLanguages: Array<string | null> } | null {
+  try {
+    const item = libraryAvis(db).get(filePath);
+    return item ? { languages: item.languages ?? [], subtitleLanguages: item.subtitleLanguages ?? [] } : null;
+  } catch {
+    return null;
+  }
 }
 
 function existsFile(candidate: string): boolean {
@@ -60,7 +71,7 @@ function existsFile(candidate: string): boolean {
   }
 }
 
-/** The copy is about as large as the AVI, in scratch and then in the movie folder. */
+/** The copy is about as large as the source, in scratch and then in the movie folder. */
 function roomFor(file: string, directories: string[]): boolean {
   try {
     const needed = fs.statSync(file).size + 512 * 1024 * 1024;
@@ -121,29 +132,32 @@ async function step() {
       finishRewrap(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
       return;
     }
-    if (!isAvi(null, local)) {
-      finishRewrap(db, job.id, "failed", "This file is not an AVI.");
+    if (!canRewrap(null, local)) {
+      finishRewrap(db, job.id, "failed", "This file is not an AVI or a loose M2TS or TS file.");
       return;
     }
+    const kind = sourceKind(local);
+    const known = currentLanguages(db, job.path);
     const directory = path.dirname(local);
     const rehearsal = dryRun();
     if (rehearsal) {
       const problem = discFolderProblem(directory);
       if (problem) {
-        finishRewrap(db, job.id, "failed", `Dry run: ${aviText(problem)}`);
+        finishRewrap(db, job.id, "failed", `Dry run: ${sourceText(problem, kind)}`);
         return;
       }
     } else {
       assertWritableDiscFolder(directory);
       if (!roomFor(local, [path.dirname(workDir), directory])) {
-        finishRewrap(db, job.id, "failed", "There is not enough free space for a copy of this AVI, so nothing was written.");
+        finishRewrap(db, job.id, "failed", `There is not enough free space for a copy of this ${kind}, so nothing was written.`);
         return;
       }
     }
     const message = await rewrapAvi({
       source: local,
       workDir,
-      languages: job.languages,
+      languages: known?.languages ?? job.languages,
+      subtitleLanguages: known?.subtitleLanguages ?? job.subtitleLanguages,
       firstLanguage: settings.firstLanguage,
       dryRun: rehearsal,
       onProgress: (percent, text) => updateRewrapProgress(db, job.id, percent, text),
@@ -160,7 +174,7 @@ async function step() {
     if (!rehearsal) syncSoon();
   } catch (caught) {
     fs.rmSync(workDir, { recursive: true, force: true });
-    finishRewrap(db, job.id, "failed", aviText(friendlyFsError(caught, "Rewrap failed.")));
+    finishRewrap(db, job.id, "failed", sourceText(friendlyFsError(caught, "Rewrap failed."), sourceKind(job.path)));
   }
 }
 
@@ -171,7 +185,7 @@ async function loop() {
   try {
     await step();
   } catch (caught) {
-    console.error("AVI rewrap stopped on one item.", caught);
+    console.error("Rewrap stopped on one item.", caught);
   } finally {
     current.working = false;
   }

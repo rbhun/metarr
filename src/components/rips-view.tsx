@@ -213,7 +213,7 @@ export function RipsView() {
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Rips</h1>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Disc images go through MakeMKV, and AVI files are rewrapped with ffmpeg. Each has its own queue, hours, and settings. Send ISO, DVD, and Blu-ray disc images for a high-quality MakeMKV remux. Every audio and subtitle track is copied into an MKV beside the disc; nothing is re-encoded, and the disc stays where it is. Progress and failure reasons stay on{" "}
+              Disc images go through MakeMKV, and AVI and loose M2TS files are rewrapped with ffmpeg. Each has its own queue, hours, and settings. Send ISO, DVD, and Blu-ray disc images for a high-quality MakeMKV remux. Every audio and subtitle track is copied into an MKV beside the disc; nothing is re-encoded, and the disc stays where it is. Progress and failure reasons stay on{" "}
               <Link href="/tasks?queue=remux&status=all" className="underline underline-offset-2">
                 Tasks
               </Link>

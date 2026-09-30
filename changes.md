@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.125
+
+- Loose M2TS and TS files, which cannot store a track language, can now be rewrapped into an MKV beside them, like AVIs. The MKV gets the audio and subtitle languages Metarr recognized, PGS subtitles are kept, and Blu-ray PCM audio is stored as lossless FLAC because Matroska cannot hold it as it is. A rewrap uses the latest languages when it starts, not only the ones known when it was queued. When a language cannot be written into one of these files, the message now points to Rewrap to MKV.
+
 ## 0.0.124
 
 - The folder scan now reads the subtitle files beside each video and compares them with what Plex lists, instead of checking only when a page opens. Files Plex does not list show with "Plex: missing" in the tooltip and a note saying why. When Plex would read the file by its name, Metarr asks Plex to refresh that title after the scan, at most once a week per file. When the name keeps Plex from reading it, the note gives the name Plex expects.

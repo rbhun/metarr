@@ -158,7 +158,7 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
       status: job.status,
       message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
       priority: null,
-      detail: "AVI to MKV · no re-encoding",
+      detail: "AVI or M2TS to MKV · no re-encoding",
       progress: job.progress,
       createdAt: job.createdAt,
       startedAt: job.startedAt,

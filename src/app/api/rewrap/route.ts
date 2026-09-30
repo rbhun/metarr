@@ -1,7 +1,7 @@
 import { clampHour } from "@/lib/detect/schedule";
 import { getDb } from "@/lib/db";
 import { libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
-import { isAvi } from "@/lib/rewrap/source";
+import { canRewrap } from "@/lib/rewrap/source";
 import {
   activeRewrap,
   clearRewrapJobs,
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
       return known ? { ...known, label: item.label ?? known.label } : item;
     }),
   ];
-  const avis = items.filter((item) => isAvi(null, item.path));
+  const avis = items.filter((item) => canRewrap(null, item.path));
   const result = enqueueRewraps(db, avis, record.immediate === true);
   kickRewrapWorker();
   return NextResponse.json({ ...result, skipped: items.length - avis.length, totals: rewrapTotals(db) });

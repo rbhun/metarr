@@ -46,10 +46,10 @@ function summary(body: RewrapBody | null): string {
     totals.failed ? `${totals.failed.toLocaleString("en")} failed` : null,
     totals.done ? `${totals.done.toLocaleString("en")} done` : null,
   ].filter(Boolean);
-  const base = parts.join(" · ") || "No AVI rewraps yet.";
+  const base = parts.join(" · ") || "No rewraps yet.";
   if (active) return `${base} · ${active.label}${active.progress ? ` ${active.progress}%` : ""}`;
   if (!totals.pending) return base;
-  if (pause === "off") return `${base} · AVI rewrap is off in Settings`;
+  if (pause === "off") return `${base} · MKV rewrap is off in Settings`;
   if (pause === "window") return `${base} · waiting for ${hourLabel(settings.startHour)}–${hourLabel(settings.endHour)}`;
   if (pause === "remux") return `${base} · a disc remux is running`;
   if (pause === "plex") return `${base} · Plex is busy`;
@@ -70,11 +70,11 @@ export function RewrapSection() {
     try {
       const response = await fetch("/api/rewrap?files=1", { cache: "no-store" });
       const next = (await response.json().catch(() => null)) as RewrapBody | null;
-      if (!response.ok || !next) throw new Error(next?.error || "The AVI list could not be loaded.");
+      if (!response.ok || !next) throw new Error(next?.error || "The file list could not be loaded.");
       setBody(next);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The AVI list could not be loaded.");
+      setError(caught instanceof Error ? caught.message : "The file list could not be loaded.");
     }
   }, []);
 
@@ -124,7 +124,7 @@ export function RewrapSection() {
       setPathInput("");
       await load();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "Could not queue the AVI rewrap.");
+      toast.error(caught instanceof Error ? caught.message : "Could not queue the rewrap.");
     } finally {
       setSending(false);
     }
@@ -137,12 +137,12 @@ export function RewrapSection() {
   async function clearQueue() {
     const waiting = body?.totals.pending ?? 0;
     if (waiting < 1 || clearing) return;
-    if (!window.confirm(`Remove ${waiting.toLocaleString("en")} waiting AVIs? A rewrap already running will finish.`)) return;
+    if (!window.confirm(`Remove ${waiting.toLocaleString("en")} waiting rewraps? A rewrap already running will finish.`)) return;
     setClearing(true);
     try {
       const response = await fetch("/api/rewrap", { method: "DELETE" });
       if (!response.ok) throw new Error("The queue could not be cleared.");
-      toast.success("Waiting AVI rewraps cleared.");
+      toast.success("Waiting rewraps cleared.");
       await load();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "The queue could not be cleared.");
@@ -162,11 +162,12 @@ export function RewrapSection() {
   return (
     <section className="space-y-3 border-t pt-6">
       <div>
-        <h2 className="text-base font-semibold tracking-tight">AVI files</h2>
+        <h2 className="text-base font-semibold tracking-tight">AVI and M2TS files</h2>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          ffmpeg copies the video and every audio track of an AVI into an MKV with the same name, next to it. Nothing is re-encoded, so the quality and
-          size stay the same. Seeking gets reliable, and known audio languages are written onto the tracks. Old DivX/Xvid video may still need Plex to
-          convert it on some players. The AVI stays where it is. Hours and the audio order are under Settings.
+          AVI and loose M2TS or TS files cannot store a language on each track. ffmpeg copies the video, every audio track, and the subtitles into an
+          MKV with the same name, next to it, and writes the audio and subtitle languages Metarr knows onto the tracks. Nothing is re-encoded, so the
+          quality and size stay the same; Blu-ray PCM audio is stored as lossless FLAC. Old DivX/Xvid video may still need Plex to convert it on some
+          players. The original file stays where it is. Hours and the audio order are under Settings.
         </p>
       </div>
 
@@ -196,7 +197,7 @@ export function RewrapSection() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium">To rewrap</h3>
-          <p className="text-xs text-muted-foreground">AVIs in the library that do not have their MKV yet.</p>
+          <p className="text-xs text-muted-foreground">AVI and M2TS files in the library that do not have their MKV yet.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={selected.size < 1 || sending} onClick={() => void send(selectedPaths(), true)}>
@@ -207,7 +208,7 @@ export function RewrapSection() {
           </Button>
         </div>
       </div>
-      <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search AVI titles or paths" aria-label="Search AVI titles or paths" />
+      <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search titles or paths" aria-label="Search titles or paths" />
       {error ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm">
           <p>{error}</p>
@@ -216,18 +217,18 @@ export function RewrapSection() {
           </Button>
         </div>
       ) : null}
-      {!body && !error ? <p className="text-sm text-muted-foreground">Loading AVI files…</p> : null}
-      {body && files.length === 0 ? <p className="text-sm text-muted-foreground">No AVI files in the library.</p> : null}
-      {body && files.length > 0 && matching.length === 0 ? <p className="text-sm text-muted-foreground">No AVI files match that search.</p> : null}
+      {!body && !error ? <p className="text-sm text-muted-foreground">Loading files…</p> : null}
+      {body && files.length === 0 ? <p className="text-sm text-muted-foreground">No AVI or M2TS files in the library.</p> : null}
+      {body && files.length > 0 && matching.length === 0 ? <p className="text-sm text-muted-foreground">No files match that search.</p> : null}
       {body && matching.length > 0 && open.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Every AVI here already has its MKV.</p>
+        <p className="text-sm text-muted-foreground">Every file here already has its MKV.</p>
       ) : null}
       {open.length > 0 ? (
         <div className="overflow-hidden rounded-lg border">
           <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
-            <Checkbox checked={allVisibleSelected} onCheckedChange={() => toggleAllVisible()} aria-label="Select all visible AVI files" />
+            <Checkbox checked={allVisibleSelected} onCheckedChange={() => toggleAllVisible()} aria-label="Select all visible files" />
             <span className="text-muted-foreground">
-              {open.length.toLocaleString("en")} AVI{open.length === 1 ? "" : "s"}
+              {open.length.toLocaleString("en")} file{open.length === 1 ? "" : "s"}
               {selected.size ? ` · ${selected.size} selected` : ""}
             </span>
           </div>
@@ -251,7 +252,7 @@ export function RewrapSection() {
         <div className="space-y-2 pt-2">
           <div>
             <h3 className="text-sm font-medium">Already rewrapped</h3>
-            <p className="text-xs text-muted-foreground">These AVIs have their MKV. The AVI is still there until you remove it.</p>
+            <p className="text-xs text-muted-foreground">These files have their MKV. The original is still there until you remove it.</p>
           </div>
           <ul className="divide-y overflow-hidden rounded-lg border">
             {converted.map((file) => (
@@ -278,7 +279,7 @@ export function RewrapSection() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1 space-y-1.5">
           <label htmlFor="rewrap-path" className="text-xs font-medium">
-            Or paste an AVI path on this machine
+            Or paste an AVI or M2TS path on this machine
           </label>
           <Input
             id="rewrap-path"
