@@ -772,6 +772,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   bitrateKbps={version.bitrateKbps}
                                   playableLabel={version.playableLabel}
                                   missing={version.missing}
+                                  flags={version.flags}
                                   length={lengthText(version)}
                                   part={multiPartLabel(version.path, version.name, title.title)}
                                   edition={version.edition}
@@ -801,6 +802,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   bitrateKbps={title.bitrateKbps}
                                   playableLabel={title.playableLabel}
                                   missing={title.versions[0]?.missing}
+                                  flags={title.versions[0]?.flags}
                                   note={title.playableNote}
                                   part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
                                   edition={title.versions[0]?.edition}
@@ -912,6 +914,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 bitrateKbps={title.bitrateKbps}
                                 playableLabel={title.playableLabel}
                                 missing={title.versions[0]?.missing}
+                                flags={title.versions[0]?.flags}
                                 note={title.playableNote}
                                 part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
                                 edition={title.versions[0]?.edition}
