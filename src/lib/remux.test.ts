@@ -284,7 +284,12 @@ test("a MakeMKV failure shows the real reason, not the routine ISO lines", () =>
     ...ISO_START,
     'MSG:5021,260,1,"This application version is too old. Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the application.","%1","x"',
   ].join("\n");
-  assert.match(makemkvFailure(expired, 1), /^This application version is too old\..*Blu-ray needs a MakeMKV key .*Settings → Disc remux/);
+  assert.match(makemkvFailure(expired, 1), /^MakeMKV has no valid key, so it does not start at all, for DVDs too \(“This application version is too old\..*Settings → Disc remux.*t=1053/);
+  const removed = [
+    'MSG:5073,260,0,"Your temporary key has expired and was removed. Please restart the application.","x"',
+    expired,
+  ].join("\n");
+  assert.match(makemkvFailure(removed, 253), /^The MakeMKV beta key has expired\. .*for DVDs too\. Paste a valid key/);
   const failed = [...ISO_START, 'MSG:5010,0,0,"Failed to open disc","Failed to open disc"'].join("\n");
   assert.equal(makemkvFailure(failed, 2), "Failed to open disc (MakeMKV exited with code 2.)");
   assert.equal(

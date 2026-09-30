@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.116
+
+- Say plainly when the MakeMKV beta key has expired or no valid key is set: MakeMKV then does not start at all, for DVDs too, and the task links the page where the new beta key is posted.
+
 ## 0.0.115
 
 - Run overnight language checks before writing earlier results into files. A backlog of tag writes was clearing the pause reason so Tasks said Queued while nothing was ever claimed.

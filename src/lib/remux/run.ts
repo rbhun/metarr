@@ -29,6 +29,7 @@ function clock(seconds: number): string {
 /** Status lines MakeMKV prints on every ISO run; they never explain a failure. */
 const ROUTINE =
   /^(Using library|Operation successfully completed|The program can't find any usable optical drives|Using direct disc access mode|AACS directory not present|Loaded content hash table|Profile parsing error|MakeMKV v\S+ \S+ started|Title #?\d+ .*(was added|skipped)|File .* was added as title)/i;
+const BETA_KEY_PAGE = "https://forum.makemkv.com/forum/viewtopic.php?t=1053";
 const LICENSE = /(too old|registration key|evaluation period|expired|shareware)/i;
 
 /** MSG:code,flags,count,"message","format",params… — only the first quoted field is the text. */
@@ -58,7 +59,12 @@ export function makemkvFailure(output: string, code: number | null, signal: Node
   const exit = stopped(code, signal);
   if (useful.some((line) => LICENSE.test(line))) {
     const said = useful.filter((line) => LICENSE.test(line)).slice(-1)[0];
-    return `${said} Blu-ray needs a MakeMKV key (DVDs do not): paste the current beta key or your registration key in Settings → Disc remux, then redo this task.`;
+    const fix = `Paste a valid key in Settings → Disc remux, then redo this task: a purchased registration key, or the beta key from ${BETA_KEY_PAGE} once the new one is posted.`;
+    if (useful.some((line) => /temporary key has expired/i.test(line))) {
+      return `The MakeMKV beta key has expired. Without a valid key MakeMKV does not start at all, for DVDs too. ${fix}`;
+    }
+    if (/too old/i.test(said)) return `MakeMKV has no valid key, so it does not start at all, for DVDs too (“${said}”). ${fix}`;
+    return `${said} ${fix}`;
   }
   if (useful.length) return `${useful.slice(-3).join(" ")} (${exit})`;
   const last = messages.slice(-1)[0];
