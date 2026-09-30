@@ -306,8 +306,7 @@ export function MergeView() {
                   <p className="text-xs">
                     <span className="text-muted-foreground">Video from </span>
                     {video.name}
-                    <span className="text-muted-foreground"> · audio also from </span>
-                    {other.name}
+                    <span className="text-muted-foreground"> · all audio and subtitles from both files</span>
                   </p>
                   <p className="text-xs text-muted-foreground">A · {versionLine(candidate.left)} · {candidate.left.audioLanguages.join(", ") || "no audio languages"}</p>
                   <p className="text-xs text-muted-foreground">B · {versionLine(candidate.right)} · {candidate.right.audioLanguages.join(", ") || "no audio languages"}</p>
