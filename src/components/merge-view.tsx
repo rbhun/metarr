@@ -284,7 +284,6 @@ export function MergeView() {
       <div className="flex flex-col gap-3">
         {candidates.map((candidate) => {
           const video = candidate.videoFrom === "left" ? candidate.left : candidate.right;
-          const other = candidate.videoFrom === "left" ? candidate.right : candidate.left;
           const frames = frameNotes[candidate.key];
           return (
             <div key={candidate.key} className="rounded-lg border px-3 py-3">
