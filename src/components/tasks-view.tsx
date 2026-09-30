@@ -14,6 +14,7 @@ const QUEUES = [
   ["language", "Languages"],
   ["remux", "Rips"],
   ["rewrap", "Rewraps"],
+  ["merge", "Merges"],
 ] as const;
 
 const TABS = [
@@ -31,7 +32,7 @@ type StatusFilter = (typeof TABS)[number][0];
 
 type TaskJob = {
   key: string;
-  queue: "language" | "remux" | "rewrap";
+  queue: "language" | "remux" | "rewrap" | "merge";
   id: number;
   path: string;
   label: string;
@@ -90,6 +91,10 @@ function taskState(job: TaskJob): string {
       if (job.progress != null && job.progress > 0) return `Rewrapping ${job.progress}%`;
       return job.message || "Rewrapping";
     }
+    if (job.queue === "merge") {
+      if (job.progress != null && job.progress > 0) return `Merging ${job.progress}%`;
+      return job.message || "Merging";
+    }
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
   if (job.status === "pending") {
@@ -101,7 +106,7 @@ function taskState(job: TaskJob): string {
   }
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
-  if (job.queue === "remux" || job.queue === "rewrap") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
+  if (job.queue === "remux" || job.queue === "rewrap" || job.queue === "merge") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";
   return job.message && /[.!?]/.test(job.message) ? "No language" : "Done";
 }
 

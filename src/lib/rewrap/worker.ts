@@ -9,6 +9,7 @@ import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
+import { mergeIsRunning } from "@/lib/merge/store";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
 import { canRewrap, sourceKind } from "@/lib/rewrap/source";
@@ -108,6 +109,10 @@ async function step() {
     }
     if (remuxIsRunning(db)) {
       writeRewrapPause(db, "remux");
+      return;
+    }
+    if (mergeIsRunning(db)) {
+      writeRewrapPause(db, "merge");
       return;
     }
     if (await plexLibraryBusy(db)) {

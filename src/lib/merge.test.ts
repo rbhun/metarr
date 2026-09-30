@@ -1,0 +1,249 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import Database from "better-sqlite3";
+import { migrate } from "@/lib/db";
+import { candidateFromVersions, languagesOnlyIn, pairCandidates, type MergeVersionView } from "@/lib/merge/candidates";
+import {
+  durationsCloseMinutes,
+  durationsCloseSeconds,
+  framesMatch,
+  meanAbsoluteDiff,
+  sampleOffsets,
+} from "@/lib/merge/compare";
+import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
+import { checkMerge, mergeArgs, parseMergeProbe, progressFromLine, type Probe } from "@/lib/merge/run";
+import { canMergeVersion, mergeTarget } from "@/lib/merge/source";
+import {
+  claimNextMerge,
+  enqueueMerges,
+  finishMerge,
+  mergeTotals,
+  readMergeSettings,
+  retryFailedMerge,
+  writeMergeSettings,
+} from "@/lib/merge/store";
+import type { ScanFile } from "@/lib/detect/targets";
+
+const VIDEO: Probe = {
+  duration: 7200,
+  streams: [
+    { index: 0, codecType: "video", codecName: "hevc", language: null },
+    { index: 1, codecType: "audio", codecName: "truehd", language: "eng" },
+    { index: 2, codecType: "subtitle", codecName: "hdmv_pgs_subtitle", language: "eng" },
+  ],
+};
+
+const OTHER: Probe = {
+  duration: 7201,
+  streams: [
+    { index: 0, codecType: "video", codecName: "h264", language: null },
+    { index: 1, codecType: "audio", codecName: "ac3", language: "hun" },
+    { index: 2, codecType: "audio", codecName: "pcm_bluray", language: "eng" },
+    { index: 3, codecType: "subtitle", codecName: "subrip", language: "hun" },
+  ],
+};
+
+function version(partial: Partial<MergeVersionView> & Pick<MergeVersionView, "path" | "name">): MergeVersionView {
+  return {
+    resolution: "1080p",
+    bitrateKbps: 8000,
+    fileBytes: 8_000_000_000,
+    hdr: "none",
+    edition: null,
+    durationMinutes: 120,
+    audioLanguages: ["English"],
+    subtitleLanguages: [],
+    flags: [],
+    playableLabel: "video",
+    container: "mkv",
+    ...partial,
+  };
+}
+
+test("merge keeps the video source name and writes beside it", () => {
+  assert.equal(mergeTarget("/movies/Film (1999)/Film.mkv"), "/movies/Film (1999)/Film.combined.mkv");
+  assert.equal(canMergeVersion("video", "mkv", "/m/Film.mkv"), true);
+  assert.equal(canMergeVersion("bluray", "iso", "/m/Film.iso"), false);
+});
+
+test("higher resolution or bitrate becomes the video source", () => {
+  assert.equal(
+    pickVideoSource(
+      { resolution: "1080p", bitrateKbps: 20_000, fileBytes: 20_000_000_000, hdr: "none" },
+      { resolution: "2160p", bitrateKbps: 8_000, fileBytes: 10_000_000_000, hdr: "none" },
+    ),
+    "right",
+  );
+  assert.equal(
+    pickVideoSource(
+      { resolution: "1080p", bitrateKbps: 20_000, fileBytes: 1, hdr: "none" },
+      { resolution: "1080p", bitrateKbps: 8_000, fileBytes: 99_000_000_000, hdr: "Dolby Vision" },
+    ),
+    "left",
+  );
+  assert.ok(qualityScore({ resolution: "2160p", bitrateKbps: 1, fileBytes: 1, hdr: "none" }) > qualityScore({ resolution: "1080p", bitrateKbps: 50_000, fileBytes: 50_000_000_000, hdr: "Dolby Vision" }));
+});
+
+test("duration closeness rejects extended cuts and allows restored copies", () => {
+  assert.equal(durationsCloseMinutes(120, 120).ok, true);
+  assert.equal(durationsCloseMinutes(120, 121).ok, true);
+  assert.equal(durationsCloseMinutes(120, 145).ok, false);
+  assert.equal(durationsCloseSeconds(7200, 7210).ok, true);
+  assert.equal(durationsCloseSeconds(7200, 9000).ok, false);
+});
+
+test("frame samples and grayscale diffs", () => {
+  assert.deepEqual(sampleOffsets(100, 5).map((value) => Math.round(value)), [5, 28, 50, 73, 95]);
+  const left = Buffer.from([10, 20, 30, 40]);
+  const right = Buffer.from([10, 22, 28, 40]);
+  assert.equal(meanAbsoluteDiff(left, right), 1);
+  assert.equal(framesMatch([5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 40, 40]), true);
+  assert.equal(framesMatch([5, 5, 5, 40, 40, 40, 40, 40, 40, 40, 40, 40]), false);
+});
+
+test("complementary audio languages make a pair", () => {
+  assert.deepEqual(languagesOnlyIn(["English", "Hungarian"], ["English"]), ["Hungarian"]);
+  const left = version({ path: "/m/Film-UHD.mkv", name: "Film-UHD.mkv", resolution: "2160p", audioLanguages: ["English"] });
+  const right = version({ path: "/m/Film-Hun.mkv", name: "Film-Hun.mkv", resolution: "1080p", audioLanguages: ["Hungarian", "English"], bitrateKbps: 4000 });
+  const pair = candidateFromVersions("Film (1999)", 1, left, right);
+  assert.ok(pair);
+  assert.equal(pair!.videoFrom, "left");
+  assert.deepEqual(pair!.audioOnlyRight, ["Hungarian"]);
+  assert.equal(pair!.editionConflict, false);
+
+  const extended = candidateFromVersions("Film (1999)", 1, left, version({ ...right, durationMinutes: 145, edition: "Extended" }));
+  assert.equal(extended, null);
+
+  const labeled = candidateFromVersions(
+    "Film (1999)",
+    1,
+    version({ ...left, edition: "Theatrical" }),
+    version({ ...right, edition: "Remastered" }),
+  );
+  assert.ok(labeled?.editionConflict);
+});
+
+test("pairCandidates walks every version pair on a title", () => {
+  const file: ScanFile = {
+    titleId: 9,
+    label: "Film (1999)",
+    path: "/m/Film-UHD.mkv",
+    container: "mkv",
+    playableLabel: "video",
+    audioTracks: [],
+    subtitleTracks: [],
+    versions: [
+      {
+        name: "Film-UHD.mkv",
+        path: "/m/Film-UHD.mkv",
+        container: "mkv",
+        resolution: "2160p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 40_000,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["English"],
+        subtitleLanguages: ["English"],
+        audioTracks: [],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 40_000_000_000,
+        durationMinutes: 120,
+      },
+      {
+        name: "Film-Hun.mkv",
+        path: "/m/Film-Hun.mkv",
+        container: "mkv",
+        resolution: "1080p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 8_000,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["Hungarian"],
+        subtitleLanguages: ["Hungarian"],
+        audioTracks: [],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 8_000_000_000,
+        durationMinutes: 120,
+      },
+      {
+        name: "Film-sample.mkv",
+        path: "/m/Film-sample.mkv",
+        container: "mkv",
+        resolution: "480p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 1000,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["French"],
+        subtitleLanguages: [],
+        audioTracks: [],
+        subtitleTracks: [],
+        missing: [],
+        flags: ["sample"],
+        fileBytes: 20_000_000,
+        durationMinutes: 2,
+      },
+    ],
+  };
+  const pairs = pairCandidates(file);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.videoFrom, "left");
+  assert.deepEqual(pairs[0]!.audioOnlyRight, ["Hungarian"]);
+});
+
+test("ffmpeg merge maps video from input 0 and audio or subtitles from both", () => {
+  const plan = mergeArgs("/v.mkv", "/a.mkv", "/out.mkv", VIDEO, OTHER);
+  const args = plan.args.join(" ");
+  assert.match(args, /-i \/v\.mkv -i \/a\.mkv/);
+  assert.match(args, /-map 0:0 -map 0:1 -map 1:1 -map 1:2 -map 0:2 -map 1:3/);
+  assert.match(args, /-c:a:2 flac/);
+  assert.match(args, /-metadata:s:a:1 language=hun/);
+  assert.deepEqual([plan.video, plan.audio, plan.subtitles, plan.converted], [1, 3, 2, 1]);
+  assert.equal(progressFromLine("out_time_us=3600000000", 7200), 50);
+  assert.equal(checkMerge(VIDEO, { ...VIDEO, streams: [...VIDEO.streams, ...OTHER.streams.filter((stream) => stream.codecType !== "video")] }, plan), null);
+  assert.match(checkMerge(VIDEO, VIDEO, plan) ?? "", /missing a stream/);
+});
+
+test("probe JSON keeps stream languages", () => {
+  const probe = parseMergeProbe(
+    JSON.stringify({
+      streams: [{ index: 0, codec_type: "video", codec_name: "hevc" }, { index: 1, codec_type: "audio", codec_name: "ac3", tags: { language: "hun" } }],
+      format: { duration: "100.5" },
+    }),
+  );
+  assert.equal(probe.duration, 100.5);
+  assert.equal(probe.streams[1]!.language, "hun");
+});
+
+test("merge queue is manual and can be turned off", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  assert.deepEqual(readMergeSettings(db), { enabled: true });
+  writeMergeSettings(db, { enabled: false });
+  assert.equal(readMergeSettings(db).enabled, false);
+  writeMergeSettings(db, { enabled: true });
+
+  assert.deepEqual(
+    enqueueMerges(db, [
+      { leftPath: "/m/a.mkv", rightPath: "/m/b.mkv", videoPath: "/m/a.mkv", label: "Film" },
+      { leftPath: "/m/b.mkv", rightPath: "/m/a.mkv", videoPath: "/m/a.mkv" },
+    ]),
+    { added: 1, already: 1 },
+  );
+  const job = claimNextMerge(db);
+  assert.ok(job);
+  assert.equal(job!.videoPath, "/m/a.mkv");
+  finishMerge(db, job!.id, "failed", "nope");
+  assert.equal(retryFailedMerge(db, job!.id), "retried");
+  assert.deepEqual(mergeTotals(db), { pending: 1, running: 0, done: 0, failed: 0 });
+});

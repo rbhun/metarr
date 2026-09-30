@@ -15,7 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Disc3, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { Disc3, GitMerge, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -38,6 +38,7 @@ export function useShell() {
 const NAV = [
   { href: "/", label: "Library", icon: Library },
   { href: "/rips", label: "Rips", icon: Disc3 },
+  { href: "/merge", label: "Merge", icon: GitMerge, beta: true },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -76,6 +77,7 @@ function NavLinks({
           >
             <Icon />
             {collapsed ? <span className="sr-only">{entry.label}</span> : entry.label}
+            {!collapsed && "beta" in entry && entry.beta ? <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">Beta</span> : null}
             {entry.href === "/tasks" ? <TaskCount bump={bump} className={collapsed ? "sr-only" : "ml-auto text-xs"} /> : null}
             {entry.href === "/rips" ? <RemuxCount className={collapsed ? "sr-only" : "ml-auto text-xs"} /> : null}
           </Link>

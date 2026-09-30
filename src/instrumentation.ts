@@ -6,9 +6,11 @@ export async function register() {
   const { startDetectWorker } = await import("@/lib/detect/worker");
   const { startRemuxWorker } = await import("@/lib/remux/worker");
   const { startRewrapWorker } = await import("@/lib/rewrap/worker");
+  const { startMergeWorker } = await import("@/lib/merge/worker");
   const { startSyncWorker } = await import("@/lib/sync-worker");
   startDetectWorker();
   startRemuxWorker();
   startRewrapWorker();
+  startMergeWorker();
   startSyncWorker();
 }
