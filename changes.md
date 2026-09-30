@@ -2,7 +2,7 @@
 
 ## 0.0.126
 
-- Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart.
+- Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart. The demo library includes Kingdom of Heaven with theatrical and director’s cuts so the labels are easy to spot.
 
 ## 0.0.125
 

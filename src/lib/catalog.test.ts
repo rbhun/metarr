@@ -77,6 +77,14 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.equal(heat?.in_plex, 0);
   assert.equal(heat?.has_file, 1);
 
+  const kingdom = queryLibrary({ kind: "all", rules: [], q: "Kingdom of Heaven", offset: 0, limit: 10 }, db).titles[0];
+  assert.ok(kingdom);
+  assert.equal(kingdom.versions.length, 2);
+  assert.deepEqual(
+    kingdom.versions.map((version) => version.edition).sort(),
+    ["Director's Cut", "Theatrical"],
+  );
+
   const wire = byTitle.get("The Wire");
   assert.equal(wire?.kind, "series");
   assert.equal(wire?.in_plex, 1);
@@ -128,7 +136,7 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.deepEqual(names([{ id: "hu", field: "language", op: "includes", value: "Hungarian" }]).sort(), ["Dune", "The Wire"]);
   assert.deepEqual(names([{ id: "pg", field: "contentRating", op: "eq", value: "PG" }]), ["The Godfather Part II"]);
   assert.deepEqual(names([{ id: "genre", field: "genre", op: "empty", value: "" }]), ["The Godfather Part II"]);
-  assert.deepEqual(names([{ id: "br", field: "bitrate", op: "gt", value: "10" }]), ["The Godfather"]);
+  assert.deepEqual(names([{ id: "br", field: "bitrate", op: "gt", value: "10" }]).sort(), ["Kingdom of Heaven", "The Godfather"]);
   assert.ok(names([{ id: "en", field: "audio", op: "excludes", value: "English" }]).includes("Parasite"));
   assert.ok(names([{ id: "mkv", field: "container", op: "eq", value: "mkv" }]).includes("The Godfather"));
   assert.ok(names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("The Godfather"));

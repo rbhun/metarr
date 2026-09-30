@@ -322,6 +322,55 @@ export function demoRecords(): SourceDraft[] {
     }),
   );
 
+  const kingdomTheatrical = video({
+    path: "/movies/Kingdom of Heaven (2005)/Kingdom of Heaven (2005)-theatrical.mkv",
+    qualityName: "Bluray-1080p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 12000,
+  });
+  const kingdomDirectors = video({
+    path: "/movies/Kingdom of Heaven (2005)/Kingdom of Heaven (2005)-directors.mkv",
+    qualityName: "Bluray-1080p",
+    resolution: "1080p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 14000,
+  });
+  const kingdomPlex = withMedia(
+    sourceDraft({
+      connector: "plex",
+      kind: "movie",
+      externalKey: "item:kingdom",
+      title: "Kingdom of Heaven",
+      year: 2005,
+      imdbId: "tt0399146",
+      tmdbId: "1495",
+      rating: 7.3,
+      genres: ["Action", "Adventure", "Drama"],
+      monitored: true,
+    }),
+    [kingdomTheatrical, kingdomDirectors],
+    ["Kingdom of Heaven", kingdomTheatrical.path, kingdomDirectors.path],
+  );
+  const kingdomRadarr = withMedia(
+    sourceDraft({
+      connector: "radarr",
+      kind: "movie",
+      externalKey: "8",
+      title: "Kingdom of Heaven",
+      year: 2005,
+      imdbId: "tt0399146",
+      tmdbId: "1495",
+      rating: 7.3,
+      genres: ["Action", "Adventure", "Drama"],
+      monitored: true,
+      qualityName: "Bluray-1080p",
+    }),
+    [kingdomTheatrical, kingdomDirectors],
+    ["Kingdom of Heaven", kingdomTheatrical.path, kingdomDirectors.path],
+  );
+
   const wire: SourceDraft = sourceDraft({
     connector: "sonarr",
     kind: "series",
@@ -605,6 +654,8 @@ export function demoRecords(): SourceDraft[] {
     parasiteRadarr,
     parasiteBazarr,
     heat,
+    kingdomPlex,
+    kingdomRadarr,
     wire,
     wirePlex,
     ...wireEpisodes,
