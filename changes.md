@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.185
+
+- Say plainly when the MakeMKV beta key has expired or no valid key is set: MakeMKV then does not start at all, for DVDs too, and the task links the page where the new beta key is posted.
+
 ## 0.0.184
 
 - Fill in missing packet timestamps when rewrapping a TS, so a broadcast recording with a cut no longer fails with "Can't write packet with unknown timestamp" after copying for a long time.
