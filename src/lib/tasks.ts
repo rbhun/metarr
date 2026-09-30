@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { jobTotals as detectTotals, listJobs as listDetectJobs, type DetectJobStatus } from "@/lib/detect/store";
+import { jobTotals as detectTotals, listJobs as listDetectJobs, readDetectPause, type DetectJobStatus, type DetectPause } from "@/lib/detect/store";
 import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
 import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
@@ -28,7 +28,7 @@ export type TaskJob = {
   waiting?: string | null;
 };
 
-const WAITING: Record<RemuxPause | RewrapPause, string> = {
+const WAITING: Record<RemuxPause | RewrapPause | DetectPause, string> = {
   window: "Waiting for the window",
   plex: "Waiting: Plex is busy",
   detect: "Waiting: language detection is running",
@@ -94,10 +94,12 @@ function statusRank(status: TaskStatus): number {
 
 function mapDetect(status: DetectJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listDetectJobs(db, { status, page, pageSize });
+  const pause = readDetectPause(db);
   return {
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `language:${job.id}`,
+      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
       queue: "language" as const,
       id: job.id,
       path: job.path,

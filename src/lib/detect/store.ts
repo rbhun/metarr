@@ -6,6 +6,7 @@ import type { DetectTarget } from "@/lib/detect/targets";
 
 export type DetectPriority = "immediate" | "window";
 export type DetectJobStatus = "pending" | "running" | "done" | "failed" | "skipped";
+export type DetectPause = "window" | "plex" | "remux" | "off";
 
 export type DetectJob = {
   id: number;
@@ -77,6 +78,20 @@ export function writeDetectSettings(db: Database.Database, settings: DetectSetti
   setMetaValue(db, "detect_schedule_start", String(settings.startHour));
   setMetaValue(db, "detect_schedule_end", String(settings.endHour));
   setMetaValue(db, "detect_path_maps", JSON.stringify(settings.pathMaps));
+}
+
+export function readDetectPause(db: Database.Database): DetectPause | null {
+  const value = meta(db, "detect_pause");
+  if (value === "window" || value === "plex" || value === "remux" || value === "off") return value;
+  return null;
+}
+
+export function writeDetectPause(db: Database.Database, pause: DetectPause | null) {
+  if (!pause) {
+    db.prepare(`DELETE FROM app_meta WHERE key = ?`).run("detect_pause");
+    return;
+  }
+  setMetaValue(db, "detect_pause", pause);
 }
 
 export function readWindowId(db: Database.Database): string | null {

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.113
+
+- Language checks in Tasks now say why they are waiting (outside the window, Plex busy, a remux running, or switched off), instead of always showing "Waiting for the window". Check Settings → Schedules → Clock: the container used UTC, so a 01–06 window stayed closed until 03:00 local time.
+
 ## 0.0.112
 
 - A DVD whose listed file is gone (VIDEO_TS.VOB is optional) now converts from its VIDEO_TS folder. When a disc really cannot be opened, the task says which part of the path is missing or refused, and the MakeMKV log page says MakeMKV never ran for that job.

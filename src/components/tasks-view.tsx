@@ -92,7 +92,13 @@ function taskState(job: TaskJob): string {
     }
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
-  if (job.status === "pending") return job.waiting ?? (job.priority === "window" ? "Waiting for the window" : "Starting");
+  if (job.status === "pending") {
+    if (job.waiting) return job.waiting;
+    // Window-priority jobs used to always say "Waiting for the window", even while
+    // the window was open and they were only next in line. Say Queued then.
+    if (job.priority === "window") return "Queued";
+    return "Starting";
+  }
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
   if (job.queue === "remux" || job.queue === "rewrap") return job.message?.startsWith("Dry run:") ? "Dry run" : "Saved";

@@ -14,7 +14,7 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
@@ -35,13 +35,32 @@ import type { StoredDetection } from "@/lib/detect/store";
 
 test("the schedule window can cross midnight", () => {
   assert.equal(inDetectWindow(1, 1, 6), true);
+  assert.equal(inDetectWindow(2, 1, 6), true);
   assert.equal(inDetectWindow(5, 1, 6), true);
+  assert.equal(inDetectWindow(0, 1, 6), false);
   assert.equal(inDetectWindow(6, 1, 6), false);
   assert.equal(inDetectWindow(15, 1, 6), false);
   assert.equal(inDetectWindow(23, 23, 6), true);
   assert.equal(inDetectWindow(2, 23, 6), true);
   assert.equal(inDetectWindow(12, 23, 6), false);
   assert.equal(inDetectWindow(4, 4, 4), false);
+});
+
+test("a language pause reason is shown on waiting window jobs", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/film.mkv", kind: "subtitle", ordinal: 0, label: "Film", format: "PGS", placement: "internal", streamLabel: null },
+  ], "window");
+  writeDetectPause(db, "window");
+  assert.equal(readDetectPause(db), "window");
+  const listed = listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 });
+  assert.equal(listed.jobs[0]?.waiting, "Waiting for the window");
+  writeDetectPause(db, "plex");
+  assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, "Waiting: Plex is busy");
+  writeDetectPause(db, null);
+  assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, null);
+  db.close();
 });
 
 test("a window key stays put until the next opening", () => {

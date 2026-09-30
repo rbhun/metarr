@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { applyTimeZone } from "@/lib/clock";
 import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
@@ -20,6 +21,7 @@ import {
   releaseRunningJobs,
   saveDetection,
   scannedKeys,
+  writeDetectPause,
   writeWindowId,
 } from "@/lib/detect/store";
 import { targetsFromFiles } from "@/lib/detect/targets";
@@ -40,6 +42,7 @@ function state() {
 
 async function step() {
   const db = getDb();
+  applyTimeZone(db);
   const settings = readDetectSettings(db);
   const now = new Date();
   const open = inDetectWindow(now.getHours(), settings.startHour, settings.endHour);
@@ -52,18 +55,38 @@ async function step() {
     }
   }
   const counts = detectCounts(db);
-  const waiting = counts.immediate > 0 || (open && counts.window > 0);
-  if (!waiting && !hasUnwritten(db) && !hasUncheckedTags(db) && !hasFormatRefresh(db)) return;
-  if (counts.immediate === 0) {
-    if (await plexIsBusy(db)) return;
-    if (remuxIsRunning(db) || rewrapIsRunning(db)) return;
-    if (await applyNextSaved(db, settings.pathMaps)) return;
-    if (await confirmNextSaved(db, settings.pathMaps)) return;
-    if (await refreshNextFormat(db)) return;
+  const urgent = counts.immediate > 0;
+  if (!urgent) {
+    if (!settings.enabled) {
+      writeDetectPause(counts.window > 0 ? "off" : null);
+    } else if (!open) {
+      writeDetectPause(counts.window > 0 ? "window" : null);
+    } else if (await plexIsBusy(db)) {
+      writeDetectPause("plex");
+      return;
+    } else if (remuxIsRunning(db) || rewrapIsRunning(db)) {
+      writeDetectPause("remux");
+      return;
+    } else {
+      writeDetectPause(null);
+      if (await applyNextSaved(db, settings.pathMaps)) return;
+      if (await confirmNextSaved(db, settings.pathMaps)) return;
+      if (await refreshNextFormat(db)) return;
+    }
+    if (!settings.enabled || !open) {
+      if (!hasUnwritten(db) && !hasUncheckedTags(db) && !hasFormatRefresh(db)) return;
+      if (await applyNextSaved(db, settings.pathMaps)) return;
+      if (await confirmNextSaved(db, settings.pathMaps)) return;
+      if (await refreshNextFormat(db)) return;
+      return;
+    }
   }
-  if (!waiting) return;
-  const job = claimNextJob(db, open);
-  if (!job) return;
+  const job = claimNextJob(db, Boolean(settings.enabled && open));
+  if (!job) {
+    if (urgent || (settings.enabled && open)) writeDetectPause(null);
+    return;
+  }
+  writeDetectPause(null);
   try {
     const local = resolveMediaPath(job.path, settings.pathMaps, (candidate) => {
       try {
@@ -127,7 +150,7 @@ async function loop() {
     current.working = false;
   }
   const counts = detectCounts(getDb());
-  const delay = counts.immediate > 0 || counts.running > 0 || hasUnwritten(getDb()) || hasUncheckedTags(getDb()) || hasFormatRefresh(getDb()) ? 1_000 : 15_000;
+  const delay = counts.immediate > 0 || counts.window > 0 || counts.running > 0 || hasUnwritten(getDb()) || hasUncheckedTags(getDb()) || hasFormatRefresh(getDb()) ? 1_000 : 15_000;
   current.timer = setTimeout(() => {
     void loop();
   }, delay);
