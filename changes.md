@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.124
+
+- The folder scan now reads the subtitle files beside each video and compares them with what Plex lists, instead of checking only when a page opens. Files Plex does not list show with "Plex: missing" in the tooltip and a note saying why. When Plex would read the file by its name, Metarr asks Plex to refresh that title after the scan, at most once a week per file. When the name keeps Plex from reading it, the note gives the name Plex expects.
+
 ## 0.0.123
 
 - Subtitle files in a video's folder that Plex does not list now show as their own rows marked "not in Plex", with the language from the file name, and unnamed ones can be language-checked. Folder listings refresh after a minute instead of staying cached until a restart, so renamed or deleted subtitles show up correctly. A subtitle for "Film Extended" in the same folder is no longer matched to "Film".

@@ -3,7 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { assignSidecars, noteSidecarPresence, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
 import { ensureListedSource } from "@/lib/media";
@@ -812,6 +812,7 @@ export function parseSubtitleTracks(value: unknown): SubtitleTrack[] {
       ...(streamIndex != null ? { streamIndex } : {}),
       ...(file ? { file } : {}),
       ...(track.fromFile === true ? { fromFile: true } : {}),
+      ...(track.folderOnly === true ? { folderOnly: true } : {}),
       ...(typeof track.conflict === "string" && track.conflict ? { conflict: track.conflict } : {}),
       ...(parseSources(track.sources) ? { sources: parseSources(track.sources) } : {}),
     }];
@@ -1125,8 +1126,7 @@ type TitleRow = {
 };
 
 function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections: Map<string, StoredDetection>): SubtitleTrack[] {
-  const names = readSidecarNames(videoPath);
-  return overlaySubtitles(videoPath, noteSidecarPresence(videoPath, assignSidecars(videoPath, tracks, names), names), detections);
+  return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
 }
 
 function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {

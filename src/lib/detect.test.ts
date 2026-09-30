@@ -17,7 +17,9 @@ import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
-import { assignSidecars, FOLDER_ONLY_SUBTITLE, languageFromSubtitleName, noteSidecarPresence, PLEX_ONLY_SUBTITLE } from "@/lib/detect/sidecars";
+import { assignSidecars, languageFromSubtitleName, sidecarTracks } from "@/lib/detect/sidecars";
+import { folderOnlySubtitleNote, markSubtitlePresence, PLEX_ONLY_SUBTITLE, plexReadsSidecar, reconcileSubtitles } from "@/lib/media";
+import type { SubtitleTrack } from "@/lib/types";
 import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
@@ -26,7 +28,7 @@ import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dial
 import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeFinding } from "@/lib/detect/apply";
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
-import { playerIdsForPaths } from "@/lib/detect/publish";
+import { playerIdsForPaths, unreadSidecars } from "@/lib/detect/publish";
 import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
@@ -132,30 +134,31 @@ test("an untagged sidecar takes its language from the file name and is not a thi
   assert.equal(languageFromSubtitleName("movie.you.srt"), null);
 });
 
-test("the file check marks an external subtitle with no file beside the video as Plex only", () => {
+function mergedWithScan(video: string, plex: SubtitleTrack[], scanned: SubtitleTrack[]): SubtitleTrack[] {
+  const base = { container: "mkv", path: video, qualityName: null, resolution: "1080p", hdr: "none" as const, is3d: false, audioLanguages: [], subtitleLanguages: [] };
+  const merged = reconcileSubtitles({ ...base, origin: "plex", subtitleTracks: plex }, { ...base, origin: "file", subtitleTracks: scanned });
+  return markSubtitlePresence({ ...base, subtitleTracks: merged, presence: { plex: true, file: true } }).subtitleTracks ?? [];
+}
+
+test("the folder scan marks an external subtitle Plex lists with no file beside the video as Plex only", () => {
   const video = "/mnt/media/Movies/21 (2008)/refined-21.mkv";
-  const names = ["refined-21.mkv", "poster.jpg"];
-  const tracks = noteSidecarPresence(
-    video,
-    assignSidecars(video, [{ language: "English", placement: "external", format: "SRT", forced: false }], names),
-    names,
-  );
+  const plex: SubtitleTrack[] = [{ language: "English", placement: "external", format: "SRT", forced: false }];
+  const tracks = mergedWithScan(video, plex, sidecarTracks(video, ["refined-21.mkv", "poster.jpg"]));
   assert.equal(tracks.length, 1);
   assert.equal(tracks[0]?.sources?.file, null);
   assert.equal(tracks[0]?.conflict, PLEX_ONLY_SUBTITLE);
   assert.equal(subtitleNote(tracks[0]!), "SRT · external · Plex only");
-  const onDisk = ["refined-21.mkv", "refined-21.en.srt"];
-  const found = noteSidecarPresence(
+  assert.equal(assignSidecars(video, tracks, ["refined-21.mkv", "other.srt"])[0]?.file, undefined);
+  const onDisk = mergedWithScan(
     video,
-    assignSidecars(video, [{ language: "English", placement: "external", format: "SRT", forced: false }], onDisk),
-    onDisk,
+    [{ ...plex[0]!, file: "/data/Movies/21 (2008)/refined-21.en.srt" }],
+    sidecarTracks(video, ["refined-21.mkv", "refined-21.en.srt"]),
   );
-  assert.equal(found.length, 1);
-  assert.equal(found[0]?.sources?.file, "English");
-  assert.equal(found[0]?.conflict, undefined);
-  assert.equal(subtitleNote(found[0]!), "SRT · external");
-  const unreadable = noteSidecarPresence(video, [{ language: "English", placement: "external", format: "SRT", forced: false }], []);
-  assert.equal(unreadable[0]?.sources, undefined);
+  assert.equal(onDisk.length, 1);
+  assert.equal(onDisk[0]?.file, "/mnt/media/Movies/21 (2008)/refined-21.en.srt");
+  assert.equal(onDisk[0]?.sources?.file, "English");
+  assert.equal(onDisk[0]?.conflict, undefined);
+  assert.equal(subtitleNote(onDisk[0]!), "SRT · external");
 });
 
 test("subtitle files in the folder that Plex does not list are shown as their own rows", () => {
@@ -166,23 +169,38 @@ test("subtitle files in the folder that Plex does not list are shown as their ow
     "Heat (1995).hu.forced.srt",
     "Heat (1995).idx",
     "Heat (1995).sub",
+    "Heat.1995.de.srt",
     "Heat (1995) Extended.mkv",
     "Heat (1995) Extended.en.srt",
   ];
-  const plex = [{ language: "English", placement: "external" as const, format: "SRT", forced: false }];
-  const tracks = noteSidecarPresence(video, assignSidecars(video, plex, names), names);
+  const plex: SubtitleTrack[] = [{ language: "English", placement: "external", format: "SRT", forced: false, file: "/mnt/media/Movies/Heat (1995)/Heat (1995).en.srt" }];
+  const tracks = mergedWithScan(video, plex, sidecarTracks(video, names));
   const extras = tracks.filter((track) => track.folderOnly);
   assert.deepEqual(extras.map((track) => path.basename(track.file!)).sort(), ["Heat (1995).hu.forced.srt", "Heat (1995).idx"]);
   const hungarian = extras.find((track) => track.language === "Hungarian");
   assert.equal(hungarian?.forced, true);
   assert.equal(hungarian?.sources?.plex, null);
   assert.equal(hungarian?.sources?.file, "Hungarian");
-  assert.equal(hungarian?.conflict, FOLDER_ONLY_SUBTITLE);
+  assert.equal(hungarian?.conflict, folderOnlySubtitleNote(video, hungarian!.file!, "Hungarian", true));
+  assert.match(hungarian!.conflict!, /asks Plex to refresh/);
   assert.equal(subtitleNote(hungarian!), "SRT · external · not in Plex · forced");
-  const vobsub = extras.find((track) => track.format === "VobSub");
-  assert.equal(vobsub?.language, null);
-  assert.equal(vobsub?.sources && "file" in vobsub.sources, false);
+  assert.equal(extras.find((track) => track.format === "VobSub")?.language, null);
   assert.equal(tracks.filter((track) => !track.folderOnly)[0]?.file?.endsWith("Heat (1995).en.srt"), true);
+  assert.equal(tracks.filter((track) => !track.folderOnly)[0]?.conflict, undefined);
+  assert.deepEqual(unreadSidecars([{ path: video, subtitleTracks: JSON.stringify(tracks), versions: "[]" }]).map((item) => path.basename(item.file)).sort(), [
+    "Heat (1995).hu.forced.srt",
+    "Heat (1995).idx",
+  ]);
+});
+
+test("a subtitle file Plex will not read by name says what name Plex expects", () => {
+  const video = "/mnt/media/Movies/21 (2008)/refined-21.mkv";
+  const tracks = mergedWithScan(video, [], sidecarTracks(video, ["refined-21.mkv", "21.2008.hu.srt"]));
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0]?.folderOnly, true);
+  assert.equal(plexReadsSidecar(video, tracks[0]!.file!), false);
+  assert.match(tracks[0]!.conflict!, /"refined-21\.hun\.srt"/);
+  assert.deepEqual(unreadSidecars([{ path: video, subtitleTracks: JSON.stringify(tracks), versions: null }]), []);
 });
 
 test("an external subtitle with no path is not queued against the video file", () => {

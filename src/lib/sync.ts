@@ -20,6 +20,7 @@ import {
 } from "@/lib/db";
 import { hasUnwritten } from "@/lib/detect/store";
 import { queueFormatRefresh } from "@/lib/detect/format-refresh";
+import { askPlexToReadSidecars } from "@/lib/detect/publish";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
@@ -220,6 +221,15 @@ async function runSync(only?: ConnectorId) {
       rebuildCatalog(db);
     });
     write();
+    const files = status.connectors.find((slot) => slot.id === "files");
+    if (staged.has("files") && files) {
+      try {
+        const asked = await askPlexToReadSidecars(db);
+        if (asked) files.message = `${files.message} ${asked}`;
+      } catch {
+        // A refresh request that fails is retried on the next folder scan.
+      }
+    }
   } else {
     for (const slot of status.connectors) {
       if (only && slot.id !== only) continue;

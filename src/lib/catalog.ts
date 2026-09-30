@@ -12,6 +12,7 @@ import {
   normalizeImdb,
   normalizeNumericId,
   normalizeTitle,
+  markSubtitlePresence,
   noteFilePresence,
   reconcileAudio,
   reconcileSubtitles,
@@ -213,7 +214,7 @@ function filesFrom(records: SourceDraft[]): MediaFile[] {
       files[existing] = mergeMediaFiles(files[existing], normalized);
     }
   }
-  return noteFilePresence(files, records.map((record) => record.connector));
+  return noteFilePresence(files, records.map((record) => record.connector)).map(markSubtitlePresence);
 }
 
 function episodeGroupKey(episode: SourceDraft): string {

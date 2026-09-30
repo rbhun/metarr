@@ -1,6 +1,7 @@
 import { asRecord, normalizeBaseUrl } from "@/lib/connectors/http";
 import { refreshFileSources } from "@/lib/detect/refresh";
-import { listConnectors } from "@/lib/db";
+import { getMeta, listConnectors, parseSubtitleTracks, setMeta } from "@/lib/db";
+import { plexReadsSidecar } from "@/lib/media";
 import type Database from "better-sqlite3";
 
 export type PlayerSource = {
@@ -150,6 +151,90 @@ async function askEach(label: string, keys: string[], run: (key: string) => Prom
   }
   if (problem) failed.push(label);
   else asked.push(label);
+}
+
+export type SidecarFile = { videoPath: string; file: string };
+
+/** Subtitle files the folder scan found that Plex does not list, but would read by name. */
+export function unreadSidecars(rows: Array<{ path: string | null; subtitleTracks: string | null; versions: string | null }>): SidecarFile[] {
+  const found: SidecarFile[] = [];
+  const add = (videoPath: unknown, tracks: unknown) => {
+    if (typeof videoPath !== "string" || !videoPath) return;
+    for (const track of parseSubtitleTracks(tracks)) {
+      if (track.folderOnly && track.file && plexReadsSidecar(videoPath, track.file)) found.push({ videoPath, file: track.file });
+    }
+  };
+  for (const row of rows) {
+    add(row.path, parseJsonValue(row.subtitleTracks));
+    const versions = parseJsonValue(row.versions);
+    if (!Array.isArray(versions)) continue;
+    for (const version of versions) {
+      const record = asRecord(version);
+      if (record) add(record.path, record.subtitleTracks);
+    }
+  }
+  return found;
+}
+
+function parseJsonValue(value: string | null): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+const SIDECAR_ASKS = "plex_sidecar_asks";
+const SIDECAR_ASK_AGAIN_MS = 7 * 24 * 60 * 60 * 1000;
+const SIDECAR_ASKS_PER_SYNC = 25;
+
+/**
+ * Plex finds a new subtitle file only when it scans that folder, which it often
+ * skips on network shares. Ask it to refresh titles whose folder has one it
+ * would read. A file is asked about at most once a week.
+ */
+export async function askPlexToReadSidecars(db: Database.Database): Promise<string> {
+  const plex = listConnectors(db).find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
+  if (!plex) return "";
+  const rows = [
+    ...(db.prepare(`SELECT path, subtitle_tracks AS subtitleTracks, versions_json AS versions FROM catalog_titles`).all() as Array<{ path: string | null; subtitleTracks: string | null; versions: string | null }>),
+    ...(db.prepare(`SELECT path, subtitle_tracks AS subtitleTracks, versions_json AS versions FROM catalog_episodes`).all() as Array<{ path: string | null; subtitleTracks: string | null; versions: string | null }>),
+  ];
+  const now = Date.now();
+  const previous = asRecord(parseJsonValue(getMeta(db, SIDECAR_ASKS))) ?? {};
+  const asks: Record<string, number> = {};
+  for (const [file, at] of Object.entries(previous)) {
+    if (typeof at === "number" && now - at < SIDECAR_ASK_AGAIN_MS) asks[file] = at;
+  }
+  const due = unreadSidecars(rows).filter((sidecar) => asks[sidecar.file] == null);
+  if (!due.length) return "";
+  const sources = sourcesFor(db, []);
+  const base = normalizeBaseUrl(plex.baseUrl, 32400);
+  const headers = { Accept: "application/json", "X-Plex-Token": plex.apiKey, "X-Plex-Product": "Metarr", "X-Plex-Client-Identifier": "metarr-local" };
+  const refreshed = new Set<string>();
+  let failed = 0;
+  for (const sidecar of due) {
+    const ids = playerIdsForPaths(sources, [sidecar.videoPath]).plex;
+    if (!ids.length) continue;
+    const fresh = ids.filter((id) => !refreshed.has(id));
+    if (refreshed.size + fresh.length > SIDECAR_ASKS_PER_SYNC) break;
+    try {
+      for (const id of fresh) {
+        await send(`${base}/library/metadata/${id}/refresh`, "PUT", headers);
+        refreshed.add(id);
+      }
+      asks[sidecar.file] = now;
+    } catch {
+      failed += 1;
+    }
+  }
+  setMeta(db, SIDECAR_ASKS, JSON.stringify(asks));
+  if (!refreshed.size && !failed) return "";
+  const titles = refreshed.size === 1 ? "1 title" : `${refreshed.size} titles`;
+  return failed
+    ? `Asked Plex to refresh ${titles} with new subtitle files. ${failed} could not be asked.`
+    : `Asked Plex to refresh ${titles} with new subtitle files.`;
 }
 
 /**

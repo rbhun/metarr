@@ -5,6 +5,7 @@ import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-forma
 import { languageFromProbeTags } from "@/lib/detect/audio";
 import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
@@ -302,11 +303,16 @@ export function listVideos(root: string): string[] {
   return found;
 }
 
+/** The streams inside the file, then the subtitle files beside it. */
+function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } {
+  return { ...probed, subtitles: [...probed.subtitles, ...sidecarTracks(filePath)] };
+}
+
 /** Probe one video. Used after a language write so the folder scanner does not walk the library. */
 export async function scanOneFile(filePath: string, match: SourceDraft | null): Promise<SourceDraft | null> {
   const probed = tracksFromProbe(await probeFile(filePath));
   if (!probed) return null;
-  return folderDraft(filePath, probed, match);
+  return folderDraft(filePath, withSidecarFiles(filePath, probed), match);
 }
 
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {
@@ -323,7 +329,7 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);
-    drafts.push(folderDraft(file, probed, pickMatch(indexed, file)));
+    drafts.push(folderDraft(file, withSidecarFiles(file, probed), pickMatch(indexed, file)));
   }
   onProgress({
     message: missing.length ? `Scanned ${drafts.length} files. Missing folder: ${missing[0]}` : `Scanned ${drafts.length} files.`,

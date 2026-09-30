@@ -61,9 +61,15 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   const sidecars = sidecarsIn(videoPath, names);
   if (sidecars.length === 0) return tracks;
   const used = new Set<string>();
+  const held = new Set<SubtitleTrack>();
   const next = tracks.map((track) => {
     const copy = { ...track };
     if (copy.placement !== "external") return copy;
+    // The folder scan already found no file for this Plex subtitle; a different sidecar is not it.
+    if (!copy.file && copy.sources?.file === null) {
+      held.add(copy);
+      return copy;
+    }
     if (copy.file) {
       const live = liveSidecarFile(copy.file, sidecars);
       copy.file = live;
@@ -77,14 +83,15 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
     }
     return copy;
   });
+  const open = (track: SubtitleTrack) => track.placement === "external" && !track.file && !held.has(track);
   for (const track of next) {
-    if (track.file || track.placement !== "external" || !track.language) continue;
+    if (!open(track) || !track.language) continue;
     const match = sidecars.find((sidecar) => !used.has(sidecar.file) && sameLanguage(sidecar.language, track.language));
     if (!match) continue;
     track.file = match.file;
     used.add(match.file);
   }
-  const unfilled = next.filter((track) => track.placement === "external" && !track.file);
+  const unfilled = next.filter(open);
   const leftover = sidecars.filter((sidecar) => !used.has(sidecar.file));
   if (unfilled.length === 1 && leftover.length === 1) {
     const track = unfilled[0];
@@ -95,7 +102,7 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
       if (!track.language && choice.language) track.language = choice.language;
     }
   }
-  const unknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
+  const unknown = next.filter((track) => open(track) && !track.language && !track.detectedLanguage);
   const remaining = sidecars.filter((sidecar) => !used.has(sidecar.file));
   // Prefer named leftovers so a bare Plex path can land on .hun / .en.hi without content detection.
   for (const sidecar of remaining) {
@@ -106,11 +113,11 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
     track.language = sidecar.language;
     used.add(sidecar.file);
   }
-  const stillUnknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
+  const stillUnknown = next.filter((track) => open(track) && !track.language && !track.detectedLanguage);
   const stillRemaining = sidecars.filter((sidecar) => !used.has(sidecar.file));
   const claimed = next.map((track) => track.language).filter((language): language is string => Boolean(language));
-  const open = stillRemaining.filter((sidecar) => !sidecar.language || !claimed.some((language) => sameLanguage(sidecar.language, language)));
-  const choice = stillUnknown.length === 1 ? (open.length === 1 ? open[0] : stillRemaining.length === 1 ? stillRemaining[0] : null) : null;
+  const unclaimed = stillRemaining.filter((sidecar) => !sidecar.language || !claimed.some((language) => sameLanguage(sidecar.language, language)));
+  const choice = stillUnknown.length === 1 ? (unclaimed.length === 1 ? unclaimed[0] : stillRemaining.length === 1 ? stillRemaining[0] : null) : null;
   if (stillUnknown[0] && choice) {
     stillUnknown[0].file = choice.file;
     if (choice.language) stillUnknown[0].language = choice.language;
@@ -118,37 +125,11 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   return next;
 }
 
-export const PLEX_ONLY_SUBTITLE =
-  "Plex lists this subtitle, but the file check found no subtitle file beside the video. Plex probably downloaded it into its own data folder, so Metarr cannot read it.";
-
-/**
- * Compare Plex's external subtitles with the folder listing. A sidecar on disk
- * counts as the file check; an external track still without a file is Plex only.
- */
-export function noteSidecarPresence(videoPath: string | null, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
-  if (!videoPath || names.length === 0) return tracks;
-  const noted = tracks.map((track) => {
-    if (track.placement !== "external") return track;
-    if (track.file) {
-      const named = languageFromSubtitleName(path.basename(track.file));
-      if (!named || (track.sources && "file" in track.sources)) return track;
-      return { ...track, sources: { ...track.sources, file: named } };
-    }
-    return { ...track, sources: { ...track.sources, file: null }, conflict: track.conflict ?? PLEX_ONLY_SUBTITLE };
-  });
-  return [...noted, ...folderOnlySidecars(videoPath, noted, names)];
-}
-
-export const FOLDER_ONLY_SUBTITLE = "This subtitle file is in the folder, but Plex does not list it. Refresh the title in Plex to pick it up.";
-
-/** Sidecars on disk that no Plex track points at. */
-function folderOnlySidecars(videoPath: string, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
-  const claimed = new Set(tracks.map((track) => track.file).filter((file): file is string => Boolean(file)));
+/** The subtitle files on disk that belong to this video, as folder-scan tracks. */
+export function sidecarTracks(videoPath: string, names: string[] = readSidecarNames(videoPath)): SubtitleTrack[] {
   const found = sidecarsIn(videoPath, names).filter((sidecar) => {
-    if (claimed.has(sidecar.file)) return false;
     const pair = sidecar.file.replace(/\.sub$/i, ".idx");
-    if (pair !== sidecar.file && (claimed.has(pair) || names.some((name) => path.join(path.dirname(videoPath), name) === pair))) return false;
-    return true;
+    return pair === sidecar.file || !names.some((name) => path.join(path.dirname(videoPath), name) === pair);
   });
   return found.map((sidecar) => ({
     language: sidecar.language,
@@ -156,9 +137,7 @@ function folderOnlySidecars(videoPath: string, tracks: SubtitleTrack[], names: s
     format: subtitleFormatOf(sidecar.file),
     forced: /[._\-\s]forced[._\-\s]/i.test(`${path.basename(sidecar.file)} `),
     file: sidecar.file,
-    sources: sidecar.language ? { plex: null, file: sidecar.language } : { plex: null },
-    conflict: FOLDER_ONLY_SUBTITLE,
-    folderOnly: true,
+    fromFile: true,
   }));
 }
 

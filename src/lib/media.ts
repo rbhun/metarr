@@ -595,11 +595,11 @@ function arrOnlyLanguages(file: MediaFile, kind: "audio" | "subtitle"): string[]
   return kind === "audio" ? file.audioLanguages : file.subtitleLanguages;
 }
 
-function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null }>(tracks: T[], languages: string[]): T[] {
+function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string }>(tracks: T[], languages: string[]): T[] {
   const known = languages.map((language) => languageName(language)?.toLowerCase()).filter((language): language is string => Boolean(language));
   if (!known.length) return tracks;
   return tracks.map((track) => {
-    if (!track.fromFile || !track.language) return track;
+    if (!track.fromFile || !track.language || track.placement === "external") return track;
     const name = languageName(track.language)?.toLowerCase();
     if (!name || known.includes(name)) return track;
     const extra = "Radarr or Sonarr does not list this.";
@@ -660,9 +660,92 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
   return tracks;
 }
 
-export function crossCheckSubtitles(reported: SubtitleTrack[], scanned: SubtitleTrack[]): SubtitleTrack[] {
-  if (!scanned.length) return reported;
-  const external = reported.filter((track) => track.placement === "external");
+function baseOf(file: string): string {
+  return (file.split(/[\\/]/).pop() ?? file).toLowerCase();
+}
+
+export const PLEX_ONLY_SUBTITLE =
+  "Plex lists this subtitle, but the folder scan found no subtitle file beside the video. Plex probably downloaded it into its own data folder, so Metarr cannot read it.";
+
+/** Plex reads a sidecar only when its name is the video's file name plus optional language and flags. */
+export function plexReadsSidecar(videoPath: string, file: string): boolean {
+  const video = baseOf(videoPath).replace(/\.[^.]+$/, "");
+  const name = baseOf(file);
+  return Boolean(video) && name.startsWith(`${video}.`);
+}
+
+/** The name Plex would read for this sidecar. */
+export function plexSidecarName(videoPath: string, file: string, language: string | null, forced: boolean): string {
+  const video = (videoPath.split(/[\\/]/).pop() ?? videoPath).replace(/\.[^.]+$/, "");
+  const ext = (file.match(/\.([^.\\/]+)$/)?.[1] ?? "srt").toLowerCase();
+  const code = language ? languageCode(language) : null;
+  return [video, code, forced ? "forced" : null, ext].filter(Boolean).join(".");
+}
+
+export function folderOnlySubtitleNote(videoPath: string | null, file: string, language: string | null, forced: boolean): string {
+  if (videoPath && !plexReadsSidecar(videoPath, file)) {
+    return `Plex does not list this subtitle file because its name does not start with the video's file name. Plex would read it as "${plexSidecarName(videoPath, file, language, forced)}".`;
+  }
+  return "This subtitle file is beside the video, but Plex has not read it yet. Metarr asks Plex to refresh the title after a folder scan.";
+}
+
+/**
+ * After Plex and the folder scan are merged for one file: a sidecar only the scan
+ * found is not in Plex, and an external subtitle only Plex lists has no file here.
+ */
+export function markSubtitlePresence(file: MediaFile): MediaFile {
+  if (file.presence?.plex !== true || file.presence?.file !== true || !file.subtitleTracks?.length) return file;
+  let changed = false;
+  const subtitleTracks = file.subtitleTracks.map((track) => {
+    if (track.placement !== "external") return track;
+    const inPlex = Boolean(track.sources && "plex" in track.sources);
+    if (track.fromFile && track.file && !inPlex) {
+      changed = true;
+      return {
+        ...track,
+        folderOnly: true,
+        sources: { ...track.sources, plex: null },
+        conflict: track.conflict ?? folderOnlySubtitleNote(file.path, track.file, track.language, track.forced),
+      };
+    }
+    if (!track.fromFile && inPlex) {
+      changed = true;
+      const stale = track.file
+        ? `Plex lists ${track.file.split(/[\\/]/).pop()}, but that file is no longer beside the video. Refresh the title in Plex to drop it.`
+        : PLEX_ONLY_SUBTITLE;
+      return { ...track, sources: { ...track.sources, file: null }, conflict: track.conflict ?? stale };
+    }
+    return track;
+  });
+  return changed ? { ...file, subtitleTracks } : file;
+}
+
+/** A sidecar the folder scan found is the same file Plex lists when the file names match. */
+function crossCheckSidecars(reported: SubtitleTrack[], scanned: SubtitleTrack[]): SubtitleTrack[] {
+  const left = [...scanned];
+  const tracks = reported.map((report) => {
+    const index = report.file ? left.findIndex((scan) => scan.file && baseOf(scan.file) === baseOf(report.file!)) : -1;
+    if (index < 0) return report;
+    const [scan] = left.splice(index, 1);
+    return {
+      ...report,
+      file: scan!.file,
+      language: report.language ?? scan!.language,
+      forced: report.forced || scan!.forced,
+      fromFile: true,
+      sources: { ...report.sources, ...scan!.sources },
+    };
+  });
+  return [...tracks, ...left.map((track) => ({ ...track, fromFile: true }))];
+}
+
+export function crossCheckSubtitles(reported: SubtitleTrack[], allScanned: SubtitleTrack[]): SubtitleTrack[] {
+  if (!allScanned.length) return reported;
+  const scanned = allScanned.filter((track) => track.placement !== "external");
+  const external = crossCheckSidecars(
+    reported.filter((track) => track.placement === "external"),
+    allScanned.filter((track) => track.placement === "external"),
+  );
   const internal = reported.filter((track) => track.placement !== "external");
   if (!internal.length) return [...scanned.map((track) => ({ ...track, fromFile: true })), ...external];
   const count = Math.max(internal.length, scanned.length);
