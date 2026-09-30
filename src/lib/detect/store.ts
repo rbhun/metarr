@@ -181,9 +181,16 @@ export function retryFailedJob(db: Database.Database, id: number): "retried" | "
     | undefined;
   if (!row || row.status !== "failed") return "missing";
   const busy = db
-    .prepare(`SELECT 1 AS ok FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running') AND id != ?`)
-    .get(row.path, row.kind, row.ordinal, id);
-  if (busy) return "already";
+    .prepare(`SELECT id, status FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running') AND id != ? LIMIT 1`)
+    .get(row.path, row.kind, row.ordinal, id) as { id: number; status: string } | undefined;
+  if (busy) {
+    // The waiting copy is the redo; the old failure would otherwise stay in the list forever.
+    db.transaction(() => {
+      if (busy.status === "pending") db.prepare(`UPDATE detect_jobs SET priority = 'immediate' WHERE id = ?`).run(busy.id);
+      db.prepare(`DELETE FROM detect_jobs WHERE id = ? AND status = 'failed'`).run(id);
+    })();
+    return "already";
+  }
   const changed = db
     .prepare(
       `UPDATE detect_jobs
@@ -194,23 +201,31 @@ export function retryFailedJob(db: Database.Database, id: number): "retried" | "
   return changed.changes === 1 ? "retried" : "missing";
 }
 
-/** Put every failed language check back on the overnight queue. */
+/** Put every failed language check back on the overnight queue, once per track. */
 export function retryAllFailedJobs(db: Database.Database): number {
-  return db
-    .prepare(
-      `UPDATE detect_jobs
-       SET status = 'pending', priority = 'window', message = NULL, started_at = NULL, finished_at = NULL
+  return db.transaction(() => {
+    db.prepare(
+      `DELETE FROM detect_jobs
        WHERE status = 'failed'
-         AND NOT EXISTS (
-           SELECT 1 FROM detect_jobs AS other
-           WHERE other.path = detect_jobs.path
-             AND other.kind = detect_jobs.kind
-             AND other.ordinal = detect_jobs.ordinal
-             AND other.status IN ('pending', 'running')
-             AND other.id != detect_jobs.id
+         AND (
+           EXISTS (
+             SELECT 1 FROM detect_jobs AS other
+             WHERE other.path = detect_jobs.path
+               AND other.kind = detect_jobs.kind
+               AND other.ordinal = detect_jobs.ordinal
+               AND other.status IN ('pending', 'running')
+           )
+           OR id NOT IN (SELECT MAX(id) FROM detect_jobs WHERE status = 'failed' GROUP BY path, kind, ordinal)
          )`,
-    )
-    .run().changes;
+    ).run();
+    return db
+      .prepare(
+        `UPDATE detect_jobs
+         SET status = 'pending', priority = 'window', message = NULL, started_at = NULL, finished_at = NULL
+         WHERE status = 'failed'`,
+      )
+      .run().changes;
+  })();
 }
 
 export function finishJob(db: Database.Database, id: number, status: "done" | "failed" | "skipped", message: string | null) {

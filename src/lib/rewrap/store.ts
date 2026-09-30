@@ -190,7 +190,10 @@ export function retryFailedRewrap(db: Database.Database, id: number): "retried" 
   const row = db.prepare(`SELECT path, status FROM rewrap_jobs WHERE id = ?`).get(id) as { path: string; status: string } | undefined;
   if (!row || row.status !== "failed") return "missing";
   const busy = db.prepare(`SELECT 1 AS ok FROM rewrap_jobs WHERE path = ? AND status IN ('pending', 'running') AND id != ?`).get(row.path, id);
-  if (busy) return "already";
+  if (busy) {
+    db.prepare(`DELETE FROM rewrap_jobs WHERE id = ? AND status = 'failed'`).run(id);
+    return "already";
+  }
   const changed = db
     .prepare(`UPDATE rewrap_jobs SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL WHERE id = ? AND status = 'failed'`)
     .run(id);
@@ -199,18 +202,25 @@ export function retryFailedRewrap(db: Database.Database, id: number): "retried" 
 
 /** One retry per file, from its latest failure; files already queued or converted stay as they are. */
 export function retryAllFailedRewrap(db: Database.Database): number {
-  return db
-    .prepare(
-      `UPDATE rewrap_jobs
-       SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
-       WHERE id IN (SELECT MAX(id) FROM rewrap_jobs WHERE status = 'failed' GROUP BY path)
-         AND NOT EXISTS (
-           SELECT 1 FROM rewrap_jobs AS other
-           WHERE other.path = rewrap_jobs.path
-             AND other.status IN ('pending', 'running', 'done')
-         )`,
-    )
-    .run().changes;
+  return db.transaction(() => {
+    db.prepare(
+      `DELETE FROM rewrap_jobs
+       WHERE status = 'failed'
+         AND EXISTS (SELECT 1 FROM rewrap_jobs AS other WHERE other.path = rewrap_jobs.path AND other.status IN ('pending', 'running'))`,
+    ).run();
+    return db
+      .prepare(
+        `UPDATE rewrap_jobs
+         SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
+         WHERE id IN (SELECT MAX(id) FROM rewrap_jobs WHERE status = 'failed' GROUP BY path)
+           AND NOT EXISTS (
+             SELECT 1 FROM rewrap_jobs AS other
+             WHERE other.path = rewrap_jobs.path
+               AND other.status IN ('pending', 'running', 'done')
+           )`,
+      )
+      .run().changes;
+  })();
 }
 
 export function releaseRunningRewrap(db: Database.Database) {

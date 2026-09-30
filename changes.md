@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.121
+
+- Redo on a failed task that is already queued now removes the old failure from the list (and runs the queued language check now), instead of only saying it is already queued. Redo all also drops failures that already have a queued copy and keeps one retry per track.
+
 ## 0.0.120
 
 - Fix the Docker build after 0.0.117: the subtitle name check that the library page uses pulled server-only file code into the browser bundle.

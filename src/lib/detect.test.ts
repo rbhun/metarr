@@ -694,6 +694,42 @@ test("redoing a failed language check queues that same track now", () => {
   db.close();
 });
 
+test("redoing a failure whose track is already queued removes the failure and runs the queued one now", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const target = { path: "/twice.mkv", kind: "subtitle" as const, ordinal: 0, label: "Twice", format: "PGS", placement: "internal", streamLabel: null };
+  enqueueTargets(db, [target], "window");
+  const job = claimNextJob(db, true);
+  finishJob(db, job!.id, "failed", "No subtitle images could be read.");
+  enqueueTargets(db, [target], "window");
+  assert.equal(retryFailedJob(db, job!.id), "already");
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
+  assert.equal(waiting.total, 1);
+  assert.equal(waiting.jobs[0]?.priority, "immediate");
+  db.close();
+});
+
+test("redo all keeps one retry per track and drops failures that are already queued", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const a = { path: "/a.mkv", kind: "subtitle" as const, ordinal: 0, label: "A", format: "PGS", placement: "internal", streamLabel: null };
+  const b = { path: "/b.mkv", kind: "subtitle" as const, ordinal: 0, label: "B", format: "PGS", placement: "internal", streamLabel: null };
+  for (let round = 0; round < 2; round += 1) {
+    enqueueTargets(db, [a], "window");
+    const job = claimNextJob(db, true);
+    finishJob(db, job!.id, "failed", "No subtitle images could be read.");
+  }
+  enqueueTargets(db, [b], "window");
+  const failedB = claimNextJob(db, true);
+  finishJob(db, failedB!.id, "failed", "No subtitle images could be read.");
+  enqueueTargets(db, [b], "window");
+  assert.equal(retryAllFailedJobs(db), 1);
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  assert.equal(listJobs(db, { status: "pending", page: 1, pageSize: 50 }).total, 2);
+  db.close();
+});
+
 test("redoing every failed language check puts them on the overnight queue", () => {
   const db = new Database(":memory:");
   migrate(db);

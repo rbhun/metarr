@@ -217,7 +217,7 @@ export function TasksView() {
       });
       const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
       if (!response.ok) throw new Error(body?.error || "That task could not be redone.");
-      toast.success(body?.result === "already" ? "That task is already queued." : "Queued again.");
+      toast.success(body?.result === "already" ? "Already queued. The old failure was removed." : "Queued again.");
       await load();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "That task could not be redone.");
