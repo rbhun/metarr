@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.128
+
+- The library Filters menu has a Versions filter: None (a single unlabeled copy), Duplicate (multiple copies with no edition label), or a specific edition such as Theatrical or Director's Cut. The demo Matrix title has two unlabeled copies so Duplicate is easy to try.
+
 ## 0.0.127
 
 - Separate audio files beside a video (or in an `audio` subfolder), such as `.ac3`, are found and listed even though Plex ignores them. They show as external rows marked "not in Plex", with the language from the file name when it is tagged. The demo Godfather title includes a Hungarian `.ac3` example.

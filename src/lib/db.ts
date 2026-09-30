@@ -293,6 +293,8 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_resolutions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_hdrs", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_editions", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "detect_results", "source", "TEXT");

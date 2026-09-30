@@ -9,7 +9,7 @@ import {
   type FilterOp,
   type FilterRule,
 } from "@/lib/filters";
-import { CONTENT_RATING_OPTIONS, languageOptions } from "@/lib/media";
+import { CONTENT_RATING_OPTIONS, EDITION_FILTER_OPTIONS, languageOptions } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { ChevronDown, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -26,6 +26,7 @@ const FIELD_LABEL: Record<FilterField, string> = {
   resolution: "Resolution",
   hdr: "HDR",
   container: "File type",
+  version: "Versions",
   file: "File",
   plex: "Plex",
   playable: "Playable",
@@ -53,6 +54,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "Disc / not playable", rule: { field: "playable", op: "eq", value: "not-video" } },
   { label: "No English subs", rule: { field: "subtitles", op: "missing", value: "English" } },
   { label: "3D only", rule: { field: "stereo", op: "eq", value: "yes" } },
+  { label: "Duplicate versions", rule: { field: "version", op: "eq", value: "duplicate" } },
   { label: "Hungarian", rule: { field: "language", op: "includes", value: "Hungarian" } },
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
 ];
@@ -130,6 +132,19 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
           </option>
         ))}
         {unknownOption()}
+      </select>
+    );
+  }
+  if (rule.field === "version") {
+    return (
+      <select className={selectClass} aria-label="Versions" value={rule.value} onChange={(event) => onChange(event.target.value)}>
+        <option value="none">None</option>
+        <option value="duplicate">Duplicate</option>
+        {EDITION_FILTER_OPTIONS.map((edition) => (
+          <option key={edition} value={edition}>
+            {edition}
+          </option>
+        ))}
       </select>
     );
   }

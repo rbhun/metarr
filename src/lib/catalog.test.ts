@@ -75,6 +75,9 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.equal(matrix?.in_plex, 1);
   assert.equal(matrix?.in_radarr, 0);
   assert.equal(matrix?.hdr, "HDR10");
+  const matrixVersions = queryLibrary({ kind: "all", rules: [], q: "The Matrix", offset: 0, limit: 10 }, db).titles[0];
+  assert.equal(matrixVersions?.versions.length, 2);
+  assert.ok(matrixVersions?.versions.every((version) => !version.edition));
 
   const parasite = byTitle.get("Parasite");
   assert.match(parasite?.subtitle_wanted ?? "", /Spanish/);
@@ -148,6 +151,13 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.ok(names([{ id: "mkv", field: "container", op: "eq", value: "mkv" }]).includes("The Godfather"));
   assert.ok(names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("The Godfather"));
   assert.ok(!names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("Dune"));
+  assert.deepEqual(names([{ id: "dup", field: "version", op: "eq", value: "duplicate" }]), ["The Matrix"]);
+  assert.ok(names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("Heat"));
+  assert.ok(!names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("The Matrix"));
+  assert.ok(!names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("Kingdom of Heaven"));
+  assert.deepEqual(names([{ id: "th", field: "version", op: "eq", value: "Theatrical" }]), ["Kingdom of Heaven"]);
+  assert.deepEqual(names([{ id: "dc", field: "version", op: "eq", value: "Director's Cut" }]), ["Kingdom of Heaven"]);
+  assert.ok(names([{ id: "not-dup", field: "version", op: "neq", value: "duplicate" }]).includes("Kingdom of Heaven"));
 
   db.prepare(
     `UPDATE catalog_episodes

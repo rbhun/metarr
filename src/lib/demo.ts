@@ -244,7 +244,25 @@ export function demoRecords(): SourceDraft[] {
     monitored: true,
   });
 
-  const matrix = movieFile(
+  const matrixHd = video({
+    container: "mp4",
+    path: "/movies/The Matrix (1999)/The Matrix (1999).mp4",
+    resolution: "1080p",
+    hdr: "HDR10",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+  });
+  const matrixSd = video({
+    container: "mkv",
+    path: "/movies/The Matrix (1999)/The Matrix (1999)-720p.mkv",
+    resolution: "720p",
+    hdr: "none",
+    qualityName: "HDTV-720p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 4000,
+  });
+  const matrix = withMedia(
     sourceDraft({
       connector: "plex",
       kind: "movie",
@@ -257,14 +275,8 @@ export function demoRecords(): SourceDraft[] {
       genres: ["Science Fiction", "Action"],
       monitored: true,
     }),
-    video({
-      container: "mp4",
-      path: "/movies/The Matrix (1999)/The Matrix (1999).mp4",
-      resolution: "1080p",
-      hdr: "HDR10",
-      audioLanguages: ["English"],
-      subtitleLanguages: ["English"],
-    }),
+    [matrixHd, matrixSd],
+    ["The Matrix", matrixHd.path, matrixSd.path],
   );
 
   const parasiteFile = video({

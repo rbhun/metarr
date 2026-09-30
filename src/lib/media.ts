@@ -595,11 +595,11 @@ function arrOnlyLanguages(file: MediaFile, kind: "audio" | "subtitle"): string[]
   return kind === "audio" ? file.audioLanguages : file.subtitleLanguages;
 }
 
-function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string }>(tracks: T[], languages: string[]): T[] {
+function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string; file?: string | null }>(tracks: T[], languages: string[]): T[] {
   const known = languages.map((language) => languageName(language)?.toLowerCase()).filter((language): language is string => Boolean(language));
   if (!known.length) return tracks;
   return tracks.map((track) => {
-    if (!track.fromFile || !track.language || track.placement === "external") return track;
+    if (!track.fromFile || !track.language || track.placement === "external" || track.file) return track;
     const name = languageName(track.language)?.toLowerCase();
     if (!name || known.includes(name)) return track;
     const extra = "Radarr or Sonarr does not list this.";
@@ -1089,6 +1089,9 @@ const EDITION_LABELS: Array<[RegExp, string]> = [
   [/special\s*edition/i, "Special Edition"],
   [/final\s*cut/i, "Final Cut"],
 ];
+
+/** Edition labels offered by the Versions filter, in the same order as detection. */
+export const EDITION_FILTER_OPTIONS = EDITION_LABELS.map(([, label]) => label);
 
 function partPair(index: number, total: number): string | null {
   if (index < 1 || total < 2 || index > total || total > 12) return null;
