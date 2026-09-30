@@ -9,7 +9,7 @@ import {
   type FilterOp,
   type FilterRule,
 } from "@/lib/filters";
-import { CONTENT_RATING_OPTIONS, EDITION_FILTER_OPTIONS, languageOptions } from "@/lib/media";
+import { CONTENT_RATING_OPTIONS, EDITION_FILTER_OPTIONS, languageOptions, VERSION_FLAG_LABEL } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { ChevronDown, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -140,6 +140,10 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
       <select className={selectClass} aria-label="Versions" value={rule.value} onChange={(event) => onChange(event.target.value)}>
         <option value="none">None</option>
         <option value="duplicate">Duplicate</option>
+        <option value="extra">{VERSION_FLAG_LABEL.extra}</option>
+        <option value="outtake">{VERSION_FLAG_LABEL.outtake}</option>
+        <option value="comic-relief">{VERSION_FLAG_LABEL["comic-relief"]}</option>
+        <option value="trailer">{VERSION_FLAG_LABEL.trailer}</option>
         {EDITION_FILTER_OPTIONS.map((edition) => (
           <option key={edition} value={edition}>
             {edition}

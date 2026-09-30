@@ -362,7 +362,9 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     const present = `(',' || IFNULL(version_flags, '') || ',')`;
     if (rule.value === "sample") return { sql: `${present} LIKE '%,sample,%'`, params: [] };
     if (rule.value === "short") return { sql: `${present} LIKE '%,short,%'`, params: [] };
-    if (rule.value === "either") return { sql: `IFNULL(version_flags, '') != ''`, params: [] };
+    if (rule.value === "either") {
+      return { sql: `(${present} LIKE '%,sample,%' OR ${present} LIKE '%,short,%')`, params: [] };
+    }
   }
 
   if (rule.field === "stereo" && rule.op === "eq") {
@@ -378,6 +380,8 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
       match = { sql: `(IFNULL(version_count, 0) <= 1 AND IFNULL(version_editions, '') = '')`, params: [] };
     } else if (value === "duplicate") {
       match = { sql: `(IFNULL(version_count, 0) > 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+    } else if (value === "extra" || value === "outtake" || value === "comic-relief" || value === "trailer") {
+      match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE ?`, params: [`%,${value},%`] };
     } else {
       match = { sql: `(',' || IFNULL(version_editions, '') || ',') LIKE ?`, params: [`%,${value},%`] };
     }

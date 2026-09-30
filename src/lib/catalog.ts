@@ -314,6 +314,7 @@ function withTitleFlag(title: string, flags: string): string {
 
 function versionColumns(files: MediaFile[]) {
   const versions = versionsFrom(files);
+  const featureVersions = versions.filter((version) => !version.flags.some((flag) => flag === "extra" || flag === "outtake" || flag === "comic-relief" || flag === "trailer"));
   return {
     versions,
     versionsJson: JSON.stringify(versions),
@@ -323,8 +324,9 @@ function versionColumns(files: MediaFile[]) {
       .join(","),
     versionHdrs: versions.map((version) => version.hdr).join(","),
     versionFlags: [...new Set(versions.flatMap((version) => version.flags))].join(","),
-    versionEditions: [...new Set(versions.map((version) => version.edition).filter((edition): edition is string => Boolean(edition)))].join(","),
-    versionCount: versions.length,
+    versionEditions: [...new Set(featureVersions.map((version) => version.edition).filter((edition): edition is string => Boolean(edition)))].join(","),
+    // Bonus files do not count toward Duplicate / None — only the main feature copies do.
+    versionCount: featureVersions.length,
   };
 }
 
@@ -339,7 +341,7 @@ function bestResolution(values: Array<string | null>): string | null {
 const HOVER_KEY = "source_hover";
 let hoverReady = false;
 
-const VERSION_FILTER_KEY = "version_filter";
+const VERSION_FILTER_KEY = "version_filter_v2";
 
 /** Rebuild stored titles once so language tooltips and version filter columns exist without another sync. */
 export function ensureHoverSources(db: Database.Database) {

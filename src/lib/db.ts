@@ -737,7 +737,17 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         audioTracks: parseAudioTracks(version.audioTracks),
         subtitleTracks: parseSubtitleTracks(version.subtitleTracks),
         missing: Array.isArray(version.missing) ? version.missing.filter((gap): gap is string => typeof gap === "string") : [],
-        flags: Array.isArray(version.flags) ? version.flags.filter((flag): flag is string => flag === "sample" || flag === "short") : [],
+        flags: Array.isArray(version.flags)
+          ? version.flags.filter(
+              (flag): flag is string =>
+                flag === "sample" ||
+                flag === "short" ||
+                flag === "extra" ||
+                flag === "outtake" ||
+                flag === "comic-relief" ||
+                flag === "trailer",
+            )
+          : [],
         fileBytes: typeof version.fileBytes === "number" ? version.fileBytes : null,
         durationMinutes: typeof version.durationMinutes === "number" ? version.durationMinutes : null,
         ...(parseFileSources(version.presence) ? { presence: parseFileSources(version.presence) } : {}),

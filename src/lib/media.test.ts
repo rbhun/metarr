@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, bonusFlag, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -153,6 +153,38 @@ test("a sample name and a tiny extra file are marked, a feature is not", () => {
   assert.deepEqual(versions.find((version) => version.name === "Sample.mkv")?.flags, ["sample", "short"]);
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("sample"));
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("short"));
+});
+
+test("extras, featurettes, outtakes, and comic relief are labeled from the path", () => {
+  assert.equal(bonusFlag("/movies/Film/Featurettes/Making Of.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Extras/Interview.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Features/Bonus Clip.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Special Features/Gallery.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Outtakes/Bloopers.mkv"), "outtake");
+  assert.equal(bonusFlag("/movies/Film/Film-comic-relief.mkv"), "comic-relief");
+  assert.equal(bonusFlag("/movies/Film/Trailers/Teaser.mkv"), "trailer");
+  assert.equal(bonusFlag("/movies/Film/Film.mkv"), null);
+  assert.equal(bonusFlag("/movies/Film/Film.Feature.mkv"), null);
+  const feature: MediaFile = {
+    container: "mkv",
+    path: "/movies/Film/Film.mkv",
+    qualityName: null,
+    resolution: "1080p",
+    hdr: "none",
+    is3d: false,
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    fileBytes: 8_000_000_000,
+  };
+  const versions = versionsFrom([
+    feature,
+    { ...feature, path: "/movies/Film/Featurettes/Looking Back.mkv", resolution: "480p", fileBytes: 400_000_000 },
+    { ...feature, path: "/movies/Film/Outtakes/Gag Reel.mkv", resolution: "480p", fileBytes: 200_000_000 },
+  ]);
+  assert.equal(versions[0]?.name, "Film.mkv");
+  assert.deepEqual(versions[0]?.flags, []);
+  assert.ok(versions.find((version) => version.name === "Looking Back.mkv")?.flags.includes("extra"));
+  assert.ok(versions.find((version) => version.name === "Gag Reel.mkv")?.flags.includes("outtake"));
 });
 
 test("a blank audio track takes the language Radarr already listed when the order lines up", () => {

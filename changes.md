@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.129
+
+- Extras, featurettes, outtakes, comic relief, and trailers are labeled on each version row from the file or folder name (including common subfolders like Featurettes and Outtakes). Bonus copies do not count as Duplicate versions. The Versions filter can also pick Extra, Outtake, Comic Relief, or Trailer. The demo Godfather title includes a featurette and outtakes.
+
 ## 0.0.128
 
 - The library Filters menu has a Versions filter: None (a single unlabeled copy), Duplicate (multiple copies with no edition label), or a specific edition such as Theatrical or Director's Cut. The demo Matrix title has two unlabeled copies so Duplicate is easy to try.

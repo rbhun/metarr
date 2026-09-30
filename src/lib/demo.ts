@@ -31,6 +31,7 @@ export function demoRecords(): SourceDraft[] {
       qualityName: "Bluray-1080p",
       audioLanguages: ["English", "Italian", "Hungarian"],
       subtitleLanguages: ["English"],
+      bitrateKbps: 18000,
     }),
     audioTracks: [
       { language: "English", layout: "5.1", codec: "DTS" },
@@ -47,7 +48,23 @@ export function demoRecords(): SourceDraft[] {
       },
     ],
   };
-  const godfatherPlex = movieFile(
+  const godfatherFeaturette = video({
+    path: "/movies/The Godfather (1972)/Featurettes/The Godfather - A Look Back.mkv",
+    qualityName: "Bluray-480p",
+    resolution: "480p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 2000,
+  });
+  const godfatherOuttake = video({
+    path: "/movies/The Godfather (1972)/Outtakes/Wedding Bloopers.mkv",
+    qualityName: "Bluray-480p",
+    resolution: "480p",
+    audioLanguages: ["English"],
+    subtitleLanguages: [],
+    bitrateKbps: 1500,
+  });
+  const godfatherPlex = withMedia(
     sourceDraft({
       connector: "plex",
       kind: "movie",
@@ -62,9 +79,10 @@ export function demoRecords(): SourceDraft[] {
       genres: ["Crime", "Drama"],
       monitored: true,
     }),
-    { ...godfatherFile, bitrateKbps: 18000 },
+    [godfatherFile, godfatherFeaturette, godfatherOuttake],
+    ["The Godfather", godfatherFile.path, godfatherFeaturette.path, godfatherOuttake.path],
   );
-  const godfatherRadarr = movieFile(
+  const godfatherRadarr = withMedia(
     sourceDraft({
       connector: "radarr",
       kind: "movie",
@@ -78,7 +96,8 @@ export function demoRecords(): SourceDraft[] {
       monitored: true,
       qualityName: "Bluray-1080p",
     }),
-    { ...godfatherFile, qualityName: "Bluray-1080p" },
+    [godfatherFile, godfatherFeaturette, godfatherOuttake],
+    ["The Godfather", godfatherFile.path, godfatherFeaturette.path, godfatherOuttake.path],
   );
   const godfatherBazarr = sourceDraft({
     connector: "bazarr",

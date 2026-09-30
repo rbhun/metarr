@@ -1137,6 +1137,52 @@ export function editionLabel(filePath: string | null | undefined): string | null
   return null;
 }
 
+export type VersionFlag = "sample" | "short" | "extra" | "outtake" | "comic-relief" | "trailer";
+
+export const BONUS_VERSION_FLAGS = ["extra", "outtake", "comic-relief", "trailer"] as const satisfies readonly VersionFlag[];
+
+export const VERSION_FLAG_LABEL: Record<VersionFlag, string> = {
+  sample: "Sample",
+  short: "Short",
+  extra: "Extra",
+  outtake: "Outtake",
+  "comic-relief": "Comic Relief",
+  trailer: "Trailer",
+};
+
+const VERSION_FLAG_SET = new Set<string>(Object.keys(VERSION_FLAG_LABEL));
+
+/** Bonus content beside a title, often under Extras / Featurettes / Outtakes. */
+const BONUS_FLAGS: Array<[RegExp, VersionFlag]> = [
+  [/comic[\s._-]*relief/i, "comic-relief"],
+  [/(?:^|[^a-z0-9])(?:outtakes?|bloopers?)(?:[^a-z0-9]|$)/i, "outtake"],
+  [/(?:^|[^a-z0-9])(?:trailers?|tv[\s._-]*spots?)(?:[^a-z0-9]|$)/i, "trailer"],
+  [
+    /(?:^|[^a-z0-9])(?:extras?|featurettes?|special[\s._-]*features?|bonus(?:es)?|behind[\s._-]*the[\s._-]*scenes|deleted[\s._-]*scenes?|interviews?)(?:[^a-z0-9]|$)/i,
+    "extra",
+  ],
+  // Plex-style folder names that would otherwise look like ordinary words in a title.
+  [/(?:^|\/)(?:features?|shorts?|scenes?|other)(?:\/|$)/i, "extra"],
+];
+
+export function isVersionFlag(value: string): value is VersionFlag {
+  return VERSION_FLAG_SET.has(value);
+}
+
+export function isBonusFlag(flags: string[] | null | undefined): boolean {
+  return Boolean(flags?.some((flag) => (BONUS_VERSION_FLAGS as readonly string[]).includes(flag)));
+}
+
+/** Flag for bonus material from the file or folder name. Featurettes and Features count as Extra. */
+export function bonusFlag(filePath: string | null | undefined): VersionFlag | null {
+  if (!filePath?.trim()) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  for (const [pattern, flag] of BONUS_FLAGS) {
+    if (pattern.test(normalized)) return flag;
+  }
+  return null;
+}
+
 function isSamplePath(filePath: string | null | undefined): boolean {
   if (!filePath?.trim()) return false;
   const base = fileName(filePath).replace(/\.[a-z0-9]{1,5}$/i, "");
@@ -1161,6 +1207,8 @@ function isShortCopy(file: MediaFile, peers: MediaFile[]): boolean {
 
 export function versionFlags(file: MediaFile, peers: MediaFile[]): string[] {
   const flags: string[] = [];
+  const bonus = bonusFlag(file.path);
+  if (bonus) flags.push(bonus);
   if (isSamplePath(file.path)) flags.push("sample");
   if (isShortCopy(file, peers)) flags.push("short");
   return flags;
@@ -1177,6 +1225,9 @@ function missingMetadata(file: MediaFile): string[] {
 export function versionsFrom(files: MediaFile[]): MediaVersion[] {
   return [...files]
     .sort((left, right) => {
+      const leftBonus = bonusFlag(left.path) ? 1 : 0;
+      const rightBonus = bonusFlag(right.path) ? 1 : 0;
+      if (leftBonus !== rightBonus) return leftBonus - rightBonus;
       const resolution = resolutionRank(resolvedResolution(right)) - resolutionRank(resolvedResolution(left));
       if (resolution !== 0) return resolution;
       return hdrRank(right.hdr) - hdrRank(left.hdr);

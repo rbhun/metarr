@@ -153,11 +153,20 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.ok(!names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("Dune"));
   assert.deepEqual(names([{ id: "dup", field: "version", op: "eq", value: "duplicate" }]), ["The Matrix"]);
   assert.ok(names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("Heat"));
+  assert.ok(names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("The Godfather"));
   assert.ok(!names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("The Matrix"));
   assert.ok(!names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("Kingdom of Heaven"));
   assert.deepEqual(names([{ id: "th", field: "version", op: "eq", value: "Theatrical" }]), ["Kingdom of Heaven"]);
   assert.deepEqual(names([{ id: "dc", field: "version", op: "eq", value: "Director's Cut" }]), ["Kingdom of Heaven"]);
   assert.ok(names([{ id: "not-dup", field: "version", op: "neq", value: "duplicate" }]).includes("Kingdom of Heaven"));
+  assert.deepEqual(names([{ id: "extra", field: "version", op: "eq", value: "extra" }]), ["The Godfather"]);
+  assert.deepEqual(names([{ id: "out", field: "version", op: "eq", value: "outtake" }]), ["The Godfather"]);
+  const godfatherVersions = queryLibrary({ kind: "all", rules: [], q: "The Godfather", offset: 0, limit: 10 }, db).titles.find(
+    (title) => title.title === "The Godfather",
+  );
+  assert.ok(godfatherVersions?.versions.some((version) => version.flags.includes("extra")));
+  assert.ok(godfatherVersions?.versions.some((version) => version.flags.includes("outtake")));
+  assert.equal(godfatherVersions?.versions.filter((version) => !version.flags.includes("extra") && !version.flags.includes("outtake")).length, 1);
 
   db.prepare(
     `UPDATE catalog_episodes
