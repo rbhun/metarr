@@ -1126,7 +1126,7 @@ type TitleRow = {
 
 function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections: Map<string, StoredDetection>): SubtitleTrack[] {
   const names = readSidecarNames(videoPath);
-  return overlaySubtitles(videoPath, noteSidecarPresence(assignSidecars(videoPath, tracks, names), names), detections);
+  return overlaySubtitles(videoPath, noteSidecarPresence(videoPath, assignSidecars(videoPath, tracks, names), names), detections);
 }
 
 function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {

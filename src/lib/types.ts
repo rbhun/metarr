@@ -81,6 +81,8 @@ export type SubtitleTrack = {
   forced: boolean;
   streamIndex?: number | null;
   file?: string | null;
+  /** A subtitle file in the video's folder that Plex does not list. */
+  folderOnly?: boolean;
   detectedLanguage?: string | null;
   fromFile?: boolean;
   conflict?: string | null;

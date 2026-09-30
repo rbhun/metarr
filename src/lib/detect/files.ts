@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { parseAudioTracks, parseSubtitleTracks, parseVersions } from "@/lib/db";
-import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, noteSidecarPresence, readSidecarNames } from "@/lib/detect/sidecars";
 import type { ScanFile } from "@/lib/detect/targets";
 import type { SubtitleTrack } from "@/lib/types";
 
@@ -47,7 +47,8 @@ function episodeCode(season: number | null, episode: number | null): string {
 }
 
 function withSidecars(videoPath: string | null, tracks: SubtitleTrack[]): SubtitleTrack[] {
-  return assignSidecars(videoPath, tracks, readSidecarNames(videoPath));
+  const names = readSidecarNames(videoPath);
+  return noteSidecarPresence(videoPath, assignSidecars(videoPath, tracks, names), names);
 }
 
 function fromTitle(row: TitleFileRow): ScanFile {

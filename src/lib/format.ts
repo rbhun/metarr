@@ -115,10 +115,11 @@ export function formatAudio(tracks: AudioTrack[], languages: string[]): string {
   return lines.length === 1 && lines[0] === "—" ? "—" : lines.join(", ");
 }
 
-export function subtitleNote(track: { placement: string; format: string | null; forced: boolean; file?: string | null; sources?: TrackSources }): string {
+export function subtitleNote(track: { placement: string; format: string | null; forced: boolean; file?: string | null; folderOnly?: boolean; sources?: TrackSources }): string {
   const place = track.placement === "burn-in" ? "burn-in" : track.placement === "external" ? "external" : null;
   const plexOnly = track.placement === "external" && !track.file && track.sources?.file === null;
-  return [track.format, place, plexOnly ? "Plex only" : null, track.forced ? "forced" : null].filter(Boolean).join(" · ");
+  const presence = plexOnly ? "Plex only" : track.folderOnly ? "not in Plex" : null;
+  return [track.format, place, presence, track.forced ? "forced" : null].filter(Boolean).join(" · ");
 }
 
 export function subtitleLines(tracks: SubtitleTrack[], languages: string[]): string[] {

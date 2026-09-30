@@ -9,7 +9,7 @@ export { isSubtitleFile, languageFromSubtitleName };
 
 const SUBTITLE_EXT = /\.(srt|ass|ssa|vtt|sub|idx)$/i;
 const VIDEO_EXT = /\.(mkv|mp4|avi|m4v|ts|wmv|mov|m2ts|mts|mpg|mpeg|webm)$/i;
-const listed = new Map<string, string[]>();
+const listed = new Map<string, { names: string[]; at: number }>();
 
 export type Sidecar = { file: string; language: string | null };
 
@@ -17,7 +17,15 @@ function subtitleNames(videoPath: string, names: string[]): string[] {
   const base = path.basename(videoPath);
   const stem = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
   if (!stem) return [];
-  const subs = names.filter((name) => SUBTITLE_EXT.test(path.basename(name)));
+  // Another video whose name starts with this one ("Film" and "Film Extended") owns its own subtitles.
+  const longer = names
+    .filter((name) => VIDEO_EXT.test(name) && path.basename(name) === name && name !== base)
+    .map((name) => path.basename(name, path.extname(name)).toLowerCase())
+    .filter((other) => other.length > stem.length && other.startsWith(stem));
+  const subs = names.filter((name) => {
+    const lower = path.basename(name).toLowerCase();
+    return SUBTITLE_EXT.test(lower) && !longer.some((other) => lower.startsWith(other));
+  });
   const matched = subs.filter((name) => path.basename(name).toLowerCase().startsWith(stem));
   if (matched.length > 0) return matched;
   const videoKey = subtitleStem(base);
@@ -117,9 +125,9 @@ export const PLEX_ONLY_SUBTITLE =
  * Compare Plex's external subtitles with the folder listing. A sidecar on disk
  * counts as the file check; an external track still without a file is Plex only.
  */
-export function noteSidecarPresence(tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
-  if (names.length === 0) return tracks;
-  return tracks.map((track) => {
+export function noteSidecarPresence(videoPath: string | null, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
+  if (!videoPath || names.length === 0) return tracks;
+  const noted = tracks.map((track) => {
     if (track.placement !== "external") return track;
     if (track.file) {
       const named = languageFromSubtitleName(path.basename(track.file));
@@ -128,15 +136,48 @@ export function noteSidecarPresence(tracks: SubtitleTrack[], names: string[]): S
     }
     return { ...track, sources: { ...track.sources, file: null }, conflict: track.conflict ?? PLEX_ONLY_SUBTITLE };
   });
+  return [...noted, ...folderOnlySidecars(videoPath, noted, names)];
+}
+
+export const FOLDER_ONLY_SUBTITLE = "This subtitle file is in the folder, but Plex does not list it. Refresh the title in Plex to pick it up.";
+
+/** Sidecars on disk that no Plex track points at. */
+function folderOnlySidecars(videoPath: string, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
+  const claimed = new Set(tracks.map((track) => track.file).filter((file): file is string => Boolean(file)));
+  const found = sidecarsIn(videoPath, names).filter((sidecar) => {
+    if (claimed.has(sidecar.file)) return false;
+    const pair = sidecar.file.replace(/\.sub$/i, ".idx");
+    if (pair !== sidecar.file && (claimed.has(pair) || names.some((name) => path.join(path.dirname(videoPath), name) === pair))) return false;
+    return true;
+  });
+  return found.map((sidecar) => ({
+    language: sidecar.language,
+    placement: "external" as const,
+    format: subtitleFormatOf(sidecar.file),
+    forced: /[._\-\s]forced[._\-\s]/i.test(`${path.basename(sidecar.file)} `),
+    file: sidecar.file,
+    sources: sidecar.language ? { plex: null, file: sidecar.language } : { plex: null },
+    conflict: FOLDER_ONLY_SUBTITLE,
+    folderOnly: true,
+  }));
+}
+
+function subtitleFormatOf(file: string): string | null {
+  const ext = path.extname(file).slice(1).toLowerCase();
+  if (ext === "idx" || ext === "sub") return "VobSub";
+  return ext ? ext.toUpperCase() : null;
 }
 
 const SUBTITLE_DIRS = ["subs", "Subs", "subtitles", "Subtitles"];
+
+/** Folder listings are reused briefly so a library page does not re-read every folder, but renames still show. */
+const LISTING_MS = 60_000;
 
 export function readSidecarNames(videoPath: string | null): string[] {
   if (!videoPath) return [];
   const directory = path.dirname(videoPath);
   const cached = listed.get(directory);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.at < LISTING_MS) return cached.names;
   try {
     const names = fs.readdirSync(directory);
     const nested: string[] = [];
@@ -153,10 +194,10 @@ export function readSidecarNames(videoPath: string | null): string[] {
       }
     }
     const found = [...names, ...nested];
-    listed.set(directory, found);
+    listed.set(directory, { names: found, at: Date.now() });
     return found;
   } catch {
-    listed.set(directory, []);
+    listed.set(directory, { names: [], at: Date.now() });
     return [];
   }
 }

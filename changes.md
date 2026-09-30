@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.123
+
+- Subtitle files in a video's folder that Plex does not list now show as their own rows marked "not in Plex", with the language from the file name, and unnamed ones can be language-checked. Folder listings refresh after a minute instead of staying cached until a restart, so renamed or deleted subtitles show up correctly. A subtitle for "Film Extended" in the same folder is no longer matched to "Film".
+
 ## 0.0.122
 
 - Compare Plex's external subtitles with the file check. A subtitle Plex lists with no file beside the video now says "Plex only", and its hover shows File scan: missing with the likely reason (Plex downloaded it into its own data folder). A sidecar found on disk shows File scan: present.
