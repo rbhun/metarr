@@ -1061,9 +1061,11 @@ function fileName(path: string | null): string {
 }
 
 const EDITION_LABELS: Array<[RegExp, string]> = [
-  [/director'?s?\s*cut/i, "Director's Cut"],
+  [/(?:director'?s?\s*cut|directors)/i, "Director's Cut"],
   [/extended(?:\s*(?:cut|edition))?/i, "Extended"],
-  [/theatrical(?:\s*cut)?/i, "Theatrical"],
+  [/theatrical(?:\s*(?:cut|edition))?/i, "Theatrical"],
+  [/restored/i, "Restored"],
+  [/anniversary/i, "Anniversary"],
   [/unrated|\buncut\b/i, "Unrated"],
   [/open\s*matte/i, "Open Matte"],
   [/\bimax\b/i, "IMAX"],

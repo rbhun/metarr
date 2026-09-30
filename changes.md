@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.126
+
+- Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart.
+
 ## 0.0.125
 
 - Loose M2TS and TS files, which cannot store a track language, can now be rewrapped into an MKV beside them, like AVIs. The MKV gets the audio and subtitle languages Metarr recognized, PGS subtitles are kept, and Blu-ray PCM audio is stored as lossless FLAC because Matroska cannot hold it as it is. A rewrap uses the latest languages when it starts, not only the ones known when it was queued. When a language cannot be written into one of these files, the message now points to Rewrap to MKV.

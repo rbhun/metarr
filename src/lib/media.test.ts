@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -103,6 +103,17 @@ test("a 1080p SDR file stays listed beside a 2160p HDR file", () => {
   assert.deepEqual(versions[1]?.missing, ["subtitles"]);
   assert.deepEqual(versions[0]?.missing, []);
   assert.equal(resolvedResolution({ resolution: null, height: 336, path: "/movies/Fantasia.avi" }), "336p");
+});
+
+test("special release markers in the file name become edition labels", () => {
+  assert.equal(editionLabel("/movies/Film-extended.mkv"), "Extended");
+  assert.equal(editionLabel("/movies/Film-theatrical.mkv"), "Theatrical");
+  assert.equal(editionLabel("/movies/Film-restored.mkv"), "Restored");
+  assert.equal(editionLabel("/movies/Film-directors.mkv"), "Director's Cut");
+  assert.equal(editionLabel("/movies/Film-directors-cut.mkv"), "Director's Cut");
+  assert.equal(editionLabel("/movies/Film-anniversary.mkv"), "Anniversary");
+  assert.equal(editionLabel("/movies/Film.Extended.Cut.1080p.mkv"), "Extended");
+  assert.equal(editionLabel("/movies/Film.mkv"), null);
 });
 
 test("a split movie is marked as a part, and a sequel title is not", () => {

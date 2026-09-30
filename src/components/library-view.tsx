@@ -179,6 +179,7 @@ function VideoSummary({
   note,
   length,
   part,
+  edition,
   sources,
 }: {
   container: string | null;
@@ -193,6 +194,7 @@ function VideoSummary({
   note?: string | null;
   length?: string | null;
   part?: string | null;
+  edition?: string | null;
   sources?: FileSources;
 }) {
   return (
@@ -201,7 +203,7 @@ function VideoSummary({
         <p className={cn("whitespace-nowrap", playableClass(playableLabel))}>{playableText(playableLabel)}</p>
       ) : null}
       <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} flags={flags} sources={sources} />
+        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} edition={edition} flags={flags} sources={sources} />
         {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
         {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
       </p>
@@ -237,6 +239,7 @@ function VersionBands({
             flags={version.flags}
             length={lengthText(version)}
             part={multiPartLabel(version.path, version.name)}
+            edition={version.edition}
             sources={sourcesFor?.(version)}
           />
           <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
@@ -771,6 +774,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   missing={version.missing}
                                   length={lengthText(version)}
                                   part={multiPartLabel(version.path, version.name, title.title)}
+                                  edition={version.edition}
                                   sources={fileHoverSources(title, data?.configured ?? [], version.presence)}
                                 />
                                 </CellScroll>
@@ -799,6 +803,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   missing={title.versions[0]?.missing}
                                   note={title.playableNote}
                                   part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                  edition={title.versions[0]?.edition}
                                   sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                                 />
                                 </CellScroll>
@@ -909,6 +914,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 missing={title.versions[0]?.missing}
                                 note={title.playableNote}
                                 part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                edition={title.versions[0]?.edition}
                                 sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                               />
                             </dd>
@@ -1108,6 +1114,7 @@ function EpisodeRows({
                                 flags={version.flags}
                                 length={lengthText(version)}
                                 part={multiPartLabel(version.path, version.name)}
+                                edition={version.edition}
                                 sources={fileHoverSources(
                                   { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
                                   configured,
@@ -1139,6 +1146,7 @@ function EpisodeRows({
                                 playableLabel={episode.playableLabel}
                                 missing={episode.versions[0]?.missing}
                                 part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                                edition={episode.versions[0]?.edition}
                                 sources={fileHoverSources(
                                   { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
                                   configured,
@@ -1252,6 +1260,7 @@ function EpisodeList({
                               resolution={episode.resolution}
                               frameRate={episode.detail?.frameRate}
                               part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                              edition={episode.versions[0]?.edition}
                               flags={episode.versions[0]?.flags}
                               sources={fileHoverSources(
                                 { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
