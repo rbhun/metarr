@@ -2,7 +2,7 @@
 
 ## 0.0.126
 
-- Beta version merge: find titles with two similar-length copies that carry different audio, compare frames, and manually combine them into one MKV that keeps the better video plus every audio and subtitle track.
+- Beta version merge: find titles with two similar-length copies that carry different audio, compare frames, and manually combine them into one MKV that keeps the better video plus every audio and subtitle track. The demo library includes Blade Runner 2049 as a sample pair.
 
 ## 0.0.125
 

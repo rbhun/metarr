@@ -15,6 +15,7 @@ function video(partial: Partial<MediaFile> & Pick<MediaFile, "path">): MediaFile
     audioLanguages: partial.audioLanguages ?? ["English"],
     subtitleLanguages: partial.subtitleLanguages ?? ["English"],
     bitrateKbps: partial.bitrateKbps ?? 8000,
+    durationMinutes: partial.durationMinutes ?? null,
   };
 }
 
@@ -299,6 +300,44 @@ export function demoRecords(): SourceDraft[] {
     subtitleWanted: ["Spanish"],
     monitored: true,
   });
+
+  // Two same-length copies with different audio — fodder for Version merge (beta).
+  const bladeRunner = withMedia(
+    sourceDraft({
+      connector: "plex",
+      kind: "movie",
+      externalKey: "item:blade-runner-2049",
+      title: "Blade Runner 2049",
+      year: 2017,
+      imdbId: "tt1856101",
+      tmdbId: "335984",
+      rating: 8.0,
+      genres: ["Science Fiction", "Drama"],
+      monitored: true,
+      runtimeMinutes: 164,
+    }),
+    [
+      video({
+        path: "/movies/Blade Runner 2049 (2017)/Blade Runner 2049 (2017) Remastered 2160p.mkv",
+        qualityName: "Bluray-2160p",
+        resolution: "2160p",
+        hdr: "HDR10",
+        bitrateKbps: 45_000,
+        durationMinutes: 164,
+        audioLanguages: ["English"],
+        subtitleLanguages: ["English"],
+      }),
+      video({
+        path: "/movies/Blade Runner 2049 (2017)/Blade Runner 2049 (2017).mkv",
+        qualityName: "Bluray-1080p",
+        resolution: "1080p",
+        bitrateKbps: 12_000,
+        durationMinutes: 164,
+        audioLanguages: ["Hungarian", "English"],
+        subtitleLanguages: ["Hungarian", "English"],
+      }),
+    ],
+  );
 
   const heat = movieFile(
     sourceDraft({
@@ -604,6 +643,7 @@ export function demoRecords(): SourceDraft[] {
     parasitePlex,
     parasiteRadarr,
     parasiteBazarr,
+    bladeRunner,
     heat,
     wire,
     wirePlex,
