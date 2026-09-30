@@ -3,7 +3,7 @@ import { applyTimeZone } from "@/lib/clock";
 import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
-import { resolveMediaPath } from "@/lib/detect/paths";
+import { mediaPathCandidates, resolveMediaPath, siblingSubtitlePath, unresolvedMediaMessage } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { detectTrack } from "@/lib/detect/run";
@@ -110,15 +110,25 @@ async function step() {
   }
   writeDetectPause(db, null);
   try {
-    const local = resolveMediaPath(job.path, settings.pathMaps, (candidate) => {
+    const exists = (candidate: string) => {
       try {
         return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
       } catch {
         return false;
       }
-    });
+    };
+    let local = resolveMediaPath(job.path, settings.pathMaps, exists);
+    if (!local && job.kind === "subtitle" && job.placement === "external") {
+      for (const candidate of mediaPathCandidates(job.path, settings.pathMaps)) {
+        const sibling = siblingSubtitlePath(candidate);
+        if (sibling && exists(sibling)) {
+          local = sibling;
+          break;
+        }
+      }
+    }
     if (!local) {
-      finishJob(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
+      finishJob(db, job.id, "failed", unresolvedMediaMessage(job.path, settings.pathMaps));
       return;
     }
     const outcome = await detectTrack(job, local);

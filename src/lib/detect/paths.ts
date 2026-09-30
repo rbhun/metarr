@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 export type PathMap = { from: string; to: string };
 
 function slash(value: string): string {
@@ -32,14 +35,112 @@ export function pathOnPlex(filePath: string, maps: PathMap[]): string {
   return `${best.from}${normalized.slice(best.to.length)}`;
 }
 
-export function resolveMediaPath(filePath: string, maps: PathMap[], exists: (candidate: string) => boolean): string | null {
+export function mediaPathCandidates(filePath: string, maps: PathMap[]): string[] {
   const normalized = filePath.replace(/\\/g, "/");
-  if (exists(filePath)) return filePath;
-  if (normalized !== filePath && exists(normalized)) return normalized;
+  const candidates = [filePath];
+  if (normalized !== filePath) candidates.push(normalized);
   for (const map of maps) {
     if (normalized !== map.from && !normalized.startsWith(`${map.from}/`)) continue;
-    const candidate = `${map.to}${normalized.slice(map.from.length)}`;
+    candidates.push(`${map.to}${normalized.slice(map.from.length)}`);
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+export function resolveMediaPath(filePath: string, maps: PathMap[], exists: (candidate: string) => boolean): string | null {
+  for (const candidate of mediaPathCandidates(filePath, maps)) {
     if (exists(candidate)) return candidate;
   }
   return null;
+}
+
+/** Why this process cannot use a media path — missing, not a file, or permission. */
+export function mediaPathProblem(filePath: string): string | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return `${filePath} is not a file.`;
+  } catch (caught) {
+    const code = caught && typeof caught === "object" && "code" in caught ? String((caught as NodeJS.ErrnoException).code) : "";
+    if (code === "EACCES" || code === "EPERM") {
+      return `Permission denied for ${filePath}. Metarr runs as uid ${process.getuid?.() ?? "?"} gid ${process.getgid?.() ?? "?"}; the file or a parent folder must be readable by that user or group.`;
+    }
+    if (code === "ENOENT") return null;
+    return `Cannot open ${filePath}${code ? ` (${code})` : ""}.`;
+  }
+  try {
+    fs.accessSync(filePath, fs.constants.R_OK);
+    return null;
+  } catch {
+    return `Permission denied for ${filePath}. Metarr runs as uid ${process.getuid?.() ?? "?"} gid ${process.getgid?.() ?? "?"}; the file or a parent folder must be readable by that user or group.`;
+  }
+}
+
+/**
+ * Plex sometimes stores a subtitle name that no longer matches the disc. Prefer an
+ * existing sidecar in the same folder whose stem matches after dropping language tags.
+ */
+export function siblingSubtitlePath(filePath: string): string | null {
+  const directory = path.dirname(filePath);
+  const base = path.basename(filePath);
+  if (!/\.(srt|ass|ssa|vtt)$/i.test(base)) return null;
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return null;
+  }
+  const wanted = subtitleStem(base);
+  if (!wanted) return null;
+  const matches = names.filter((name) => /\.(srt|ass|ssa|vtt)$/i.test(name) && subtitleStem(name) === wanted);
+  if (matches.length === 1) {
+    const found = path.join(directory, matches[0]!);
+    return mediaPathProblem(found) ? null : found;
+  }
+  if (matches.includes(base)) {
+    const found = path.join(directory, base);
+    return mediaPathProblem(found) ? null : found;
+  }
+  return null;
+}
+
+/** Folder + title stem, ignoring language / forced / SDH tags on the subtitle name. */
+export function subtitleStem(fileName: string): string {
+  const stem = fileName
+    .replace(/\.(srt|ass|ssa|vtt)$/i, "")
+    .replace(/[([{\]](\d{4})[\])} ]/g, " $1 ")
+    .replace(/[([{\])]/g, " ");
+  const parts = stem.split(/[._\-\s]+/).filter(Boolean);
+  while (parts.length > 1) {
+    const last = parts[parts.length - 1] ?? "";
+    if (/^(forced|sdh|cc|foreign|hi|default|normal)$/i.test(last)) {
+      parts.pop();
+      continue;
+    }
+    if (/^[a-z]{2,3}$/i.test(last) || /^(english|hungarian|german|french|spanish|italian|japanese|chinese|portuguese|russian|polish|dutch|swedish|norwegian|danish|finnish|czech|turkish|arabic|hindi|ukrainian|hebrew|greek|romanian|croatian|serbian|bulgarian|catalan|vietnamese|slovak|thai|indonesian)$/i.test(last)) {
+      parts.pop();
+      continue;
+    }
+    break;
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+export function unresolvedMediaMessage(filePath: string, maps: PathMap[]): string {
+  const candidates = mediaPathCandidates(filePath, maps);
+  for (const candidate of candidates) {
+    const problem = mediaPathProblem(candidate);
+    if (problem) return problem;
+  }
+  const parent = path.dirname(candidates[0]?.replace(/\\/g, "/") ?? filePath.replace(/\\/g, "/"));
+  let parentNote = "";
+  try {
+    fs.readdirSync(parent);
+    parentNote = ` The folder ${parent} is readable, so the subtitle name may not match the file on disk.`;
+  } catch (caught) {
+    const code = caught && typeof caught === "object" && "code" in caught ? String((caught as NodeJS.ErrnoException).code) : "";
+    if (code === "EACCES" || code === "EPERM") {
+      return `Permission denied for folder ${parent}. Metarr runs as uid ${process.getuid?.() ?? "?"} gid ${process.getgid?.() ?? "?"}; that folder must be traversable by that user or group.`;
+    }
+    if (code === "ENOENT") parentNote = ` The folder ${parent} is missing inside the container.`;
+  }
+  return `Cannot open ${filePath}.${parentNote} Add a path mapping in Settings if Plex uses a different path.`;
 }

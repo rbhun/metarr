@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.116
+
+- When an external subtitle path fails to open, say whether it is missing, permission-denied, or a name mismatch, and try a same-folder sidecar whose title matches after dropping language tags and year brackets.
+
 ## 0.0.115
 
 - Run overnight language checks before writing earlier results into files. A backlog of tag writes was clearing the pause reason so Tasks said Queued while nothing was ever claimed.

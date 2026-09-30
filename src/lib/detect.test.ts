@@ -10,7 +10,7 @@ import { commentaryRole } from "@/lib/detect/commentary";
 import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { resolveMediaPath } from "@/lib/detect/paths";
+import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
@@ -81,6 +81,12 @@ test("path mapping rewrites a plex prefix and keeps a file that is already local
   assert.equal(resolveMediaPath("/mnt/media/Movies/Film.mkv", [{ from: "/mnt/media", to: "/Volumes/media" }], exists), "/Volumes/media/Movies/Film.mkv");
   assert.equal(resolveMediaPath("/Volumes/media/Movies/Film.mkv", [], exists), "/Volumes/media/Movies/Film.mkv");
   assert.equal(resolveMediaPath("/data/Film.mkv", [{ from: "/mnt/media", to: "/Volumes/media" }], exists), null);
+});
+
+test("subtitle stems ignore language tags and year brackets so a renamed sidecar still matches", () => {
+  assert.equal(subtitleStem("10 Things I Hate About You 1999.srt"), subtitleStem("10 Things I Hate About You (1999).en.srt"));
+  assert.equal(subtitleStem("Film.hu.forced.srt"), subtitleStem("Film.srt"));
+  assert.notEqual(subtitleStem("Film.srt"), subtitleStem("Other.srt"));
 });
 
 test("commentary comes from the track title or from how people talk about the film", () => {
