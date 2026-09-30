@@ -1,3 +1,5 @@
+import path from "node:path";
+import { languageFromSubtitleName } from "@/lib/detect/sidecars";
 import type { DetectTarget } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 
@@ -30,15 +32,16 @@ export function subtitleTarget(path: string | null, track: SubtitleTrack, index:
   return targets[0] ?? null;
 }
 
-export function subtitleTargets(path: string | null, track: SubtitleTrack, index: number, label: string): DetectTarget[] {
+export function subtitleTargets(mediaPath: string | null, track: SubtitleTrack, index: number, label: string): DetectTarget[] {
   if (track.language || track.detectedLanguage || track.placement === "burn-in") return [];
   const external = track.placement === "external" && track.file ? track.file : null;
+  if (external && languageFromSubtitleName(path.basename(external))) return [];
   const copies = track.copies?.length
     ? track.copies
     : external
       ? [{ path: external, ordinal: 0 }]
-      : path
-        ? [{ path, ordinal: track.streamIndex ?? index }]
+      : mediaPath
+        ? [{ path: mediaPath, ordinal: track.streamIndex ?? index }]
         : [];
   return copies.map((copy) => ({
     path: copy.path,

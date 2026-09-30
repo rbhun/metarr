@@ -74,32 +74,34 @@ export function mediaPathProblem(filePath: string): string | null {
   }
 }
 
+/** Readable subtitle files in the same folder that share this title stem (language tags ignored). */
+export function listSiblingSubtitles(filePath: string): string[] {
+  const directory = path.dirname(filePath);
+  const base = path.basename(filePath);
+  if (!/\.(srt|ass|ssa|vtt)$/i.test(base)) return [];
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return [];
+  }
+  const wanted = subtitleStem(base);
+  if (!wanted) return [];
+  return names
+    .filter((name) => /\.(srt|ass|ssa|vtt)$/i.test(name) && subtitleStem(name) === wanted)
+    .map((name) => path.join(directory, name))
+    .filter((found) => !mediaPathProblem(found));
+}
+
 /**
  * Plex sometimes stores a subtitle name that no longer matches the disc. Prefer an
  * existing sidecar in the same folder whose stem matches after dropping language tags.
  */
 export function siblingSubtitlePath(filePath: string): string | null {
-  const directory = path.dirname(filePath);
+  const matches = listSiblingSubtitles(filePath);
+  if (matches.length === 1) return matches[0]!;
   const base = path.basename(filePath);
-  if (!/\.(srt|ass|ssa|vtt)$/i.test(base)) return null;
-  let names: string[];
-  try {
-    names = fs.readdirSync(directory);
-  } catch {
-    return null;
-  }
-  const wanted = subtitleStem(base);
-  if (!wanted) return null;
-  const matches = names.filter((name) => /\.(srt|ass|ssa|vtt)$/i.test(name) && subtitleStem(name) === wanted);
-  if (matches.length === 1) {
-    const found = path.join(directory, matches[0]!);
-    return mediaPathProblem(found) ? null : found;
-  }
-  if (matches.includes(base)) {
-    const found = path.join(directory, base);
-    return mediaPathProblem(found) ? null : found;
-  }
-  return null;
+  return matches.find((found) => path.basename(found) === base) ?? null;
 }
 
 /** Folder + title stem, ignoring language / forced / SDH tags on the subtitle name. */

@@ -132,6 +132,37 @@ test("an untagged sidecar takes its language from the file name and is not a thi
   assert.equal(languageFromSubtitleName("movie.you.srt"), null);
 });
 
+test("a stale bare Plex subtitle path rematches language-tagged sidecars and skips detection", () => {
+  const video = "/mnt/media/Movies/10 Things I Hate About You (1999)/10 Things I Hate About You 1999.avi";
+  const names = [
+    "10 Things I Hate About You 1999.avi",
+    "10 Things I Hate About You 1999.hun.srt",
+    "10 Things I Hate About You 1999.en.hi.srt",
+  ];
+  const tracks = assignSidecars(
+    video,
+    [
+      { language: null, placement: "external", format: "SRT", forced: false, file: `${path.dirname(video)}/10 Things I Hate About You 1999.srt` },
+      { language: null, placement: "external", format: "SRT", forced: false },
+    ],
+    names,
+  );
+  assert.equal(tracks[0]?.language, "English");
+  assert.equal(tracks[0]?.file?.endsWith(".en.hi.srt"), true);
+  assert.equal(tracks[1]?.language, "Hungarian");
+  assert.equal(tracks[1]?.file?.endsWith(".hun.srt"), true);
+  const file: ScanFile = {
+    label: "10 Things I Hate About You (1999)",
+    path: video,
+    container: "avi",
+    playableLabel: "video",
+    audioTracks: [],
+    subtitleTracks: tracks,
+    versions: [],
+  };
+  assert.deepEqual(targetsFromFiles([file], false, new Set()), []);
+});
+
 test("a magyar label takes the hungarian sidecar and the unnamed file stays readable", () => {
   const video = "/mnt/media/Movies/All That Jazz (1979)/All That Jazz[1979]_TroyAtwood.avi";
   const names = [
@@ -451,7 +482,6 @@ test("unknown audio and subtitles are scanned, labeled tracks and discs are not"
   assert.deepEqual(targets.map((target) => `${target.kind}:${target.ordinal}:${target.path}`), [
     "audio:1:/movies/Dune.mkv",
     "subtitle:0:/movies/Dune.mkv",
-    "subtitle:0:/movies/Dune.hu.srt",
   ]);
   const scanned = new Set(["/movies/Dune.mkv\0audio\0" + "1"]);
   const again = targetsFromFiles([file], false, scanned);

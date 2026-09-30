@@ -1,13 +1,15 @@
 import fs from "node:fs";
+import path from "node:path";
 import { applyTimeZone } from "@/lib/clock";
 import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
-import { mediaPathCandidates, resolveMediaPath, siblingSubtitlePath, unresolvedMediaMessage } from "@/lib/detect/paths";
+import { listSiblingSubtitles, mediaPathCandidates, resolveMediaPath, siblingSubtitlePath, unresolvedMediaMessage } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { detectTrack } from "@/lib/detect/run";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
+import { languageFromSubtitleName } from "@/lib/detect/sidecars";
 import {
   claimNextJob,
   detectCounts,
@@ -119,12 +121,21 @@ async function step() {
     };
     let local = resolveMediaPath(job.path, settings.pathMaps, exists);
     if (!local && job.kind === "subtitle" && job.placement === "external") {
+      let namedOnly = false;
       for (const candidate of mediaPathCandidates(job.path, settings.pathMaps)) {
         const sibling = siblingSubtitlePath(candidate);
         if (sibling && exists(sibling)) {
           local = sibling;
           break;
         }
+        const siblings = listSiblingSubtitles(candidate);
+        if (siblings.length > 1 && siblings.every((file) => languageFromSubtitleName(path.basename(file)))) {
+          namedOnly = true;
+        }
+      }
+      if (!local && namedOnly) {
+        finishJob(db, job.id, "skipped", "The folder already has language-tagged subtitle files for this title.");
+        return;
       }
     }
     if (!local) {

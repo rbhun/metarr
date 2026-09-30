@@ -55,12 +55,35 @@ function sameLanguage(left: string | null | undefined, right: string | null | un
   return (languageName(left) ?? left).toLowerCase() === (languageName(right) ?? right).toLowerCase();
 }
 
+/** Keep a Plex path only when that sidecar is still on disk (same path or unique basename). */
+function liveSidecarFile(file: string, sidecars: Sidecar[]): string | null {
+  if (sidecars.some((sidecar) => sidecar.file === file)) return file;
+  const base = path.basename(file);
+  const matches = sidecars.filter((sidecar) => path.basename(sidecar.file) === base);
+  return matches.length === 1 ? matches[0]!.file : null;
+}
+
 export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
   if (!videoPath || names.length === 0) return tracks;
   const sidecars = sidecarsIn(videoPath, names);
   if (sidecars.length === 0) return tracks;
   const used = new Set<string>();
-  const next = tracks.map((track) => ({ ...track }));
+  const next = tracks.map((track) => {
+    const copy = { ...track };
+    if (copy.placement !== "external") return copy;
+    if (copy.file) {
+      const live = liveSidecarFile(copy.file, sidecars);
+      copy.file = live;
+      if (!live) {
+        // Stale Plex path — rematch below.
+      } else {
+        const fromName = languageFromSubtitleName(path.basename(live));
+        if (fromName && !copy.language) copy.language = fromName;
+        used.add(live);
+      }
+    }
+    return copy;
+  });
   for (const track of next) {
     if (track.file || track.placement !== "external" || !track.language) continue;
     const match = sidecars.find((sidecar) => !used.has(sidecar.file) && sameLanguage(sidecar.language, track.language));
@@ -81,12 +104,23 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   }
   const unknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
   const remaining = sidecars.filter((sidecar) => !used.has(sidecar.file));
+  // Prefer named leftovers so a bare Plex path can land on .hun / .en.hi without content detection.
+  for (const sidecar of remaining) {
+    if (!sidecar.language) continue;
+    const track = unknown.find((item) => !item.file);
+    if (!track) break;
+    track.file = sidecar.file;
+    track.language = sidecar.language;
+    used.add(sidecar.file);
+  }
+  const stillUnknown = next.filter((track) => track.placement === "external" && !track.language && !track.file && !track.detectedLanguage);
+  const stillRemaining = sidecars.filter((sidecar) => !used.has(sidecar.file));
   const claimed = next.map((track) => track.language).filter((language): language is string => Boolean(language));
-  const open = remaining.filter((sidecar) => !sidecar.language || !claimed.some((language) => sameLanguage(sidecar.language, language)));
-  const choice = unknown.length === 1 ? (open.length === 1 ? open[0] : remaining.length === 1 ? remaining[0] : null) : null;
-  if (unknown[0] && choice) {
-    unknown[0].file = choice.file;
-    if (choice.language) unknown[0].language = choice.language;
+  const open = stillRemaining.filter((sidecar) => !sidecar.language || !claimed.some((language) => sameLanguage(sidecar.language, language)));
+  const choice = stillUnknown.length === 1 ? (open.length === 1 ? open[0] : stillRemaining.length === 1 ? stillRemaining[0] : null) : null;
+  if (stillUnknown[0] && choice) {
+    stillUnknown[0].file = choice.file;
+    if (choice.language) stillUnknown[0].language = choice.language;
   }
   return next;
 }

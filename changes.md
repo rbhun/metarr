@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.117
+
+- Drop stale Plex subtitle paths that are gone from disk, rematch them to language-tagged sidecars in the folder, and skip language checks when the file name already has a language (for example `.hun.srt` / `.en.hi.srt`).
+
 ## 0.0.116
 
 - When an external subtitle path fails to open, say whether it is missing, permission-denied, or a name mismatch, and try a same-folder sidecar whose title matches after dropping language tags and year brackets.

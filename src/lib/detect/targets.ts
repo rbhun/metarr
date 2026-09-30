@@ -1,4 +1,6 @@
+import path from "node:path";
 import { isTransportStream } from "@/lib/detect/audio";
+import { languageFromSubtitleName } from "@/lib/detect/sidecars";
 import { isDiscImage } from "@/lib/media";
 import type { AudioTrack, MediaVersion, SubtitleTrack } from "@/lib/types";
 
@@ -78,11 +80,12 @@ function targetsOnFile(file: ScanFile, rescan: boolean, scanned: Set<string>): D
     item.subtitleTracks.forEach((track, index) => {
       if (track.language || track.placement === "burn-in") return;
       const external = track.placement === "external" && track.file;
-      const path = external ? track.file! : item.path;
+      if (external && languageFromSubtitleName(path.basename(track.file!))) return;
+      const mediaPath = external ? track.file! : item.path;
       const ordinal = external ? 0 : (track.streamIndex ?? index);
-      if (!rescan && scanned.has(keyOf(path, "subtitle", ordinal))) return;
+      if (!rescan && scanned.has(keyOf(mediaPath, "subtitle", ordinal))) return;
       targets.push({
-        path,
+        path: mediaPath,
         kind: "subtitle",
         ordinal,
         label: item.label,
