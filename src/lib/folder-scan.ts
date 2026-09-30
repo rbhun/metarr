@@ -5,7 +5,7 @@ import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-forma
 import { languageFromProbeTags } from "@/lib/detect/audio";
 import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
-import { sidecarTracks } from "@/lib/detect/sidecars";
+import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
@@ -303,9 +303,12 @@ export function listVideos(root: string): string[] {
   return found;
 }
 
-/** The streams inside the file, then the subtitle files beside it. */
+/** The streams inside the file, then the subtitle and separate audio files beside it. */
 function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } {
-  return { ...probed, subtitles: [...probed.subtitles, ...sidecarTracks(filePath)] };
+  return {
+    audio: [...probed.audio, ...audioSidecarTracks(filePath)],
+    subtitles: [...probed.subtitles, ...sidecarTracks(filePath)],
+  };
 }
 
 /** Probe one video. Used after a language write so the folder scanner does not walk the library. */

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.127
+
+- Separate audio files beside a video (or in an `audio` subfolder), such as `.ac3`, are found and listed even though Plex ignores them. They show as external rows marked "not in Plex", with the language from the file name when it is tagged. The demo Godfather title includes a Hungarian `.ac3` example.
+
 ## 0.0.126
 
 - Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart. The demo library includes Kingdom of Heaven with theatrical and director’s cuts so the labels are easy to spot.

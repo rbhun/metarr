@@ -51,6 +51,13 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.equal(godfather?.playable_label, "video");
   assert.match(godfather?.container ?? "", /mkv/);
   assert.equal(godfather?.quality_name, "Bluray-1080p");
+  const godfatherLibrary = queryLibrary({ kind: "all", rules: [], q: "The Godfather", offset: 0, limit: 10 }, db).titles.find(
+    (title) => title.title === "The Godfather",
+  );
+  const externalAudio = godfatherLibrary?.versions[0]?.audioTracks.find((track) => track.file);
+  assert.equal(externalAudio?.language, "Hungarian");
+  assert.equal(externalAudio?.folderOnly, true);
+  assert.match(externalAudio?.file ?? "", /\.ac3$/i);
 
   const avatar = byTitle.get("Avatar");
   assert.equal(avatar?.playable_label, "bluray");
@@ -133,7 +140,7 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
 
   assert.deepEqual(names([{ id: "subs", field: "subtitles", op: "missing", value: "English" }]), ["Heat"]);
   assert.deepEqual(names([{ id: "3d", field: "stereo", op: "eq", value: "yes" }]), ["Gravity"]);
-  assert.deepEqual(names([{ id: "hu", field: "language", op: "includes", value: "Hungarian" }]).sort(), ["Dune", "The Wire"]);
+  assert.deepEqual(names([{ id: "hu", field: "language", op: "includes", value: "Hungarian" }]).sort(), ["Dune", "The Godfather", "The Wire"]);
   assert.deepEqual(names([{ id: "pg", field: "contentRating", op: "eq", value: "PG" }]), ["The Godfather Part II"]);
   assert.deepEqual(names([{ id: "genre", field: "genre", op: "empty", value: "" }]), ["The Godfather Part II"]);
   assert.deepEqual(names([{ id: "br", field: "bitrate", op: "gt", value: "10" }]).sort(), ["Kingdom of Heaven", "The Godfather"]);

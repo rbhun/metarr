@@ -607,15 +607,30 @@ function noteMissingFromArr<T extends { language: string | null; fromFile?: bool
   });
 }
 
+function markFolderAudio(track: AudioTrack): AudioTrack {
+  return {
+    ...track,
+    fromFile: true,
+    folderOnly: true,
+    sources: { ...track.sources, plex: null, ...(track.file ? { file: track.file } : {}) },
+    conflict: track.conflict ?? "This audio file is beside the video, but Plex does not list separate audio files.",
+  };
+}
+
 /** Compare a folder scan with the tracks Plex stored. The file tag wins, and a mismatch is kept on the track. */
 export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): AudioTrack[] {
-  if (!scanned.length) return reported;
-  if (!reported.length) return scanned.map((track) => ({ ...track, fromFile: true }));
-  const count = Math.max(reported.length, scanned.length);
+  const scannedInternal = scanned.filter((track) => !track.file);
+  const scannedExternal = scanned.filter((track) => track.file);
+  if (!scannedInternal.length && !scannedExternal.length) return reported;
+  if (!reported.length && !scannedInternal.length) return scannedExternal.map(markFolderAudio);
+  if (!reported.length) {
+    return [...scannedInternal.map((track) => ({ ...track, fromFile: true })), ...scannedExternal.map(markFolderAudio)];
+  }
+  const count = Math.max(reported.length, scannedInternal.length);
   const tracks: AudioTrack[] = [];
   for (let index = 0; index < count; index += 1) {
     const report = reported[index];
-    const scan = scanned[index];
+    const scan = scannedInternal[index];
     if (!scan) {
       if (report) tracks.push({ ...report, sources: { ...report.sources, file: report.sources?.file ?? null } });
       continue;
@@ -657,7 +672,7 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
       ...(notes.length ? { conflict: notes.join(" ") } : {}),
     });
   }
-  return tracks;
+  return [...tracks, ...scannedExternal.map(markFolderAudio)];
 }
 
 function baseOf(file: string): string {
@@ -834,8 +849,8 @@ export function mergeAudioTracks(groups: AudioTrack[][]): AudioTrack[] {
   const tracks: AudioTrack[] = [];
   const seen = new Set<string>();
   for (const track of groups.flat()) {
-    if (!track.language && !track.layout && !track.codec) continue;
-    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}`.toLowerCase();
+    if (!track.language && !track.layout && !track.codec && !track.file) continue;
+    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}|${track.file ?? ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     tracks.push(track);

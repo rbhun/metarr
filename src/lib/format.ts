@@ -91,6 +91,11 @@ export function shownLanguage(track: { language: string | null; detectedLanguage
   return languageName(value) ?? value;
 }
 
+export function audioNote(track: { file?: string | null; folderOnly?: boolean }): string {
+  if (!track.file && !track.folderOnly) return "";
+  return [track.file ? "external" : null, track.folderOnly ? "not in Plex" : null].filter(Boolean).join(" · ");
+}
+
 export function audioLines(tracks: AudioTrack[], languages: string[]): string[] {
   if (tracks.length > 0) {
     const lines = tracks
@@ -100,6 +105,7 @@ export function audioLines(tracks: AudioTrack[], languages: string[]): string[] 
           track.detectedRole === "commentary" ? "commentary" : track.detectedRole === "short" ? "short" : null,
           formatLayout(track.layout),
           track.codec,
+          audioNote(track) || null,
         ]
           .filter(Boolean)
           .join(" "),

@@ -1,5 +1,6 @@
 import { rebuildCatalog } from "@/lib/catalog";
 import { clearLibrary, deleteAllSourceRecords, getDb, insertSourceRecords, saveEnrichment, setMeta } from "@/lib/db";
+import { FOLDER_ONLY_AUDIO } from "@/lib/detect/sidecars";
 import { enrichmentKey } from "@/lib/online";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { MediaFile, SourceDraft } from "@/lib/types";
@@ -23,12 +24,29 @@ function movieFile(record: SourceDraft, file: MediaFile): SourceDraft {
 }
 
 export function demoRecords(): SourceDraft[] {
-  const godfatherFile = video({
-    path: "/movies/The Godfather (1972)/The Godfather (1972).mkv",
-    qualityName: "Bluray-1080p",
-    audioLanguages: ["English", "Italian"],
-    subtitleLanguages: ["English"],
-  });
+  const godfatherAudio = "/movies/The Godfather (1972)/audio/The Godfather (1972).hu.ac3";
+  const godfatherFile = {
+    ...video({
+      path: "/movies/The Godfather (1972)/The Godfather (1972).mkv",
+      qualityName: "Bluray-1080p",
+      audioLanguages: ["English", "Italian", "Hungarian"],
+      subtitleLanguages: ["English"],
+    }),
+    audioTracks: [
+      { language: "English", layout: "5.1", codec: "DTS" },
+      { language: "Italian", layout: "2.0", codec: "Dolby Digital" },
+      {
+        language: "Hungarian",
+        layout: null,
+        codec: "Dolby Digital",
+        file: godfatherAudio,
+        fromFile: true,
+        folderOnly: true,
+        sources: { plex: null, file: godfatherAudio },
+        conflict: FOLDER_ONLY_AUDIO,
+      },
+    ],
+  };
   const godfatherPlex = movieFile(
     sourceDraft({
       connector: "plex",

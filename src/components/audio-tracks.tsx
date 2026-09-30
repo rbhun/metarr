@@ -7,7 +7,7 @@ import { fileLanguageClass, formatConflictClass, omittedLanguageClass, UnknownLa
 import { SourceHover } from "@/components/source-hover";
 import { FlagPill } from "@/components/media-pills";
 import { audioTargets } from "@/lib/detect/track";
-import { formatLayout, languageHover } from "@/lib/format";
+import { audioNote, formatLayout, languageHover } from "@/lib/format";
 import type { AudioTrack } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -103,6 +103,8 @@ export function AudioTracks({
           commentary: track.detectedRole === "commentary",
           short: track.detectedRole === "short",
           fromFile: track.fromFile === true,
+          folderOnly: track.folderOnly === true,
+          file: track.file ?? null,
           omittedByPlex: track.omittedByPlex === true,
           conflict: track.conflict ?? null,
           sources: track.sources,
@@ -110,9 +112,10 @@ export function AudioTracks({
           layout: formatLayout(track.layout),
           codec: track.codec,
           targets: audioTargets(path, track, index, label),
+          note: audioNote(track),
         }))
-        .filter((row) => row.language || row.layout || row.codec)
-    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, omittedByPlex: false, conflict: null, sources: undefined, detected: null, layout: null, codec: null, targets: [] }));
+        .filter((row) => row.language || row.layout || row.codec || row.file)
+    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, folderOnly: false, file: null, omittedByPlex: false, conflict: null, sources: undefined, detected: null, layout: null, codec: null, targets: [], note: "" }));
 
   if (rows.length === 0) return <p>—</p>;
 
@@ -122,14 +125,14 @@ export function AudioTracks({
         const formatConflict = row.conflict?.includes("The file is ") ?? false;
         const tone = formatConflict
           ? formatConflictClass
-          : row.conflict || row.omittedByPlex
+          : row.conflict || row.omittedByPlex || row.folderOnly
             ? omittedLanguageClass
             : row.fromFile
               ? fileLanguageClass
               : undefined;
         const text = `${row.language ?? ""}${row.commentary ? " commentary" : ""}`;
         return (
-        <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${index}`} className="flex items-center gap-1">
+        <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${row.file ?? ""}-${index}`} className="flex flex-wrap items-center gap-1">
           {row.language ? (
             row.targets.length ? (
               <SourceHover text={hover}>
@@ -156,6 +159,7 @@ export function AudioTracks({
           {row.short ? <FlagPill kind="short" /> : null}
           {row.layout ? <span className="font-mono text-[0.92em] tabular-nums">{row.layout}</span> : null}
           <CodecMark codec={row.codec} />
+          {row.note ? <span className="text-[10px] text-muted-foreground">· {row.note}</span> : null}
         </p>
         );
       });
