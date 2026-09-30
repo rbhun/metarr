@@ -3,7 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, noteSidecarPresence, readSidecarNames } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
 import { ensureListedSource } from "@/lib/media";
@@ -1125,7 +1125,8 @@ type TitleRow = {
 };
 
 function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections: Map<string, StoredDetection>): SubtitleTrack[] {
-  return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
+  const names = readSidecarNames(videoPath);
+  return overlaySubtitles(videoPath, noteSidecarPresence(assignSidecars(videoPath, tracks, names), names), detections);
 }
 
 function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {

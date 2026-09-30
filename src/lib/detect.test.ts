@@ -17,7 +17,7 @@ import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
-import { assignSidecars, languageFromSubtitleName } from "@/lib/detect/sidecars";
+import { assignSidecars, languageFromSubtitleName, noteSidecarPresence, PLEX_ONLY_SUBTITLE } from "@/lib/detect/sidecars";
 import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
@@ -130,6 +130,28 @@ test("an untagged sidecar takes its language from the file name and is not a thi
   assert.equal(tracks[1]?.language, "Hungarian");
   assert.equal(tracks[1]?.file?.endsWith(".hu.srt"), true);
   assert.equal(languageFromSubtitleName("movie.you.srt"), null);
+});
+
+test("the file check marks an external subtitle with no file beside the video as Plex only", () => {
+  const video = "/mnt/media/Movies/21 (2008)/refined-21.mkv";
+  const names = ["refined-21.mkv", "poster.jpg"];
+  const tracks = noteSidecarPresence(
+    assignSidecars(video, [{ language: "English", placement: "external", format: "SRT", forced: false }], names),
+    names,
+  );
+  assert.equal(tracks[0]?.sources?.file, null);
+  assert.equal(tracks[0]?.conflict, PLEX_ONLY_SUBTITLE);
+  assert.equal(subtitleNote(tracks[0]!), "SRT · external · Plex only");
+  const onDisk = ["refined-21.mkv", "refined-21.en.srt"];
+  const found = noteSidecarPresence(
+    assignSidecars(video, [{ language: "English", placement: "external", format: "SRT", forced: false }], onDisk),
+    onDisk,
+  );
+  assert.equal(found[0]?.sources?.file, "English");
+  assert.equal(found[0]?.conflict, undefined);
+  assert.equal(subtitleNote(found[0]!), "SRT · external");
+  const unreadable = noteSidecarPresence([{ language: "English", placement: "external", format: "SRT", forced: false }], []);
+  assert.equal(unreadable[0]?.sources, undefined);
 });
 
 test("an external subtitle with no path is not queued against the video file", () => {

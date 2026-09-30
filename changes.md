@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.122
+
+- Compare Plex's external subtitles with the file check. A subtitle Plex lists with no file beside the video now says "Plex only", and its hover shows File scan: missing with the likely reason (Plex downloaded it into its own data folder). A sidecar found on disk shows File scan: present.
+
 ## 0.0.121
 
 - Redo on a failed task that is already queued now removes the old failure from the list (and runs the queued language check now), instead of only saying it is already queued. Redo all also drops failures that already have a queued copy and keeps one retry per track.

@@ -110,6 +110,26 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
   return next;
 }
 
+export const PLEX_ONLY_SUBTITLE =
+  "Plex lists this subtitle, but the file check found no subtitle file beside the video. Plex probably downloaded it into its own data folder, so Metarr cannot read it.";
+
+/**
+ * Compare Plex's external subtitles with the folder listing. A sidecar on disk
+ * counts as the file check; an external track still without a file is Plex only.
+ */
+export function noteSidecarPresence(tracks: SubtitleTrack[], names: string[]): SubtitleTrack[] {
+  if (names.length === 0) return tracks;
+  return tracks.map((track) => {
+    if (track.placement !== "external") return track;
+    if (track.file) {
+      const named = languageFromSubtitleName(path.basename(track.file));
+      if (!named || (track.sources && "file" in track.sources)) return track;
+      return { ...track, sources: { ...track.sources, file: named } };
+    }
+    return { ...track, sources: { ...track.sources, file: null }, conflict: track.conflict ?? PLEX_ONLY_SUBTITLE };
+  });
+}
+
 const SUBTITLE_DIRS = ["subs", "Subs", "subtitles", "Subtitles"];
 
 export function readSidecarNames(videoPath: string | null): string[] {

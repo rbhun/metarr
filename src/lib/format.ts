@@ -115,9 +115,10 @@ export function formatAudio(tracks: AudioTrack[], languages: string[]): string {
   return lines.length === 1 && lines[0] === "—" ? "—" : lines.join(", ");
 }
 
-export function subtitleNote(track: { placement: string; format: string | null; forced: boolean }): string {
+export function subtitleNote(track: { placement: string; format: string | null; forced: boolean; file?: string | null; sources?: TrackSources }): string {
   const place = track.placement === "burn-in" ? "burn-in" : track.placement === "external" ? "external" : null;
-  return [track.format, place, track.forced ? "forced" : null].filter(Boolean).join(" · ");
+  const plexOnly = track.placement === "external" && !track.file && track.sources?.file === null;
+  return [track.format, place, plexOnly ? "Plex only" : null, track.forced ? "forced" : null].filter(Boolean).join(" · ");
 }
 
 export function subtitleLines(tracks: SubtitleTrack[], languages: string[]): string[] {

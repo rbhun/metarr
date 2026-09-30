@@ -40,7 +40,7 @@ export function SubtitleRows({
         const language = shownLanguage(track);
         const targets = subtitleTargets(path, track, index, label);
         const rest = subtitleNote(track);
-        const hover = languageHover(track.sources, language, null, track.detectedLanguage) || (targets.length ? "Detect this language now" : undefined);
+        const hover = languageHover(track.sources, language, track.conflict, track.detectedLanguage) || (targets.length ? "Detect this language now" : undefined);
         return (
           <p key={`${language ?? "unknown"}-${track.placement}-${track.format ?? ""}-${track.streamIndex ?? ""}-${index}`}>
             {language ? (
