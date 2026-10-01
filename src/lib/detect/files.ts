@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import { parseAudioTracks, parseSubtitleTracks, parseVersions } from "@/lib/db";
-import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import type { ScanFile } from "@/lib/detect/targets";
-import type { SubtitleTrack } from "@/lib/types";
+import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 
 type TitleFileRow = {
   id: number;
@@ -50,6 +50,10 @@ function withSidecars(videoPath: string | null, tracks: SubtitleTrack[]): Subtit
   return assignSidecars(videoPath, tracks, readSidecarNames(videoPath));
 }
 
+function withAudio(videoPath: string | null, tracks: AudioTrack[]): AudioTrack[] {
+  return withAudioSidecars(videoPath, tracks);
+}
+
 function fromTitle(row: TitleFileRow): ScanFile {
   const name = row.year ? `${row.title} (${row.year})` : row.title;
   return {
@@ -58,10 +62,11 @@ function fromTitle(row: TitleFileRow): ScanFile {
     path: row.path,
     container: row.container,
     playableLabel: row.playable_label,
-    audioTracks: parseAudioTracks(jsonValue(row.audio_tracks)),
+    audioTracks: withAudio(row.path, parseAudioTracks(jsonValue(row.audio_tracks))),
     subtitleTracks: withSidecars(row.path, parseSubtitleTracks(jsonValue(row.subtitle_tracks))),
     versions: parseVersions(row.versions_json).map((version) => ({
       ...version,
+      audioTracks: withAudio(version.path, version.audioTracks),
       subtitleTracks: withSidecars(version.path, version.subtitleTracks),
     })),
   };
@@ -74,10 +79,11 @@ function fromEpisode(row: EpisodeFileRow): ScanFile {
     path: row.path,
     container: row.container,
     playableLabel: row.playable_label,
-    audioTracks: parseAudioTracks(jsonValue(row.audio_tracks)),
+    audioTracks: withAudio(row.path, parseAudioTracks(jsonValue(row.audio_tracks))),
     subtitleTracks: withSidecars(row.path, parseSubtitleTracks(jsonValue(row.subtitle_tracks))),
     versions: parseVersions(row.versions_json).map((version) => ({
       ...version,
+      audioTracks: withAudio(version.path, version.audioTracks),
       subtitleTracks: withSidecars(version.path, version.subtitleTracks),
     })),
   };

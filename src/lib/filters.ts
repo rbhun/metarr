@@ -10,6 +10,7 @@ export const FILTER_FIELDS = [
   "resolution",
   "hdr",
   "container",
+  "version",
   "file",
   "plex",
   "playable",
@@ -40,6 +41,7 @@ export function fieldOps(field: FilterField): FilterOp[] {
   if (field === "genre") return ["includes", "excludes", "empty", "notEmpty"];
   if (field === "contentRating" || field === "resolution" || field === "hdr" || field === "container") return ["eq", "neq", "empty", "notEmpty"];
   if (field === "score" || field === "bitrate" || field === "year") return ["gt", "gte", "lt", "lte", "eq", "empty", "notEmpty"];
+  if (field === "version") return ["eq", "neq"];
   return ["eq"];
 }
 
@@ -62,7 +64,9 @@ export function defaultRule(id: string, field: FilterField = "language"): Filter
                   ? "HDR10"
                   : field === "container"
                     ? "mkv"
-                    : field === "file"
+                    : field === "version"
+                      ? "duplicate"
+                      : field === "file"
                     ? "missing"
                     : field === "plex"
                       ? "out"
@@ -358,12 +362,31 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     const present = `(',' || IFNULL(version_flags, '') || ',')`;
     if (rule.value === "sample") return { sql: `${present} LIKE '%,sample,%'`, params: [] };
     if (rule.value === "short") return { sql: `${present} LIKE '%,short,%'`, params: [] };
-    if (rule.value === "either") return { sql: `IFNULL(version_flags, '') != ''`, params: [] };
+    if (rule.value === "either") {
+      return { sql: `(${present} LIKE '%,sample,%' OR ${present} LIKE '%,short,%')`, params: [] };
+    }
   }
 
   if (rule.field === "stereo" && rule.op === "eq") {
     if (rule.value === "yes") return { sql: "is_3d = 1", params: [] };
     if (rule.value === "no") return { sql: "is_3d = 0", params: [] };
+  }
+
+  if (rule.field === "version" && (rule.op === "eq" || rule.op === "neq")) {
+    const value = rule.value.trim();
+    if (!value) return null;
+    let match: { sql: string; params: Array<string | number> } | null = null;
+    if (value === "none") {
+      match = { sql: `(IFNULL(version_count, 0) <= 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+    } else if (value === "duplicate") {
+      match = { sql: `(IFNULL(version_count, 0) > 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+    } else if (value === "extra" || value === "outtake" || value === "comic-relief" || value === "trailer") {
+      match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE ?`, params: [`%,${value},%`] };
+    } else {
+      match = { sql: `(',' || IFNULL(version_editions, '') || ',') LIKE ?`, params: [`%,${value},%`] };
+    }
+    if (rule.op === "eq") return match;
+    return { sql: `NOT (${match.sql})`, params: match.params };
   }
 
   return null;

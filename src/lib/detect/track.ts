@@ -12,7 +12,20 @@ function narrowLayout(layout: string | null | undefined): boolean {
 }
 
 export function audioTargets(path: string | null, track: AudioTrack, index: number, label: string): DetectTarget[] {
-  if (track.language || track.fromFile || track.detectedRole === "short") return [];
+  if (track.language || track.detectedRole === "short") return [];
+  if (track.file) {
+    if (track.detectedLanguage) return [];
+    return [{
+      path: track.file,
+      kind: "audio" as const,
+      ordinal: 0,
+      label,
+      format: track.codec,
+      placement: "external",
+      streamLabel: track.label ?? null,
+    }];
+  }
+  if (track.fromFile) return [];
   if (track.detectedLanguage && (track.detectedRole === "commentary" || !narrowLayout(track.layout))) return [];
   const copies = track.copies?.length ? track.copies : path ? [{ path, ordinal: track.streamIndex ?? index }] : [];
   return copies.map((copy) => ({

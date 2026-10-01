@@ -1,5 +1,6 @@
 import { rebuildCatalog } from "@/lib/catalog";
 import { clearLibrary, deleteAllSourceRecords, getDb, insertSourceRecords, saveEnrichment, setMeta } from "@/lib/db";
+import { FOLDER_ONLY_AUDIO } from "@/lib/detect/sidecars";
 import { enrichmentKey } from "@/lib/online";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { MediaFile, SourceDraft } from "@/lib/types";
@@ -23,13 +24,47 @@ function movieFile(record: SourceDraft, file: MediaFile): SourceDraft {
 }
 
 export function demoRecords(): SourceDraft[] {
-  const godfatherFile = video({
-    path: "/movies/The Godfather (1972)/The Godfather (1972).mkv",
-    qualityName: "Bluray-1080p",
-    audioLanguages: ["English", "Italian"],
+  const godfatherAudio = "/movies/The Godfather (1972)/audio/The Godfather (1972).hu.ac3";
+  const godfatherFile = {
+    ...video({
+      path: "/movies/The Godfather (1972)/The Godfather (1972).mkv",
+      qualityName: "Bluray-1080p",
+      audioLanguages: ["English", "Italian", "Hungarian"],
+      subtitleLanguages: ["English"],
+      bitrateKbps: 18000,
+    }),
+    audioTracks: [
+      { language: "English", layout: "5.1", codec: "DTS" },
+      { language: "Italian", layout: "2.0", codec: "Dolby Digital" },
+      {
+        language: "Hungarian",
+        layout: null,
+        codec: "Dolby Digital",
+        file: godfatherAudio,
+        fromFile: true,
+        folderOnly: true,
+        sources: { plex: null, file: godfatherAudio },
+        conflict: FOLDER_ONLY_AUDIO,
+      },
+    ],
+  };
+  const godfatherFeaturette = video({
+    path: "/movies/The Godfather (1972)/Featurettes/The Godfather - A Look Back.mkv",
+    qualityName: "Bluray-480p",
+    resolution: "480p",
+    audioLanguages: ["English"],
     subtitleLanguages: ["English"],
+    bitrateKbps: 2000,
   });
-  const godfatherPlex = movieFile(
+  const godfatherOuttake = video({
+    path: "/movies/The Godfather (1972)/Outtakes/Wedding Bloopers.mkv",
+    qualityName: "Bluray-480p",
+    resolution: "480p",
+    audioLanguages: ["English"],
+    subtitleLanguages: [],
+    bitrateKbps: 1500,
+  });
+  const godfatherPlex = withMedia(
     sourceDraft({
       connector: "plex",
       kind: "movie",
@@ -44,9 +79,10 @@ export function demoRecords(): SourceDraft[] {
       genres: ["Crime", "Drama"],
       monitored: true,
     }),
-    { ...godfatherFile, bitrateKbps: 18000 },
+    [godfatherFile, godfatherFeaturette, godfatherOuttake],
+    ["The Godfather", godfatherFile.path, godfatherFeaturette.path, godfatherOuttake.path],
   );
-  const godfatherRadarr = movieFile(
+  const godfatherRadarr = withMedia(
     sourceDraft({
       connector: "radarr",
       kind: "movie",
@@ -60,7 +96,8 @@ export function demoRecords(): SourceDraft[] {
       monitored: true,
       qualityName: "Bluray-1080p",
     }),
-    { ...godfatherFile, qualityName: "Bluray-1080p" },
+    [godfatherFile, godfatherFeaturette, godfatherOuttake],
+    ["The Godfather", godfatherFile.path, godfatherFeaturette.path, godfatherOuttake.path],
   );
   const godfatherBazarr = sourceDraft({
     connector: "bazarr",
@@ -226,7 +263,25 @@ export function demoRecords(): SourceDraft[] {
     monitored: true,
   });
 
-  const matrix = movieFile(
+  const matrixHd = video({
+    container: "mp4",
+    path: "/movies/The Matrix (1999)/The Matrix (1999).mp4",
+    resolution: "1080p",
+    hdr: "HDR10",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+  });
+  const matrixSd = video({
+    container: "mkv",
+    path: "/movies/The Matrix (1999)/The Matrix (1999)-720p.mkv",
+    resolution: "720p",
+    hdr: "none",
+    qualityName: "HDTV-720p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 4000,
+  });
+  const matrix = withMedia(
     sourceDraft({
       connector: "plex",
       kind: "movie",
@@ -239,14 +294,8 @@ export function demoRecords(): SourceDraft[] {
       genres: ["Science Fiction", "Action"],
       monitored: true,
     }),
-    video({
-      container: "mp4",
-      path: "/movies/The Matrix (1999)/The Matrix (1999).mp4",
-      resolution: "1080p",
-      hdr: "HDR10",
-      audioLanguages: ["English"],
-      subtitleLanguages: ["English"],
-    }),
+    [matrixHd, matrixSd],
+    ["The Matrix", matrixHd.path, matrixSd.path],
   );
 
   const parasiteFile = video({
@@ -320,6 +369,55 @@ export function demoRecords(): SourceDraft[] {
       audioLanguages: ["English"],
       subtitleLanguages: [],
     }),
+  );
+
+  const kingdomTheatrical = video({
+    path: "/movies/Kingdom of Heaven (2005)/Kingdom of Heaven (2005)-theatrical.mkv",
+    qualityName: "Bluray-1080p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 12000,
+  });
+  const kingdomDirectors = video({
+    path: "/movies/Kingdom of Heaven (2005)/Kingdom of Heaven (2005)-directors.mkv",
+    qualityName: "Bluray-1080p",
+    resolution: "1080p",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 14000,
+  });
+  const kingdomPlex = withMedia(
+    sourceDraft({
+      connector: "plex",
+      kind: "movie",
+      externalKey: "item:kingdom",
+      title: "Kingdom of Heaven",
+      year: 2005,
+      imdbId: "tt0399146",
+      tmdbId: "1495",
+      rating: 7.3,
+      genres: ["Action", "Adventure", "Drama"],
+      monitored: true,
+    }),
+    [kingdomTheatrical, kingdomDirectors],
+    ["Kingdom of Heaven", kingdomTheatrical.path, kingdomDirectors.path],
+  );
+  const kingdomRadarr = withMedia(
+    sourceDraft({
+      connector: "radarr",
+      kind: "movie",
+      externalKey: "8",
+      title: "Kingdom of Heaven",
+      year: 2005,
+      imdbId: "tt0399146",
+      tmdbId: "1495",
+      rating: 7.3,
+      genres: ["Action", "Adventure", "Drama"],
+      monitored: true,
+      qualityName: "Bluray-1080p",
+    }),
+    [kingdomTheatrical, kingdomDirectors],
+    ["Kingdom of Heaven", kingdomTheatrical.path, kingdomDirectors.path],
   );
 
   const wire: SourceDraft = sourceDraft({
@@ -605,6 +703,8 @@ export function demoRecords(): SourceDraft[] {
     parasiteRadarr,
     parasiteBazarr,
     heat,
+    kingdomPlex,
+    kingdomRadarr,
     wire,
     wirePlex,
     ...wireEpisodes,

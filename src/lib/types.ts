@@ -63,6 +63,10 @@ export type AudioTrack = {
   codec: string | null;
   streamIndex?: number | null;
   label?: string | null;
+  /** A separate audio file beside the video (for example .ac3 in an audio subfolder). */
+  file?: string | null;
+  /** An audio file on disk that Plex does not list. */
+  folderOnly?: boolean;
   detectedLanguage?: string | null;
   detectedRole?: "commentary" | "short" | null;
   fromFile?: boolean;

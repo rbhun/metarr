@@ -17,8 +17,9 @@ import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
-import { assignSidecars, languageFromSubtitleName, sidecarTracks } from "@/lib/detect/sidecars";
-import { folderOnlySubtitleNote, markSubtitlePresence, PLEX_ONLY_SUBTITLE, plexReadsSidecar, reconcileSubtitles } from "@/lib/media";
+import { audioCodecFromName, languageFromAudioName } from "@/lib/detect/audio-name";
+import { assignSidecars, audioSidecarTracks, FOLDER_ONLY_AUDIO, languageFromSubtitleName, sidecarTracks, withAudioSidecars } from "@/lib/detect/sidecars";
+import { crossCheckAudio, folderOnlySubtitleNote, markSubtitlePresence, PLEX_ONLY_SUBTITLE, plexReadsSidecar, reconcileSubtitles } from "@/lib/media";
 import type { SubtitleTrack } from "@/lib/types";
 import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
@@ -309,6 +310,40 @@ test("a subtitle in the subs folder is the external file", () => {
   assert.equal(named[0]?.file?.endsWith("subs/Ace Ventura.srt"), true);
 });
 
+test("a separate ac3 beside the video or in an audio folder is listed as not in Plex", () => {
+  assert.equal(languageFromAudioName("Film.hu.ac3"), "Hungarian");
+  assert.equal(audioCodecFromName("Film.hu.ac3"), "Dolby Digital");
+  assert.equal(audioCodecFromName("Film.eac3"), "Dolby Digital Plus");
+  const video = "/movies/Heat (1995)/Heat (1995).mkv";
+  const beside = audioSidecarTracks(video, ["Heat (1995).mkv", "Heat (1995).hu.ac3", "Heat (1995).en.srt"]);
+  assert.equal(beside.length, 1);
+  assert.equal(beside[0]?.language, "Hungarian");
+  assert.equal(beside[0]?.codec, "Dolby Digital");
+  assert.equal(beside[0]?.file, "/movies/Heat (1995)/Heat (1995).hu.ac3");
+  assert.equal(beside[0]?.folderOnly, true);
+  assert.equal(beside[0]?.conflict, FOLDER_ONLY_AUDIO);
+  const nested = audioSidecarTracks(video, ["Heat (1995).mkv", "audio/Heat (1995).en.ac3"]);
+  assert.equal(nested[0]?.file, "/movies/Heat (1995)/audio/Heat (1995).en.ac3");
+  assert.equal(nested[0]?.language, "English");
+  const plex = [{ language: "English", layout: "5.1", codec: "DTS" }];
+  const checked = crossCheckAudio(plex, [
+    { language: "English", layout: "5.1", codec: "DTS", fromFile: true },
+    ...beside,
+  ]);
+  assert.equal(checked.length, 2);
+  assert.equal(checked[0]?.language, "English");
+  assert.equal(checked[0]?.folderOnly, undefined);
+  assert.equal(checked[1]?.folderOnly, true);
+  assert.equal(checked[1]?.sources?.plex, null);
+  const merged = withAudioSidecars(video, plex, ["Heat (1995).mkv", "Heat (1995).hu.ac3"]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1]?.file?.endsWith("Heat (1995).hu.ac3"), true);
+  assert.equal(
+    withAudioSidecars(video, checked, ["Heat (1995).mkv", "Heat (1995).hu.ac3"]).filter((track) => track.file).length,
+    1,
+  );
+});
+
 test("a series unknown subtitle queues every episode that still has it", () => {
   const tracks = rollupSubtitles([
     {
@@ -341,6 +376,16 @@ test("a detected stereo or mono track can be heard again until it is commentary"
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, language: "English" }, 3, "Alien").length, 0);
   assert.equal(audioTargets("/movies/Adjustment.m2ts", { ...stereo, detectedLanguage: "Portuguese", detectedRole: "short", fromFile: true }, 1, "Film").length, 0);
   assert.equal(audioTargets("/movies/Adjustment.m2ts", { language: null, layout: "2.0", codec: "AC3", fromFile: true, detectedLanguage: "English" }, 9, "Film").length, 0);
+  const external = {
+    language: null,
+    layout: null,
+    codec: "Dolby Digital",
+    file: "/movies/Alien/audio/Alien.ac3",
+    fromFile: true,
+    folderOnly: true,
+  };
+  assert.deepEqual(audioTargets("/movies/Alien.mkv", external, 0, "Alien").map((target) => target.path), ["/movies/Alien/audio/Alien.ac3"]);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...external, language: "English" }, 0, "Alien").length, 0);
 });
 
 test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packets", () => {

@@ -595,11 +595,11 @@ function arrOnlyLanguages(file: MediaFile, kind: "audio" | "subtitle"): string[]
   return kind === "audio" ? file.audioLanguages : file.subtitleLanguages;
 }
 
-function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string }>(tracks: T[], languages: string[]): T[] {
+function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string; file?: string | null }>(tracks: T[], languages: string[]): T[] {
   const known = languages.map((language) => languageName(language)?.toLowerCase()).filter((language): language is string => Boolean(language));
   if (!known.length) return tracks;
   return tracks.map((track) => {
-    if (!track.fromFile || !track.language || track.placement === "external") return track;
+    if (!track.fromFile || !track.language || track.placement === "external" || track.file) return track;
     const name = languageName(track.language)?.toLowerCase();
     if (!name || known.includes(name)) return track;
     const extra = "Radarr or Sonarr does not list this.";
@@ -607,15 +607,30 @@ function noteMissingFromArr<T extends { language: string | null; fromFile?: bool
   });
 }
 
+function markFolderAudio(track: AudioTrack): AudioTrack {
+  return {
+    ...track,
+    fromFile: true,
+    folderOnly: true,
+    sources: { ...track.sources, plex: null, ...(track.file ? { file: track.file } : {}) },
+    conflict: track.conflict ?? "This audio file is beside the video, but Plex does not list separate audio files.",
+  };
+}
+
 /** Compare a folder scan with the tracks Plex stored. The file tag wins, and a mismatch is kept on the track. */
 export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): AudioTrack[] {
-  if (!scanned.length) return reported;
-  if (!reported.length) return scanned.map((track) => ({ ...track, fromFile: true }));
-  const count = Math.max(reported.length, scanned.length);
+  const scannedInternal = scanned.filter((track) => !track.file);
+  const scannedExternal = scanned.filter((track) => track.file);
+  if (!scannedInternal.length && !scannedExternal.length) return reported;
+  if (!reported.length && !scannedInternal.length) return scannedExternal.map(markFolderAudio);
+  if (!reported.length) {
+    return [...scannedInternal.map((track) => ({ ...track, fromFile: true })), ...scannedExternal.map(markFolderAudio)];
+  }
+  const count = Math.max(reported.length, scannedInternal.length);
   const tracks: AudioTrack[] = [];
   for (let index = 0; index < count; index += 1) {
     const report = reported[index];
-    const scan = scanned[index];
+    const scan = scannedInternal[index];
     if (!scan) {
       if (report) tracks.push({ ...report, sources: { ...report.sources, file: report.sources?.file ?? null } });
       continue;
@@ -657,7 +672,7 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
       ...(notes.length ? { conflict: notes.join(" ") } : {}),
     });
   }
-  return tracks;
+  return [...tracks, ...scannedExternal.map(markFolderAudio)];
 }
 
 function baseOf(file: string): string {
@@ -834,8 +849,8 @@ export function mergeAudioTracks(groups: AudioTrack[][]): AudioTrack[] {
   const tracks: AudioTrack[] = [];
   const seen = new Set<string>();
   for (const track of groups.flat()) {
-    if (!track.language && !track.layout && !track.codec) continue;
-    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}`.toLowerCase();
+    if (!track.language && !track.layout && !track.codec && !track.file) continue;
+    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}|${track.file ?? ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     tracks.push(track);
@@ -1061,9 +1076,11 @@ function fileName(path: string | null): string {
 }
 
 const EDITION_LABELS: Array<[RegExp, string]> = [
-  [/director'?s?\s*cut/i, "Director's Cut"],
+  [/(?:director'?s?\s*cut|directors)/i, "Director's Cut"],
   [/extended(?:\s*(?:cut|edition))?/i, "Extended"],
-  [/theatrical(?:\s*cut)?/i, "Theatrical"],
+  [/theatrical(?:\s*(?:cut|edition))?/i, "Theatrical"],
+  [/restored/i, "Restored"],
+  [/anniversary/i, "Anniversary"],
   [/unrated|\buncut\b/i, "Unrated"],
   [/open\s*matte/i, "Open Matte"],
   [/\bimax\b/i, "IMAX"],
@@ -1072,6 +1089,9 @@ const EDITION_LABELS: Array<[RegExp, string]> = [
   [/special\s*edition/i, "Special Edition"],
   [/final\s*cut/i, "Final Cut"],
 ];
+
+/** Edition labels offered by the Versions filter, in the same order as detection. */
+export const EDITION_FILTER_OPTIONS = EDITION_LABELS.map(([, label]) => label);
 
 function partPair(index: number, total: number): string | null {
   if (index < 1 || total < 2 || index > total || total > 12) return null;
@@ -1117,6 +1137,52 @@ export function editionLabel(filePath: string | null | undefined): string | null
   return null;
 }
 
+export type VersionFlag = "sample" | "short" | "extra" | "outtake" | "comic-relief" | "trailer";
+
+export const BONUS_VERSION_FLAGS = ["extra", "outtake", "comic-relief", "trailer"] as const satisfies readonly VersionFlag[];
+
+export const VERSION_FLAG_LABEL: Record<VersionFlag, string> = {
+  sample: "Sample",
+  short: "Short",
+  extra: "Extra",
+  outtake: "Outtake",
+  "comic-relief": "Comic Relief",
+  trailer: "Trailer",
+};
+
+const VERSION_FLAG_SET = new Set<string>(Object.keys(VERSION_FLAG_LABEL));
+
+/** Bonus content beside a title, often under Extras / Featurettes / Outtakes. */
+const BONUS_FLAGS: Array<[RegExp, VersionFlag]> = [
+  [/comic[\s._-]*relief/i, "comic-relief"],
+  [/(?:^|[^a-z0-9])(?:outtakes?|bloopers?)(?:[^a-z0-9]|$)/i, "outtake"],
+  [/(?:^|[^a-z0-9])(?:trailers?|tv[\s._-]*spots?)(?:[^a-z0-9]|$)/i, "trailer"],
+  [
+    /(?:^|[^a-z0-9])(?:extras?|featurettes?|special[\s._-]*features?|bonus(?:es)?|behind[\s._-]*the[\s._-]*scenes|deleted[\s._-]*scenes?|interviews?)(?:[^a-z0-9]|$)/i,
+    "extra",
+  ],
+  // Plex-style folder names that would otherwise look like ordinary words in a title.
+  [/(?:^|\/)(?:features?|shorts?|scenes?|other)(?:\/|$)/i, "extra"],
+];
+
+export function isVersionFlag(value: string): value is VersionFlag {
+  return VERSION_FLAG_SET.has(value);
+}
+
+export function isBonusFlag(flags: string[] | null | undefined): boolean {
+  return Boolean(flags?.some((flag) => (BONUS_VERSION_FLAGS as readonly string[]).includes(flag)));
+}
+
+/** Flag for bonus material from the file or folder name. Featurettes and Features count as Extra. */
+export function bonusFlag(filePath: string | null | undefined): VersionFlag | null {
+  if (!filePath?.trim()) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  for (const [pattern, flag] of BONUS_FLAGS) {
+    if (pattern.test(normalized)) return flag;
+  }
+  return null;
+}
+
 function isSamplePath(filePath: string | null | undefined): boolean {
   if (!filePath?.trim()) return false;
   const base = fileName(filePath).replace(/\.[a-z0-9]{1,5}$/i, "");
@@ -1141,6 +1207,8 @@ function isShortCopy(file: MediaFile, peers: MediaFile[]): boolean {
 
 export function versionFlags(file: MediaFile, peers: MediaFile[]): string[] {
   const flags: string[] = [];
+  const bonus = bonusFlag(file.path);
+  if (bonus) flags.push(bonus);
   if (isSamplePath(file.path)) flags.push("sample");
   if (isShortCopy(file, peers)) flags.push("short");
   return flags;
@@ -1157,6 +1225,9 @@ function missingMetadata(file: MediaFile): string[] {
 export function versionsFrom(files: MediaFile[]): MediaVersion[] {
   return [...files]
     .sort((left, right) => {
+      const leftBonus = bonusFlag(left.path) ? 1 : 0;
+      const rightBonus = bonusFlag(right.path) ? 1 : 0;
+      if (leftBonus !== rightBonus) return leftBonus - rightBonus;
       const resolution = resolutionRank(resolvedResolution(right)) - resolutionRank(resolvedResolution(left));
       if (resolution !== 0) return resolution;
       return hdrRank(right.hdr) - hdrRank(left.hdr);

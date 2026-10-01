@@ -1,5 +1,21 @@
 # Changes
 
+## 0.0.130
+
+- Extras, featurettes, outtakes, comic relief, and trailers are labeled on each version row from the file or folder name (including common subfolders like Featurettes and Outtakes). Bonus copies do not count as Duplicate versions. The Versions filter can also pick Extra, Outtake, Comic Relief, or Trailer. The demo Godfather title includes a featurette and outtakes.
+
+## 0.0.129
+
+- The library Filters menu has a Versions filter: None (a single unlabeled copy), Duplicate (multiple copies with no edition label), or a specific edition such as Theatrical or Director's Cut. The demo Matrix title has two unlabeled copies so Duplicate is easy to try.
+
+## 0.0.128
+
+- Separate audio files beside a video (or in an `audio` subfolder), such as `.ac3`, are found and listed even though Plex ignores them. They show as external rows marked "not in Plex", with the language from the file name when it is tagged. The demo Godfather title includes a Hungarian `.ac3` example.
+
+## 0.0.127
+
+- Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart. The demo library includes Kingdom of Heaven with theatrical and director’s cuts so the labels are easy to spot.
+
 ## 0.0.126
 
 - Sample a short audio track near the start as well as the middle, so a cut-off extra can still be heard.

@@ -15,7 +15,7 @@ function versionKey(version: MediaVersion, index: number): string {
 }
 
 function versionHeading(version: MediaVersion): string {
-  return [hdrText(version.hdr), version.edition, version.qualityName, version.bitrateKbps ? formatBitrate(version.bitrateKbps) : null]
+  return [hdrText(version.hdr), version.qualityName, version.bitrateKbps ? formatBitrate(version.bitrateKbps) : null]
     .filter(Boolean)
     .join(" · ");
 }
@@ -32,7 +32,7 @@ export function VersionLines({
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} flags={version.flags} sources={sourcesFor?.(version)} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} edition={version.edition} flags={version.flags} sources={sourcesFor?.(version)} />
             <span><MarkedText text={versionHeading(version)} /></span>
           </p>
           {version.missing.length ? (
@@ -88,7 +88,7 @@ export function VersionDetail({
         <div key={versionKey(version, index)} className="space-y-1 rounded-lg border p-2">
           <p className="font-medium">{version.name}</p>
           <p className="flex flex-wrap items-center gap-1">
-            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} flags={version.flags} sources={sourcesFor?.(version)} />
+            <MediaPills container={version.container} resolution={version.resolution} part={multiPartLabel(version.path, version.name)} edition={version.edition} flags={version.flags} sources={sourcesFor?.(version)} />
             <span><MarkedText text={versionHeading(version)} /></span>
             {version.is3d ? <span>3D</span> : null}
           </p>

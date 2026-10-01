@@ -217,7 +217,7 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(titleIdForPath(db, "/movies/Avatar (2009)/Avatar.hun.srt"), avatar.titleId);
   assert.equal(titleIdForPath(db, "/nowhere/Film.mkv"), null);
   assert.equal(titleIdForPath(db, "/movies/Unknown.mkv"), null);
-  assert.equal(queryLibrary({ kind: "all", rules: [], q: "", offset: 0, limit: 1, id: avatar.titleId }).titles[0]?.id, avatar.titleId);
+  assert.equal(queryLibrary({ kind: "all", rules: [], q: "", offset: 0, limit: 1, id: avatar.titleId }, db).titles[0]?.id, avatar.titleId);
   const byPath = enqueuePaths(
     db,
     [

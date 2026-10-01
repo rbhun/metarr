@@ -90,10 +90,12 @@ export function audioFormatConflict(
 
 /** True when a probed track has a format the stored track does not. */
 export function formatGaps(reported: AudioTrack[], scanned: AudioTrack[]): boolean {
-  return scanned.some((scan, index) => {
-    const report = reported[index];
-    const missingLayout = Boolean(scan.layout) && !report?.layout;
-    const missingCodec = Boolean(scan.codec) && !report?.codec;
-    return missingLayout || missingCodec;
-  });
+  return scanned
+    .filter((scan) => !scan.file)
+    .some((scan, index) => {
+      const report = reported[index];
+      const missingLayout = Boolean(scan.layout) && !report?.layout;
+      const missingCodec = Boolean(scan.codec) && !report?.codec;
+      return missingLayout || missingCodec;
+    });
 }

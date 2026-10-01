@@ -3,7 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
 import { ensureListedSource } from "@/lib/media";
@@ -293,6 +293,8 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_resolutions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_hdrs", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_editions", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "detect_results", "source", "TEXT");
@@ -735,7 +737,17 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         audioTracks: parseAudioTracks(version.audioTracks),
         subtitleTracks: parseSubtitleTracks(version.subtitleTracks),
         missing: Array.isArray(version.missing) ? version.missing.filter((gap): gap is string => typeof gap === "string") : [],
-        flags: Array.isArray(version.flags) ? version.flags.filter((flag): flag is string => flag === "sample" || flag === "short") : [],
+        flags: Array.isArray(version.flags)
+          ? version.flags.filter(
+              (flag): flag is string =>
+                flag === "sample" ||
+                flag === "short" ||
+                flag === "extra" ||
+                flag === "outtake" ||
+                flag === "comic-relief" ||
+                flag === "trailer",
+            )
+          : [],
         fileBytes: typeof version.fileBytes === "number" ? version.fileBytes : null,
         durationMinutes: typeof version.durationMinutes === "number" ? version.durationMinutes : null,
         ...(parseFileSources(version.presence) ? { presence: parseFileSources(version.presence) } : {}),
@@ -779,7 +791,8 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
     const language = typeof track.language === "string" ? track.language : null;
     const layout = typeof track.layout === "string" ? track.layout : null;
     const codec = typeof track.codec === "string" ? track.codec : null;
-    if (!language && !layout && !codec) return [];
+    const file = typeof track.file === "string" ? track.file : null;
+    if (!language && !layout && !codec && !file) return [];
     const streamIndex = optionalIndex(track.streamIndex);
     const label = typeof track.label === "string" ? track.label : null;
     return [{
@@ -788,6 +801,8 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
       codec,
       ...(streamIndex != null ? { streamIndex } : {}),
       ...(label ? { label } : {}),
+      ...(file ? { file } : {}),
+      ...(track.folderOnly === true ? { folderOnly: true } : {}),
       ...(track.omittedByPlex === true ? { omittedByPlex: true } : {}),
       ...(track.fromFile === true ? { fromFile: true } : {}),
       ...(typeof track.conflict === "string" && track.conflict ? { conflict: track.conflict } : {}),
@@ -1129,6 +1144,10 @@ function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections
   return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
 }
 
+function audio(videoPath: string | null, tracks: AudioTrack[], detections: Map<string, StoredDetection>): AudioTrack[] {
+  return overlayAudio(videoPath, withAudioSidecars(videoPath, tracks), detections);
+}
+
 function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {
   if (kind === "series") return inSonarr ? "sonarr" : null;
   return inRadarr ? "radarr" : null;
@@ -1139,7 +1158,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
   const app = listedApp(row.kind, row.in_radarr === 1, row.in_sonarr === 1);
   const versions = parseVersions(row.versions_json).map((version) => ({
     ...version,
-    audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+    audioTracks: ensureListedSource(audio(version.path, version.audioTracks, detections), app),
     subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
   }));
   return {
@@ -1166,7 +1185,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: ensureListedSource(overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    audioTracks: ensureListedSource(audio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
     subtitleTracks: ensureListedSource(subtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     posterPath: row.poster_path,
     runtimeMinutes: row.runtime_minutes,
@@ -1332,13 +1351,13 @@ function libraryTitles(
     const files = versions.length
       ? versions.map((version) => ({
           path: version.path,
-          audioTracks: overlayAudio(version.path, version.audioTracks, detections),
+          audioTracks: audio(version.path, version.audioTracks, detections),
           subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
         }))
       : [
           {
             path: episode.path,
-            audioTracks: overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections),
+            audioTracks: audio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections),
             subtitleTracks: subtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections),
           },
         ];
@@ -1417,13 +1436,13 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: ensureListedSource(overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    audioTracks: ensureListedSource(audio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
     subtitleTracks: ensureListedSource(subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
     versions: parseVersions(row.versions_json).map((version) => ({
       ...version,
-      audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+      audioTracks: ensureListedSource(audio(version.path, version.audioTracks, detections), app),
       subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
     })),
     inPlex: row.in_plex === 1,
