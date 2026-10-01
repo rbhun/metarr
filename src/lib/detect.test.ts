@@ -347,7 +347,9 @@ test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packet
   assert.deepEqual(sampleOffsets(6360), [600, 1200]);
   assert.deepEqual(sampleOffsets(null), [600, 1200]);
   assert.deepEqual(sampleOffsets(15 * 60), [600]);
-  assert.deepEqual(sampleOffsets(40), [20]);
+  assert.deepEqual(sampleOffsets(40), [20, 1]);
+  assert.deepEqual(sampleOffsets(114), [57, 1]);
+  assert.deepEqual(sampleOffsets(2), [1]);
   assert.equal(clipStart(600, 3_600), 4_200);
   assert.equal(clipStart(600, 0), 600);
   assert.equal(clipStart(600, null), 600);
