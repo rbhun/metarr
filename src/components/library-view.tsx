@@ -1148,6 +1148,7 @@ function EpisodeRows({
                                 bitrateKbps={null}
                                 playableLabel={episode.playableLabel}
                                 missing={episode.versions[0]?.missing}
+                                flags={episode.versions[0]?.flags}
                                 part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
                                 edition={episode.versions[0]?.edition}
                                 sources={fileHoverSources(
