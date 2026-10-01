@@ -35,21 +35,87 @@ function filePathForScan(catalogId: number, episodeId?: number | null): string |
   return null;
 }
 
-/** Ask Plex to scan the folder for a title it does not have yet. */
+export type ScanItem = { catalogId: number; episodeId?: number | null };
+
+/** One Plex refresh per folder, so several episodes of one show are a single scan. */
+export function uniqueScanFolders(targets: Array<{ key: string; path: string }>): Array<{ key: string; path: string }> {
+  const seen = new Set<string>();
+  const unique: Array<{ key: string; path: string }> = [];
+  for (const target of targets) {
+    const path = target.path.replace(/\\/g, "/").replace(/\/+$/, "");
+    const id = `${target.key}\0${path.toLowerCase()}`;
+    if (!path || seen.has(id)) continue;
+    seen.add(id);
+    unique.push({ key: target.key, path });
+  }
+  return unique;
+}
+
+function scanTarget(
+  item: ScanItem,
+  maps: ReturnType<typeof readDetectSettings>["pathMaps"],
+  locations: Array<{ key: string; path: string }>,
+): { key: string; path: string } {
+  const filePath = filePathForScan(item.catalogId, item.episodeId);
+  if (!filePath) throw new Error("This title has no file path to scan.");
+  const onPlex = pathOnPlex(filePath, maps);
+  const target = plexFolderToScan(locations, onPlex) ?? (onPlex === filePath ? null : plexFolderToScan(locations, filePath));
+  if (!target) throw new Error("This file is not inside a Plex library folder.");
+  return target;
+}
+
+function folderName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || "this folder";
+}
+
+/** Ask Plex to scan the folder for one title. */
 export async function askPlexToScan(catalogId: number, episodeId?: number | null): Promise<{ message: string }> {
+  return askPlexToScanSelection([{ catalogId, episodeId }]);
+}
+
+/** Ask Plex to scan the folders for the selected titles and episodes. */
+export async function askPlexToScanSelection(items: ScanItem[]): Promise<{ message: string }> {
+  if (items.length === 0) throw new Error("Select a title first.");
   const db = getDb();
   const connector = listConnectors(db).find((item) => item.id === "plex");
   if (!connector?.enabled || !connector.baseUrl || !connector.apiKey) {
     throw new Error("Plex is not connected. Add it in Settings.");
   }
-  const filePath = filePathForScan(catalogId, episodeId);
-  if (!filePath) throw new Error("This title has no file path to scan.");
   const maps = readDetectSettings(db).pathMaps;
-  const onPlex = pathOnPlex(filePath, maps);
   const locations = await fetchPlexLibraryFolders(connector.baseUrl, connector.apiKey, plexExcludedLibraries(db));
-  const target = plexFolderToScan(locations, onPlex) ?? (onPlex === filePath ? null : plexFolderToScan(locations, filePath));
-  if (!target) throw new Error("This file is not inside a Plex library folder.");
-  await refreshPlexSectionFolder(connector.baseUrl, connector.apiKey, target.key, target.path);
-  const name = target.path.split("/").filter(Boolean).pop() || "this folder";
-  return { message: `Plex is scanning ${name}. Sync again after it finishes to show the title here.` };
+  if (items.length === 1) {
+    const only = items[0];
+    if (!only) throw new Error("Select a title first.");
+    const target = scanTarget(only, maps, locations);
+    await refreshPlexSectionFolder(connector.baseUrl, connector.apiKey, target.key, target.path);
+    return { message: `Plex is scanning ${folderName(target.path)}. Sync again after it finishes to show the title here.` };
+  }
+  const targets: Array<{ key: string; path: string }> = [];
+  let skipped = 0;
+  for (const item of items) {
+    try {
+      targets.push(scanTarget(item, maps, locations));
+    } catch {
+      skipped += 1;
+    }
+  }
+  const folders = uniqueScanFolders(targets);
+  if (folders.length === 0) throw new Error("None of the selected files are inside a Plex library folder.");
+  let sent = 0;
+  let sentName = "";
+  let firstError: string | null = null;
+  for (const folder of folders) {
+    try {
+      await refreshPlexSectionFolder(connector.baseUrl, connector.apiKey, folder.key, folder.path);
+      sent += 1;
+      if (!sentName) sentName = folderName(folder.path);
+    } catch (error) {
+      firstError = error instanceof Error ? error.message : "Plex did not scan.";
+    }
+  }
+  if (sent === 0) throw new Error(firstError ?? "Plex did not scan.");
+  const lead = sent === 1 ? `Plex is scanning ${sentName}.` : `Plex is scanning ${sent} folders.`;
+  const missed = skipped ? ` ${skipped} selected ${skipped === 1 ? "row was" : "rows were"} skipped.` : "";
+  const dropped = sent < folders.length ? " Some folders could not be sent." : "";
+  return { message: `${lead}${missed}${dropped} Sync again after it finishes to show changes here.` };
 }

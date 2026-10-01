@@ -8,6 +8,16 @@ export function isSubtitleFile(file: string): boolean {
   return SUBTITLE_EXT.test(file);
 }
 
+/** MicroDVD `.sub` files are text. A VobSub `.sub` is an MPEG packet stream. */
+export function subtitleSampleIsText(sample: Uint8Array): boolean {
+  if (sample.length === 0) return false;
+  let noisy = 0;
+  for (const byte of sample) {
+    if (byte === 0 || byte < 9 || (byte > 13 && byte < 32)) noisy += 1;
+  }
+  return noisy / sample.length <= 0.02;
+}
+
 export function fileBaseName(file: string): string {
   return file.split(/[\\/]/).pop() ?? file;
 }

@@ -37,7 +37,7 @@ import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versi
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
-import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
+import { openService, pushToPlex, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 
 type KindFilter = "all" | TitleKind;
@@ -46,6 +46,8 @@ type SelectedRow = {
   key: string;
   label: string;
   path: string | null;
+  catalogId: number;
+  episodeId?: number;
 };
 
 const COLUMNS = 8;
@@ -55,6 +57,7 @@ function titleSelection(title: LibraryTitle): SelectedRow {
     key: `title:${title.id}`,
     label: title.year ? `${title.title} (${title.year})` : title.title,
     path: title.versions.length > 1 ? title.versions.map((version) => version.path).filter(Boolean).join(" | ") : title.path,
+    catalogId: title.id,
   };
 }
 
@@ -63,6 +66,8 @@ function episodeSelection(series: LibraryTitle, episode: LibraryEpisode): Select
     key: `episode:${episode.id}`,
     label: `${series.title} ${episodeCode(episode.season, episode.episode)} ${episode.title}`.trim(),
     path: episode.versions.length > 1 ? episode.versions.map((version) => version.path).filter(Boolean).join(" | ") : episode.path,
+    catalogId: series.id,
+    episodeId: episode.id,
   };
 }
 
@@ -278,6 +283,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [detail, setDetail] = useState<LibraryTitle | null>(null);
   const [detailEpisode, setDetailEpisode] = useState<LibraryEpisode | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [plexBusy, setPlexBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
@@ -502,6 +508,18 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function pushSelected() {
+    const items = [...selected.values()].map((row) => ({ catalogId: row.catalogId, episodeId: row.episodeId }));
+    setPlexBusy(true);
+    try {
+      toast.success(await pushToPlex(items));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not ask Plex to scan.");
+    } finally {
+      setPlexBusy(false);
+    }
+  }
+
   async function copySelected() {
     const rows = [...selected.values()];
     const text = rows.map((row) => `${row.label}\t${row.path ?? "no file"}`).join("\n");
@@ -600,6 +618,9 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <span className="text-muted-foreground">Marks rows in this browser only.</span>
             <Button size="sm" variant="outline" onClick={() => void copySelected()}>
               Copy titles and paths
+            </Button>
+            <Button size="sm" variant="outline" disabled={plexBusy} onClick={() => void pushSelected()}>
+              {plexBusy ? "Pushing…" : "Push to Plex"}
             </Button>
             <Button
               size="sm"

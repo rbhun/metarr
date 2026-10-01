@@ -30,7 +30,8 @@ import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeF
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths, unreadSidecars } from "@/lib/detect/publish";
-import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubCanvasSize, vobsubExtractArgs } from "@/lib/detect/picture";
+import { subtitleSampleIsText } from "@/lib/detect/subtitle-name";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
@@ -527,6 +528,17 @@ test("a vobsub picture is drawn as an image and cropped to the text", () => {
   assert.match(args[args.indexOf("-filter_complex") + 1] ?? "", /\[0:s:2\].*\[sub\]/);
   assert.equal(args[args.indexOf("-map") + 1], "[sub]");
   assert.equal(args[args.indexOf("-c:v") + 1], "png");
+  assert.equal(args.includes("-canvas_size"), false);
+});
+
+test("a binary sub file is a picture and a microdvd sub file is text", () => {
+  assert.equal(subtitleSampleIsText(Buffer.from("{1}{50}Hello there\n")), true);
+  assert.equal(subtitleSampleIsText(Buffer.from([0x00, 0x00, 0x01, 0xba, 0x44, 0x00, 0x00, 0x01, 0xbd])), false);
+  const loose = vobsubExtractArgs("/movies/Film.sub", 0, 0, "/tmp/cue-%02d.png", vobsubCanvasSize(null));
+  assert.ok(loose.indexOf("-canvas_size") < loose.indexOf("-i"));
+  assert.equal(loose[loose.indexOf("-canvas_size") + 1], "1920x1080");
+  assert.equal(loose[loose.indexOf("-ss") + 1], "0");
+  assert.equal(vobsubCanvasSize("# VobSub index file\nsize: 720x576\n"), "720x576");
 });
 
 test("pgs bitmap text is read back from the subtitle stream", () => {

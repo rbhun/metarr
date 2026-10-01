@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.132
+
+- Read a binary `.sub` subtitle as pictures, so its language can be recognized instead of being rejected as unreadable text.
+
+## 0.0.131
+
+- Add Push to Plex on the selected rows, so those folders are scanned again.
+
 ## 0.0.130
 
 - Extras, featurettes, outtakes, comic relief, and trailers are labeled on each version row from the file or folder name (including common subfolders like Featurettes and Outtakes). Bonus copies do not count as Duplicate versions. The Versions filter can also pick Extra, Outtake, Comic Relief, or Trailer. The demo Godfather title includes a featurette and outtakes.
