@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.148
+
+- Rip the largest Blu-ray title instead of the longest. On discs with hundreds of clips one clip can report a broken, hours-long duration, so a 181 MB clip was saved as the movie. A rip far smaller than MakeMKV announced now fails instead of being saved, and the result names the playlist, length and size.
+
 ## 0.0.147
 
 - Match a file’s local-language title to the episode list, and show that episode’s English name and Sonarr number.

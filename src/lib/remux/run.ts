@@ -5,9 +5,25 @@ import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
-import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
+import { formatBytes } from "@/lib/format";
+import { mainTitle, parseDiscTitles, progressPercent, type DiscTitle } from "@/lib/remux/robot";
 
 const RIP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+/** A remux keeps every byte of the chosen streams; far less than MakeMKV announced means the wrong or a broken title. */
+const MIN_SIZE_SHARE = 0.25;
+
+function titleName(title: DiscTitle): string {
+  return `title ${title.index}${title.sourceFile ? ` (${title.sourceFile})` : ""}`;
+}
+
+/** Null when the saved MKV is plausibly the whole title. */
+export function undersizedMessage(title: DiscTitle, savedBytes: number): string | null {
+  if (!title.bytes || savedBytes >= title.bytes * MIN_SIZE_SHARE) return null;
+  return (
+    `MakeMKV saved only ${formatBytes(savedBytes)} of the ${formatBytes(title.bytes)} ${titleName(title)}, ` +
+    `so nothing was saved next to the disc. Open the MakeMKV log in Tasks for its reason.`
+  );
+}
 
 function listMkv(directory: string): Array<{ path: string; bytes: number }> {
   if (!fs.existsSync(directory)) return [];
@@ -172,12 +188,12 @@ export async function ripDisc(options: {
   onProgress(0, "Reading the disc");
   const info = await runMakeMkv(binary, ["info", source], home, () => undefined, logDir);
   const titles = parseDiscTitles(info);
-  const main = longestTitle(titles);
+  const main = mainTitle(titles);
   if (!main) throw new Error("MakeMKV did not find a title on this disc.");
   if (options.dryRun) {
     const target = path.join(outputDir, `${safeBaseName(label)}.mkv`);
     const others = extras && titles.length > 1 ? ` and ${titles.length - 1} other titles as -other files` : "";
-    return `Dry run: would remux title ${main.index} (${clock(main.seconds)})${others} into ${target}, keeping every audio and subtitle track. Nothing was written.`;
+    return `Dry run: would remux ${titleName(main)}, ${clock(main.seconds)}, ${formatBytes(main.bytes)}${others} into ${target}, keeping every audio and subtitle track. Nothing was written.`;
   }
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(workDir, { recursive: true });
@@ -195,12 +211,16 @@ export async function ripDisc(options: {
     onProgress(100, "Saving files");
     const produced = listMkv(workDir);
     const plan = planRemuxFiles(outputDir, label, produced, extras, (file) => fs.existsSync(file));
+    const saved = produced.find((file) => file.path === plan.main.from)?.bytes ?? 0;
+    const short = undersizedMessage(main, saved);
+    if (short) throw new Error(short);
     deliverFile(plan.main.from, plan.main.to);
     for (const extra of plan.extras) deliverFile(extra.from, extra.to);
     const movie = path.basename(plan.main.to);
-    if (!extras || plan.extras.length === 0) return `Saved ${movie}. The disc was left in place.`;
+    const from = `from ${titleName(main)}, ${clock(main.seconds)}, ${formatBytes(saved)}`;
+    if (!extras || plan.extras.length === 0) return `Saved ${movie} ${from}. The disc was left in place.`;
     const count = plan.extras.length === 1 ? "1 extra" : `${plan.extras.length} extras`;
-    return `Saved ${movie} and ${count}. The disc was left in place.`;
+    return `Saved ${movie} ${from}, and ${count}. The disc was left in place.`;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

@@ -14,8 +14,8 @@ import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWor
 import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
-import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
-import { makemkvFailure, makemkvMessages, ripDisc } from "@/lib/remux/run";
+import { mainTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
+import { makemkvFailure, makemkvMessages, ripDisc, undersizedMessage } from "@/lib/remux/run";
 import { prepareMakemkvLogDir, readMakemkvLog } from "@/lib/remux/logs";
 import { makemkvSource, outputDirectory, resolveDiscPath } from "@/lib/remux/source";
 import {
@@ -72,8 +72,8 @@ test("a disc counts as converted only when the title also has a playable video f
 test("robot info keeps the longest title and reads progress", () => {
   const titles = parseDiscTitles(INFO);
   assert.equal(titles.length, 3);
-  assert.equal(longestTitle(titles)?.index, 1);
-  assert.equal(longestTitle(titles)?.seconds, 2 * 3600 + 14 * 60 + 32);
+  assert.equal(mainTitle(titles)?.index, 1);
+  assert.equal(mainTitle(titles)?.seconds, 2 * 3600 + 14 * 60 + 32);
   assert.equal(progressPercent("PRGV:32768,0,65536"), 50);
   assert.equal(progressPercent("PRGV:65536,0,65536"), 100);
   assert.equal(progressPercent("MSG:1,0,0,\"hi\""), null);
@@ -390,4 +390,28 @@ test("a DVD whose listed VOB is gone still opens from its VIDEO_TS folder", () =
   );
   assert.match(unreadablePathMessage("/nowhere-metarr/Movies/x.iso"), /\/nowhere-metarr does not exist inside Metarr/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the feature is the largest title, even when a small clip reports a longer duration", () => {
+  const info = [
+    'TINFO:0,9,0,"2:19:01"',
+    'TINFO:0,11,0,"34359738368"',
+    'TINFO:0,16,0,"00010.mpls"',
+    'TINFO:95,9,0,"26:30:12"',
+    'TINFO:95,11,0,"189792256"',
+    'TINFO:95,16,0,"00377.m2ts"',
+    'TINFO:7,9,0,"0:01:30"',
+    'TINFO:7,11,0,"104857600"',
+  ].join("\n");
+  const titles = parseDiscTitles(info);
+  const main = mainTitle(titles);
+  assert.equal(main?.index, 0);
+  assert.equal(main?.sourceFile, "00010.mpls");
+  assert.equal(main?.bytes, 34359738368);
+  assert.equal(undersizedMessage(main!, 30 * 1024 **3), null);
+  assert.match(
+    undersizedMessage(main!, 181 * 1024 ** 2) ?? "",
+    /^MakeMKV saved only 181 MB of the 32\.0 GB title 0 \(00010\.mpls\), so nothing was saved next to the disc\./,
+  );
+  assert.equal(undersizedMessage({ ...main!, bytes: 0 }, 1), null);
 });
