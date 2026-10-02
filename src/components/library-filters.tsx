@@ -23,6 +23,8 @@ const FIELD_LABEL: Record<FilterField, string> = {
   score: "Score",
   bitrate: "Bitrate",
   year: "Year",
+  kind: "Series or movie",
+  length: "Length",
   resolution: "Resolution",
   hdr: "HDR",
   container: "File type",
@@ -152,6 +154,14 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
       </select>
     );
   }
+  if (rule.field === "kind") {
+    return (
+      <select className={selectClass} aria-label="Series or movie" value={rule.value} onChange={(event) => onChange(event.target.value)}>
+        <option value="movie">Movie</option>
+        <option value="series">Series</option>
+      </select>
+    );
+  }
   if (rule.field === "file") {
     return (
       <select className={selectClass} aria-label="File" value={rule.value} onChange={(event) => onChange(event.target.value)}>
@@ -197,7 +207,7 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
       </select>
     );
   }
-  const numeric = rule.field === "score" || rule.field === "bitrate" || rule.field === "year";
+  const numeric = rule.field === "score" || rule.field === "bitrate" || rule.field === "year" || rule.field === "length";
   const unknown = rule.value === "unknown";
   return (
     <div className="flex items-center gap-1.5">
@@ -205,7 +215,7 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
         className={selectClass}
         aria-label={`${FIELD_LABEL[rule.field]} value`}
         value={unknown ? "unknown" : "set"}
-        onChange={(event) => onChange(event.target.value === "unknown" ? "unknown" : rule.field === "genre" ? "" : rule.field === "bitrate" ? "10" : rule.field === "score" ? "7" : "2000")}
+        onChange={(event) => onChange(event.target.value === "unknown" ? "unknown" : rule.field === "genre" ? "" : rule.field === "bitrate" ? "10" : rule.field === "score" ? "7" : rule.field === "length" ? "90" : "2000")}
       >
         <option value="set">{rule.field === "genre" ? "Named" : "A number"}</option>
         {unknownOption()}
@@ -216,11 +226,12 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
           aria-label={FIELD_LABEL[rule.field]}
           inputMode={numeric ? "decimal" : "text"}
           value={rule.value}
-          placeholder={rule.field === "genre" ? "Drama" : rule.field === "bitrate" ? "10" : ""}
+          placeholder={rule.field === "genre" ? "Drama" : rule.field === "bitrate" ? "10" : rule.field === "length" ? "90" : ""}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
       {!unknown && rule.field === "bitrate" ? <span className="text-xs text-muted-foreground">Mbps</span> : null}
+      {!unknown && rule.field === "length" ? <span className="text-xs text-muted-foreground">min</span> : null}
       {!unknown && rule.field === "score" ? <span className="text-xs text-muted-foreground">/ 10</span> : null}
     </div>
   );
@@ -337,7 +348,7 @@ export function LibraryFilters({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Add a filter to match a language, an empty genre, a content rating such as PG, or a bitrate above a number of Mbps.
+          Add a filter to match a language, a movie or series, a length in minutes, an empty genre, a content rating such as PG, or a bitrate above a number of Mbps.
         </p>
       )}
     </div>

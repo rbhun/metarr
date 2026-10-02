@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.133
+
+- Filter the library by movie or series, and by length in minutes.
+
 ## 0.0.132
 
 - Read a binary `.sub` subtitle as pictures, so its language can be recognized instead of being rejected as unreadable text.
