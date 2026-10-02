@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.145
+
+- Add Rescan files on a title’s detail panel so one movie or episode can re-read its folder on disk and the connected apps without a full library sync.
+
 ## 0.0.144
 
 - Fix the image build: TypeScript rejected a part-number match that could be null, so `npm run build` failed in Docker.

@@ -1001,6 +1001,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
           }
         }}
         onLookup={(id) => void lookup([id])}
+        onRescanned={(catalogId) => {
+          setDetailEpisode(null);
+          if (catalogId == null) {
+            setDetail(null);
+          } else if (detail && detail.id !== catalogId) {
+            setDetail({ ...detail, id: catalogId });
+          }
+          bump();
+        }}
       />
     </div>
   );

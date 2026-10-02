@@ -45,6 +45,7 @@ export function TitleDetail({
   fileBrowserRoot = "",
   onOpenChange,
   onLookup,
+  onRescanned,
 }: {
   title: LibraryTitle | null;
   episode?: LibraryEpisode | null;
@@ -54,9 +55,11 @@ export function TitleDetail({
   fileBrowserRoot?: string;
   onOpenChange: (open: boolean) => void;
   onLookup: (id: number) => void;
+  onRescanned?: (catalogId: number | null) => void;
 }) {
   const [arrBusy, setArrBusy] = useState<"open" | "search" | "plex" | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
+  const [rescanBusy, setRescanBusy] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const router = useRouter();
   async function detectNow() {
@@ -68,6 +71,25 @@ export function TitleDetail({
       toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
     } finally {
       setDetectBusy(false);
+    }
+  }
+  async function rescanFiles() {
+    if (!title) return;
+    setRescanBusy(true);
+    try {
+      const response = await fetch(`/api/library/${title.id}/rescan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
+      });
+      const body = (await response.json()) as { message?: string; error?: string; catalogId?: number | null };
+      if (!response.ok) throw new Error(body.error || "The rescan failed.");
+      toast.success(body.message || "Files re-read.");
+      onRescanned?.(body.catalogId ?? title.id);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The rescan failed.");
+    } finally {
+      setRescanBusy(false);
     }
   }
   const rating = title ? displayRating(title.rating, title.online) : { value: null, source: null };
@@ -197,6 +219,16 @@ export function TitleDetail({
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" className="w-fit" disabled={detectBusy} onClick={() => void detectNow()}>
                   {detectBusy ? "Queuing…" : "Detect languages now"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-fit"
+                  disabled={rescanBusy || !(file?.path || file?.versions.some((version) => version.path))}
+                  onClick={() => void rescanFiles()}
+                  title="Re-read this title’s files on disk and from the connected apps"
+                >
+                  {rescanBusy ? "Scanning…" : "Rescan files"}
                 </Button>
                 {canConvert ? (
                   <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void convertDisc()} title="Remux the disc to MKV now, without waiting for the overnight window">
