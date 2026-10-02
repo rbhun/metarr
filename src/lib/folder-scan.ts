@@ -13,6 +13,7 @@ import { fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqu
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
+import { throwIfSyncCancelled } from "@/lib/sync-cancel";
 import type Database from "better-sqlite3";
 
 const ROOTS_KEY = "folder_roots";
@@ -329,6 +330,7 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]!;
     onProgress({ message: `Files · ${index + 1}/${files.length} ${path.basename(file)}`, fetched: index, total: files.length });
+    throwIfSyncCancelled();
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);

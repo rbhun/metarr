@@ -23,6 +23,7 @@ import { queueFormatRefresh } from "@/lib/detect/format-refresh";
 import { askPlexToReadSidecars } from "@/lib/detect/publish";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
+import { isSyncCancelled, runWithSyncAbort, throwIfSyncCancelled } from "@/lib/sync-cancel";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
 type Memory = {
@@ -31,6 +32,7 @@ type Memory = {
   finishedAt: string | null;
   status: SyncStatus["status"];
   connectors: ConnectorProgress[];
+  abort: AbortController | null;
 };
 
 const globalForSync = globalThis as unknown as { __metarrSync?: Memory };
@@ -53,6 +55,7 @@ function memory(): Memory {
       finishedAt: null,
       status: "idle",
       connectors: freshConnectors(),
+      abort: null,
     };
   }
   return globalForSync.__metarrSync;
@@ -73,7 +76,14 @@ export function getSyncStatus(): SyncStatus {
   const current = memory();
   const demo = isDemo();
   if (current.running) {
-    return { ...current, connectors: current.connectors.map((item) => ({ ...item })), demo };
+    return {
+      running: true,
+      startedAt: current.startedAt,
+      finishedAt: current.finishedAt,
+      status: current.status,
+      connectors: current.connectors.map((item) => ({ ...item })),
+      demo,
+    };
   }
   const status = getMeta(getDb(), "last_sync_status");
   const finishedAt = getMeta(getDb(), "last_sync_at");
@@ -113,14 +123,49 @@ async function pullConnector(
 
 async function runSync(only?: ConnectorId) {
   const status = memory();
+  const abort = status.abort;
+  if (!abort) return;
+  await runWithSyncAbort(abort.signal, () => runSyncBody(only));
+}
+
+function markCancelled(status: Memory, only?: ConnectorId) {
+  for (const slot of status.connectors) {
+    if (only && slot.id !== only) continue;
+    if (slot.state === "pending" || slot.state === "running") {
+      slot.state = "skipped";
+      slot.message = "Cancelled.";
+    }
+  }
+}
+
+async function runSyncBody(only?: ConnectorId) {
+  const status = memory();
   const db = getDb();
   const wasDemo = isDemo(db);
   const staged = new Map<ConnectorId, SourceDraft[]>();
+  let cancelled = false;
+
+  const trackProgress = (slot: ConnectorProgress) => (update: ProgressUpdate) => {
+    throwIfSyncCancelled(status.abort?.signal);
+    slot.message = update.message;
+    slot.fetched = update.fetched;
+    slot.total = update.total;
+  };
 
   for (const connector of listConnectors(db)) {
     if (only && connector.id !== only) continue;
     const slot = status.connectors.find((item) => item.id === connector.id);
     if (!slot) continue;
+    try {
+      throwIfSyncCancelled(status.abort?.signal);
+    } catch (error) {
+      if (isSyncCancelled(error)) {
+        cancelled = true;
+        markCancelled(status, only);
+        break;
+      }
+      throw error;
+    }
     if (connector.id === "files") {
       const scan = readFolderScan(db);
       if (!scan.enabled && !only) {
@@ -140,11 +185,7 @@ async function runSync(only?: ConnectorId) {
           ...loadSourceRecords(db).filter((record) => record.connector !== "files" && !staged.has(record.connector)),
           ...[...staged.values()].flat(),
         ];
-        const records = await scanFolders(scan.roots, known, (update) => {
-          slot.message = update.message;
-          slot.fetched = update.fetched;
-          slot.total = update.total;
-        });
+        const records = await scanFolders(scan.roots, known, trackProgress(slot));
         staged.set(connector.id, records);
         const refresh = formatRefreshPaths(known, records);
         if (refresh.length) queueFormatRefresh(db, refresh);
@@ -154,6 +195,13 @@ async function runSync(only?: ConnectorId) {
         slot.fetched = records.length;
         slot.total = records.length;
       } catch (error) {
+        if (isSyncCancelled(error)) {
+          cancelled = true;
+          slot.state = "skipped";
+          slot.message = "Cancelled.";
+          markCancelled(status, only);
+          break;
+        }
         slot.state = "error";
         slot.message = error instanceof Error ? error.message : "Folder scan failed.";
       }
@@ -173,17 +221,20 @@ async function runSync(only?: ConnectorId) {
     slot.state = "running";
     slot.message = `Connecting to ${CONNECTOR_LABEL[connector.id]}`;
     try {
-      const records = await pullConnector(connector.id, connector.baseUrl, connector.apiKey, (update) => {
-        slot.message = update.message;
-        slot.fetched = update.fetched;
-        slot.total = update.total;
-      });
+      const records = await pullConnector(connector.id, connector.baseUrl, connector.apiKey, trackProgress(slot));
       staged.set(connector.id, records);
       slot.state = "success";
       slot.message = describe(records);
       slot.fetched = records.length;
       slot.total = records.length;
     } catch (error) {
+      if (isSyncCancelled(error)) {
+        cancelled = true;
+        slot.state = "skipped";
+        slot.message = "Cancelled.";
+        markCancelled(status, only);
+        break;
+      }
       slot.state = "error";
       slot.message = error instanceof Error ? error.message : "Sync failed.";
     }
@@ -222,7 +273,7 @@ async function runSync(only?: ConnectorId) {
     });
     write();
     const files = status.connectors.find((slot) => slot.id === "files");
-    if (staged.has("files") && files) {
+    if (staged.has("files") && files && !cancelled) {
       try {
         const asked = await askPlexToReadSidecars(db);
         if (asked) files.message = `${files.message} ${asked}`;
@@ -246,12 +297,22 @@ async function runSync(only?: ConnectorId) {
     return {
       id: slot.id,
       ok: slot.state === "success" ? true : slot.state === "error" ? false : null,
-      message: slot.message,
+      message: cancelled && slot.message === "Cancelled." ? "Cancelled." : slot.message,
     };
   });
   const noteFailures = notes.filter((note) => note.ok === false).length;
   const noteSuccesses = notes.filter((note) => note.ok === true).length;
-  const outcome = noteSuccesses > 0 && noteFailures > 0 ? "partial" : noteSuccesses > 0 ? "success" : noteFailures > 0 ? "error" : "idle";
+  const outcome = cancelled
+    ? noteSuccesses > 0
+      ? "partial"
+      : "idle"
+    : noteSuccesses > 0 && noteFailures > 0
+      ? "partial"
+      : noteSuccesses > 0
+        ? "success"
+        : noteFailures > 0
+          ? "error"
+          : "idle";
   setMeta(db, "last_sync_at", finishedAt);
   setMeta(db, "last_sync_status", outcome);
   setMeta(db, "last_sync_notes", JSON.stringify(notes));
@@ -259,6 +320,7 @@ async function runSync(only?: ConnectorId) {
   status.running = false;
   status.finishedAt = finishedAt;
   status.status = outcome;
+  status.abort = null;
 }
 
 function rememberedConnectors(): ConnectorProgress[] {
@@ -281,6 +343,7 @@ export function startSync(only?: ConnectorId): { started: boolean; status: SyncS
   status.startedAt = new Date().toISOString();
   status.finishedAt = null;
   status.status = "running";
+  status.abort = new AbortController();
   status.connectors = (only ? rememberedConnectors() : freshConnectors()).map((item) =>
     !only || item.id === only ? { id: item.id, state: "pending", message: "Waiting", fetched: 0, total: null } : item,
   );
@@ -289,13 +352,21 @@ export function startSync(only?: ConnectorId): { started: boolean; status: SyncS
     current.running = false;
     current.finishedAt = new Date().toISOString();
     current.status = "error";
-    const message = error instanceof Error ? error.message : "Sync failed.";
+    current.abort = null;
+    const message = isSyncCancelled(error) ? "Cancelled." : error instanceof Error ? error.message : "Sync failed.";
     for (const slot of current.connectors) {
       if (slot.state === "running" || slot.state === "pending") {
-        slot.state = "error";
+        slot.state = isSyncCancelled(error) ? "skipped" : "error";
         slot.message = message;
       }
     }
   });
   return { started: true, status: getSyncStatus() };
+}
+
+export function cancelSync(): { cancelled: boolean; status: SyncStatus } {
+  const status = memory();
+  if (!status.running || !status.abort) return { cancelled: false, status: getSyncStatus() };
+  status.abort.abort();
+  return { cancelled: true, status: getSyncStatus() };
 }

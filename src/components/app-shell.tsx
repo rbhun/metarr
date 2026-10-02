@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -19,11 +20,13 @@ import { Disc3, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, Settings
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 type ShellContextValue = {
   status: SyncStatus | null;
   epoch: number;
   startSync: (id?: ConnectorId) => Promise<void>;
+  cancelSync: () => Promise<void>;
   bump: () => void;
 };
 
@@ -141,8 +144,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [refresh, status?.running]);
 
+  const cancelSync = useCallback(async () => {
+    if (!status?.running) return;
+    const response = await fetch("/api/sync", { method: "DELETE" });
+    if (!response.ok) {
+      toast.error("Could not cancel the sync.");
+      return;
+    }
+    toast.success("Stopping sync…");
+    await refresh();
+  }, [refresh, status?.running]);
+
   return (
-    <ShellContext.Provider value={{ status, epoch, startSync, bump }}>
+    <ShellContext.Provider value={{ status, epoch, startSync, cancelSync, bump }}>
       <div className="flex h-dvh bg-background text-foreground">
         <aside
           className={cn(
@@ -231,6 +245,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </div>
+          <DialogFooter>
+            {status?.running ? (
+              <Button variant="outline" onClick={() => void cancelSync()}>
+                Cancel sync
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setSyncOpen(false)}>
+                Close
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </ShellContext.Provider>

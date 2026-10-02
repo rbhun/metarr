@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.143
+
+- Add Cancel sync on the sync window so a long library sync can be stopped without closing the app.
+
 ## 0.0.142
 
 - Show the secondary title under the library name. TMDB is asked in the chosen language, because the translation list often has no name.
