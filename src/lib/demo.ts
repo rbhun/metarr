@@ -815,6 +815,7 @@ function seedDemoOnline(db: ReturnType<typeof getDb>, fetchedAt: string) {
         posterUrl: sample.posterUrl,
         originalTitle: sample.title,
         localTitles: {},
+        episodeTitles: {},
         runtimeMinutes: sample.runtimeMinutes,
         rating: null,
         contentRating: null,

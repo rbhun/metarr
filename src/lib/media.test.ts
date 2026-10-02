@@ -130,6 +130,14 @@ test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("History of the World - Part 1.avi"), null);
   assert.equal(multiPartLabel("/movies/Airplane II/Airplane.2.mkv"), null);
   assert.equal(multiPartLabel(null), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/TaleSpin - S01E07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07/TaleSpin - S01E07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/1/07/S01E07.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 2/2/S01E14 Stormy Weather.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/13/The Idol Rich.avi"), null);
+  assert.equal(multiPartLabel("/movies/Foo/Movie (1/2).mkv"), "1 of 2");
 
   const cd1 = "/movies/Foo/Foo CD1.avi";
   const cd2 = "/movies/Foo/Foo CD2.avi";

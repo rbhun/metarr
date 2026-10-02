@@ -151,7 +151,7 @@ function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () 
             {title.title}
             {title.year ? <span className="ml-1.5 font-normal text-muted-foreground">{title.year}</span> : null}
           </p>
-          {title.localTitle ? <p className="text-xs text-muted-foreground">{title.localTitle}</p> : null}
+          {title.localTitle ? <p className="text-sm text-muted-foreground">{title.localTitle}</p> : null}
           <p className="text-xs text-muted-foreground">
             {title.kind === "movie" ? "Movie" : `${title.episodeFileCount} of ${title.episodeCount} episodes on disk`}
             {rating.value != null ? ` · ${formatRating(rating.value)}` : ""}
@@ -1101,6 +1101,7 @@ function EpisodeRows({
                               <p className="font-medium">
                                 {episodeCode(episode.season, episode.episode)} {episode.title}
                               </p>
+                              {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
                               <p className="text-xs text-muted-foreground">
                                 {formatRuntime(episode.runtimeMinutes)}
                                 {episode.airDate ? ` · ${episode.airDate}` : ""}
@@ -1265,6 +1266,7 @@ function EpisodeList({
                         <p className="font-medium">
                           {episodeCode(episode.season, episode.episode)} {episode.title}
                         </p>
+                        {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
                         {episode.versions.length > 1 ? (
                           <div className="mt-1">
                             <VersionLines

@@ -110,6 +110,11 @@ test("language votes need a confident majority", () => {
     { language: "hu", probability: 0.55 },
     { language: "en", probability: 0.52 },
   ]).language, null);
+  assert.equal(agreeLanguage([
+    { language: "en", probability: 0.91 },
+    { language: "hu", probability: 0.84 },
+  ]).language, null);
+  assert.deepEqual(agreeLanguage([{ language: "hu", probability: 0.91 }]), { language: "hu", confidence: 0.91 });
 });
 
 test("subtitle cues drop timestamps and ass styling", () => {
@@ -392,7 +397,9 @@ test("a detected stereo or mono track can be heard again until it is commentary"
 test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packets", () => {
   assert.deepEqual(sampleOffsets(6360), [600, 1200]);
   assert.deepEqual(sampleOffsets(null), [600, 1200]);
-  assert.deepEqual(sampleOffsets(15 * 60), [600]);
+  assert.deepEqual(sampleOffsets(15 * 60), [600, 180]);
+  assert.deepEqual(sampleOffsets(20 * 60), [600, 180]);
+  assert.deepEqual(sampleOffsets(21 * 60), [600, 1200]);
   assert.deepEqual(sampleOffsets(40), [20, 1]);
   assert.deepEqual(sampleOffsets(114), [57, 1]);
   assert.deepEqual(sampleOffsets(2), [1]);

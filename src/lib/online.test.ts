@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
-import { insertSourceRecords, migrate, queryLibrary, saveEnrichment, setMeta } from "@/lib/db";
+import { insertSourceRecords, migrate, queryEpisodes, queryLibrary, saveEnrichment, setMeta } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { lookupOnline } from "@/lib/online-lookup";
-import { displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
+import { displayEpisodeTitle, displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
 
 const godfather = {
   kind: "movie" as const,
@@ -22,6 +22,7 @@ function hit(partial: Partial<SourceHit> & Pick<SourceHit, "source">): SourceHit
     posterUrl: null,
     originalTitle: null,
     localTitles: {},
+    episodeTitles: {},
     runtimeMinutes: null,
     rating: null,
     contentRating: null,
@@ -77,6 +78,13 @@ test("a selected language keeps a different local title", () => {
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "hu"), "A keresztapa");
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "en"), null);
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, ""), null);
+  const alreadyLocal = mergeHits([
+    hit({ source: "tmdb", originalTitle: "TaleSpin", localTitles: { hu: "Balu kapitány kalandjai" }, overview: "A bear flies." }),
+  ]);
+  assert.equal(
+    displayLocalTitle("Balu kapitány kalandjai", { ...alreadyLocal, fetchedAt: "" }, "hu"),
+    "TaleSpin",
+  );
 });
 
 test("display helpers fill only blank library fields", () => {
@@ -144,6 +152,7 @@ test("library rows attach saved online metadata", () => {
       posterUrl: "https://image.tmdb.org/poster.jpg",
       originalTitle: "The Godfather",
       localTitles: { hu: "A keresztapa" },
+      episodeTitles: {},
       runtimeMinutes: 175,
       rating: 8.7,
       contentRating: null,
@@ -175,4 +184,110 @@ test("library rows attach saved online metadata", () => {
   assert.equal(row?.online?.runtimeMinutes, 175);
   const partTwo = library.titles.find((title) => title.title === "The Godfather Part II");
   assert.equal(partTwo?.online, null);
+});
+
+test("a blank translation name is filled from the language-specific title", async () => {
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("language=hu")) {
+      return Response.json({ id: 2720, name: "Balu kapitány kalandjai", original_name: "TaleSpin" });
+    }
+    if (url.includes("/tv/2720")) {
+      return Response.json({
+        id: 2720,
+        name: "TaleSpin",
+        original_name: "TaleSpin",
+        translations: { translations: [{ iso_639_1: "hu", data: { name: "" } }] },
+        seasons: [],
+      });
+    }
+    return Response.json({ results: [] });
+  };
+  const result = await lookupOnline(
+    { kind: "series", title: "TaleSpin", year: 1990, imdbId: null, tmdbId: "2720", tvdbId: null },
+    { tmdb: "tmdb-key" },
+    fetchImpl,
+    "hu",
+  );
+  assert.equal(result.localTitles.hu, "Balu kapitány kalandjai");
+});
+
+test("a series lookup keeps episode titles in the chosen language", async () => {
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/tv/1396/season/1") && url.includes("language=hu")) {
+      return Response.json({
+        episodes: [
+          { season_number: 1, episode_number: 1, name: "A célpont" },
+          { season_number: 1, episode_number: 2, name: "The Detail" },
+        ],
+      });
+    }
+    if (url.includes("/tv/1396")) {
+      return Response.json({
+        id: 1396,
+        name: "The Wire",
+        original_name: "The Wire",
+        overview: "A Baltimore crime series.",
+        seasons: [{ season_number: 1, episode_count: 13 }],
+        translations: { translations: [{ iso_639_1: "hu", data: { name: "A drót" } }] },
+      });
+    }
+    return Response.json({ results: [] });
+  };
+  const result = await lookupOnline(
+    { kind: "series", title: "The Wire", year: 2002, imdbId: null, tmdbId: "1396", tvdbId: null },
+    { tmdb: "tmdb-key" },
+    fetchImpl,
+    "hu",
+  );
+  assert.equal(result.localTitles.hu, "A drót");
+  assert.equal(result.episodeTitles.hu?.["1:1"], "A célpont");
+  assert.equal(displayEpisodeTitle("The Target", result.episodeTitles, "hu", 1, 1), "A célpont");
+  assert.equal(displayEpisodeTitle("The Detail", result.episodeTitles, "hu", 1, 2), null);
+});
+
+test("episode rows show the saved local title", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const key = enrichmentKey({
+    kind: "series",
+    title: "The Wire",
+    year: 2002,
+    imdbId: "tt0306414",
+    tmdbId: null,
+    tvdbId: null,
+  });
+  saveEnrichment(
+    key,
+    "series",
+    {
+      status: "found",
+      sources: ["tmdb"],
+      overview: null,
+      posterUrl: null,
+      originalTitle: "The Wire",
+      localTitles: { hu: "A drót" },
+      episodeTitles: { hu: { "1:1": "A célpont" } },
+      runtimeMinutes: null,
+      rating: null,
+      contentRating: null,
+      genres: [],
+      imdbId: "tt0306414",
+      tmdbId: "1396",
+      tvdbId: null,
+      message: null,
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+    },
+    db,
+  );
+  setMeta(db, "title_language", "hu");
+  const series = queryLibrary({ kind: "series", rules: [], q: "Wire", offset: 0, limit: 5 }, db).titles[0];
+  assert.ok(series);
+  const episodes = queryEpisodes(series.id, db);
+  assert.equal(episodes.find((episode) => episode.episode === 1)?.localTitle, "A célpont");
+  const found = queryLibrary({ kind: "all", rules: [], q: "célpont", offset: 0, limit: 5 }, db);
+  assert.equal(found.titles.some((title) => title.title === "The Wire"), true);
 });

@@ -15,7 +15,8 @@ export function agreeLanguage(samples: Array<{ language: string; probability: nu
   const top = ranked[0];
   if (!top) return { language: null, confidence: 0 };
   const [language, stats] = top;
-  const majority = stats.count >= Math.ceil(usable.length / 2);
+  // A 1–1 split is not a majority. One sample can still decide when it is the only vote.
+  const majority = stats.count * 2 > usable.length;
   if (!majority || stats.probability < MIN_PROBABILITY) return { language: null, confidence: stats.probability };
   return { language, confidence: stats.probability };
 }

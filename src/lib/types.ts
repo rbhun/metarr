@@ -21,6 +21,8 @@ export type OnlineMeta = {
   posterUrl: string | null;
   originalTitle: string | null;
   localTitles: Record<string, string>;
+  /** Translated episode names for one language, keyed by `season:episode`. */
+  episodeTitles: Record<string, Record<string, string>>;
   runtimeMinutes: number | null;
   rating: number | null;
   contentRating: string | null;
@@ -248,6 +250,7 @@ export type LibraryEpisode = {
   season: number | null;
   episode: number | null;
   title: string;
+  localTitle: string | null;
   hasFile: boolean;
   wanted: boolean;
   container: string | null;

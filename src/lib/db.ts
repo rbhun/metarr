@@ -7,7 +7,7 @@ import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detec
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
 import { ensureListedSource } from "@/lib/media";
-import { displayLocalTitle, enrichmentKey } from "@/lib/online";
+import { displayEpisodeTitle, displayLocalTitle, enrichmentKey } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
 import type {
@@ -301,6 +301,7 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "detect_results", "tag_checked_at", "TEXT");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, "enrichment", "episode_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);
 
   const now = new Date().toISOString();
@@ -392,10 +393,10 @@ export function saveEnrichment(
 ) {
   db.prepare(
     `INSERT INTO enrichment (
-      match_key, kind, status, sources, overview, poster_url, original_title, local_titles, runtime_minutes,
+      match_key, kind, status, sources, overview, poster_url, original_title, local_titles, episode_titles, runtime_minutes,
       rating, content_rating, genres, imdb_id, tmdb_id, tvdb_id, message, fetched_at
     ) VALUES (
-      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @localTitles, @runtimeMinutes,
+      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @localTitles, @episodeTitles, @runtimeMinutes,
       @rating, @contentRating, @genres, @imdbId, @tmdbId, @tvdbId, @message, @fetchedAt
     )
     ON CONFLICT(match_key) DO UPDATE SET
@@ -406,6 +407,7 @@ export function saveEnrichment(
       poster_url = excluded.poster_url,
       original_title = excluded.original_title,
       local_titles = excluded.local_titles,
+      episode_titles = excluded.episode_titles,
       runtime_minutes = excluded.runtime_minutes,
       rating = excluded.rating,
       content_rating = excluded.content_rating,
@@ -424,6 +426,7 @@ export function saveEnrichment(
     posterUrl: meta.posterUrl,
     originalTitle: meta.originalTitle,
     localTitles: JSON.stringify(meta.localTitles ?? {}),
+    episodeTitles: JSON.stringify(meta.episodeTitles ?? {}),
     runtimeMinutes: meta.runtimeMinutes,
     rating: meta.rating,
     contentRating: meta.contentRating,
@@ -448,6 +451,7 @@ type EnrichmentRow = {
   poster_url: string | null;
   original_title: string | null;
   local_titles: string | null;
+  episode_titles: string | null;
   runtime_minutes: number | null;
   rating: number | null;
   content_rating: string | null;
@@ -458,6 +462,26 @@ type EnrichmentRow = {
   message: string | null;
   fetched_at: string;
 };
+
+function parseEpisodeTitles(raw: string | null | undefined): Record<string, Record<string, string>> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const titles: Record<string, Record<string, string>> = {};
+    for (const [code, names] of Object.entries(value)) {
+      if (!names || typeof names !== "object" || Array.isArray(names)) continue;
+      const episodeNames: Record<string, string> = {};
+      for (const [key, name] of Object.entries(names)) {
+        if (typeof name === "string" && name.trim() && /^\d+:\d+$/.test(key)) episodeNames[key] = name.trim();
+      }
+      if (Object.keys(episodeNames).length) titles[code] = episodeNames;
+    }
+    return titles;
+  } catch {
+    return {};
+  }
+}
 
 function parseLocalTitles(raw: string | null | undefined): Record<string, string> {
   if (!raw) return {};
@@ -483,6 +507,7 @@ function mapEnrichment(row: EnrichmentRow): OnlineMeta {
     posterUrl: row.poster_url,
     originalTitle: row.original_title,
     localTitles: parseLocalTitles(row.local_titles),
+    episodeTitles: parseEpisodeTitles(row.episode_titles),
     runtimeMinutes: row.runtime_minutes,
     rating: row.rating,
     contentRating: row.content_rating,
@@ -1236,9 +1261,9 @@ function filterClause(query: LibraryQuery, language: string): { where: string; p
     const pattern = likePattern(search);
     if (language) {
       where.push(
-        "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND json_extract(e.local_titles, ?) LIKE ? ESCAPE '\\'))",
+        "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND (json_extract(e.local_titles, ?) LIKE ? ESCAPE '\\' OR e.episode_titles LIKE ? ESCAPE '\\')))",
       );
-      params.push(pattern, `$.${language}`, pattern);
+      params.push(pattern, `$.${language}`, pattern, pattern);
     } else {
       where.push("title LIKE ? ESCAPE '\\'");
       params.push(pattern);
@@ -1410,6 +1435,22 @@ type EpisodeRow = {
 
 export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[] {
   const detections = detectionMap(db);
+  const language = titleLanguage(getMeta(db, "title_language"));
+  const series = db.prepare(`SELECT match_key, kind, title, year, imdb_id, tmdb_id, tvdb_id FROM catalog_titles WHERE id = ?`).get(catalogId) as
+    | { match_key: string | null; kind: string; title: string; year: number | null; imdb_id: string | null; tmdb_id: string | null; tvdb_id: string | null }
+    | undefined;
+  const matchKey = series
+    ? series.match_key ||
+      enrichmentKey({
+        kind: series.kind === "series" ? "series" : "movie",
+        title: series.title,
+        year: series.year,
+        imdbId: series.imdb_id,
+        tmdbId: series.tmdb_id,
+        tvdbId: series.tvdb_id,
+      })
+    : "";
+  const episodeTitles = matchKey ? loadEnrichment([matchKey], db).get(matchKey)?.episodeTitles : undefined;
   const rows = db
     .prepare(
       `SELECT * FROM catalog_episodes
@@ -1424,6 +1465,7 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     season: row.season,
     episode: row.episode,
     title: row.title,
+    localTitle: displayEpisodeTitle(row.title, episodeTitles, language, row.season, row.episode),
     hasFile: row.has_file === 1,
     wanted: row.wanted === 1,
     container: row.container,

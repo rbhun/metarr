@@ -1,5 +1,6 @@
-import { countLookupRemaining, enabledProviderKeys, getDb, saveEnrichment, titlesForLookup } from "@/lib/db";
+import { countLookupRemaining, enabledProviderKeys, getDb, getMeta, saveEnrichment, titlesForLookup } from "@/lib/db";
 import { lookupOnline } from "@/lib/online-lookup";
+import { titleLanguage } from "@/lib/title-language";
 import { markOmdbExhausted, reserveOmdbRequest } from "@/lib/omdb-quota";
 import type { ProviderId } from "@/lib/types";
 import { NextResponse } from "next/server";
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
   let omdbStopped = false;
   let message: string | null = null;
   const db = getDb();
+  const language = titleLanguage(getMeta(db, "title_language"));
   const processedIds: number[] = [];
   for (const title of batch) {
     const active: Partial<Record<ProviderId, string>> = { ...keys };
@@ -54,7 +56,7 @@ export async function POST(request: Request) {
       omdbStopped = true;
       break;
     }
-    const meta = await lookupOnline(title, active);
+    const meta = await lookupOnline(title, active, fetch, language);
     const omdbLimited = meta.message === "OMDb daily request limit reached.";
     if (omdbLimited) {
       markOmdbExhausted(db);

@@ -1112,6 +1112,35 @@ function hitFrom(match: RegExpMatchArray, index: number, total: number | null): 
   return { index, total, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length };
 }
 
+/** `Season 1`, `Season.01`, or a folder that is only the number. */
+function seasonOrIndexSegment(segment: string): boolean {
+  return /^(?:season[\s._-]*)?0*\d{1,2}$/i.test(segment.trim());
+}
+
+/** The file or folder name starts with this part number, as in `07.avi` or `07 - Title`. */
+function startsWithIndex(segment: string, index: number): boolean {
+  const match = segment.trim().match(/^0*(\d{1,2})(?=\.[a-z0-9]{1,5}$|[^a-z0-9]|$)/i);
+  return Boolean(match) && Number(match[1]) === index;
+}
+
+/**
+ * `Season 1/07 - Title.avi` is an episode path. `Movie (1/2).mkv` keeps the slash
+ * inside one file name, so that one still counts as a split.
+ */
+function slashIsEpisodePath(source: string, match: RegExpMatchArray): boolean {
+  const text = match[0];
+  const secondAt = text.lastIndexOf(match[2] ?? "");
+  const relative = secondAt < 0 ? -1 : text.lastIndexOf("/", secondAt);
+  if (relative < 0) return false;
+  const slash = (match.index ?? 0) + relative;
+  const leftFrom = source.lastIndexOf("/", slash - 1) + 1;
+  const rightTo = source.indexOf("/", slash + 1);
+  const left = source.slice(leftFrom, slash);
+  const right = source.slice(slash + 1, rightTo < 0 ? source.length : rightTo);
+  if (!seasonOrIndexSegment(left)) return false;
+  return startsWithIndex(right, Number(match[2]));
+}
+
 /** The part token in one name, using the same rules as the library pill. */
 function partHit(source: string): PartHit | null {
   const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
@@ -1121,8 +1150,9 @@ function partHit(source: string): PartHit | null {
     const hit = hitFrom(counted, Number(counted[1]), Number(counted[2]));
     if (hit) return hit;
   }
-  const slash = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/);
-  if (slash) {
+  const slashPattern = /(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/g;
+  for (const slash of source.matchAll(slashPattern)) {
+    if (slashIsEpisodePath(source, slash)) continue;
     const hit = hitFrom(slash, Number(slash[1]), Number(slash[2]));
     if (hit) return hit;
   }

@@ -182,6 +182,7 @@ export function TitleDetail({
                 {episode ? `${episodeCode(episode.season, episode.episode)} ${episode.title}` : title.title}
                 {!episode && title.year ? <span className="ml-2 font-normal text-muted-foreground">{title.year}</span> : null}
               </SheetTitle>
+              {episode?.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
               {!episode && title.localTitle ? <p className="text-sm text-muted-foreground">{title.localTitle}</p> : null}
               <SheetDescription>
                 {episode

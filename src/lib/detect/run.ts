@@ -372,7 +372,7 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
         timedOut = true;
         continue;
       }
-      if (agreed.language && transcript.join(" ").trim().length >= 80) break;
+      if (samples.length >= 2 && agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
     if (transport && samples.length === 0 && !readSample) {
       const outcome = await listenSlice(openingWindow(fileSize, packetBytes(file)), sampleOffsets(heard.duration).length);

@@ -578,7 +578,7 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>Secondary title</CardTitle>
               <CardDescription>
-                Shows a title in the chosen language under the Plex title. The names come from TMDB during lookup and stay in the local database.
+                Shows a title in the chosen language under the Plex title, and the same for each episode. The names come from TMDB during lookup and stay in the local database.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">

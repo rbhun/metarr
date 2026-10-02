@@ -16,6 +16,7 @@ export type SourceHit = {
   posterUrl: string | null;
   originalTitle: string | null;
   localTitles: Record<string, string>;
+  episodeTitles: Record<string, Record<string, string>>;
   runtimeMinutes: number | null;
   rating: number | null;
   contentRating: string | null;
@@ -71,6 +72,7 @@ export function blankHit(source: ProviderId): SourceHit {
     posterUrl: null,
     originalTitle: null,
     localTitles: {},
+    episodeTitles: {},
     runtimeMinutes: null,
     rating: null,
     contentRating: null,
@@ -91,6 +93,7 @@ export function mergeHits(hits: SourceHit[], message: string | null = null): Omi
       posterUrl: null,
       originalTitle: null,
       localTitles: {},
+      episodeTitles: {},
       runtimeMinutes: null,
       rating: null,
       contentRating: null,
@@ -120,6 +123,7 @@ export function mergeHits(hits: SourceHit[], message: string | null = null): Omi
     posterUrl: cleanText(tmdb?.posterUrl) ?? cleanText(omdb?.posterUrl),
     originalTitle: cleanText(tmdb?.originalTitle) ?? cleanText(omdb?.originalTitle),
     localTitles: tmdb?.localTitles ?? {},
+    episodeTitles: tmdb?.episodeTitles ?? {},
     runtimeMinutes: tmdb?.runtimeMinutes ?? omdb?.runtimeMinutes ?? null,
     rating: parseRating(omdb?.rating) ?? parseRating(tmdb?.rating),
     contentRating: omdb?.contentRating ?? tmdb?.contentRating ?? null,
@@ -159,6 +163,29 @@ export function displayLocalTitle(title: string, online: OnlineMeta | null, lang
   const code = language?.trim().toLowerCase();
   if (!code) return null;
   const local = online?.localTitles?.[code]?.trim();
+  if (local && normalizeTitle(local) !== normalizeTitle(title)) return local;
+  const original = online?.originalTitle?.trim();
+  if (local && original && normalizeTitle(original) !== normalizeTitle(title)) return original;
+  return null;
+}
+
+export function episodeTitleKey(season: number | null, episode: number | null): string | null {
+  if (season == null || episode == null || !Number.isInteger(season) || !Number.isInteger(episode)) return null;
+  return `${season}:${episode}`;
+}
+
+/** The episode name in the chosen language, hidden when it repeats the library title. */
+export function displayEpisodeTitle(
+  title: string,
+  episodeTitles: Record<string, Record<string, string>> | null | undefined,
+  language: string | null,
+  season: number | null,
+  episode: number | null,
+): string | null {
+  const code = language?.trim().toLowerCase();
+  const key = episodeTitleKey(season, episode);
+  if (!code || !key) return null;
+  const local = episodeTitles?.[code]?.[key]?.trim();
   if (!local) return null;
   if (normalizeTitle(local) === normalizeTitle(title)) return null;
   return local;

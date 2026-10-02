@@ -1,5 +1,21 @@
 # Changes
 
+## 0.0.142
+
+- Show the secondary title under the library name. TMDB is asked in the chosen language, because the translation list often has no name.
+
+## 0.0.141
+
+- Show each episode’s title in the secondary language. The names come from TMDB when the series is looked up.
+
+## 0.0.140
+
+- Keep a spoken language only when the sample points agree, so one clip cannot label a Hungarian episode as English or Japanese.
+
+## 0.0.139
+
+- An episode path such as Season 1/07 is no longer labeled as part 1 of 7.
+
 ## 0.0.138
 
 - Keep the disk read for multi-part rewrap on the server, so the title page no longer pulls node:fs into the browser bundle and the image build can finish.

@@ -1,4 +1,4 @@
-import { normalizeContentRating, normalizeImdb, normalizeNumericId, parseRating, parseYear } from "@/lib/media";
+import { normalizeContentRating, normalizeImdb, normalizeNumericId, normalizeTitle, parseRating, parseYear } from "@/lib/media";
 import { acceptSearchScore, blankHit, localTitlesFromTranslations, mergeHits, titleScore, type Identity, type SourceHit } from "@/lib/online";
 import type { OnlineMeta, ProviderId, TitleKind } from "@/lib/types";
 
@@ -57,9 +57,10 @@ export class ProviderError extends Error {
   }
 }
 
-async function tmdbGet(apiKey: string, path: string, fetchImpl: FetchLike): Promise<unknown> {
+async function tmdbGet(apiKey: string, path: string, fetchImpl: FetchLike, language?: string): Promise<unknown> {
   const url = new URL(`https://api.themoviedb.org/3${path}`);
   url.searchParams.set("api_key", apiKey);
+  if (language) url.searchParams.set("language", language);
   const response = await fetchImpl(url, { headers: { Accept: "application/json" } });
   if (response.status === 401 || response.status === 403) {
     throw new ProviderError("tmdb", "TMDB rejected the API key.");
@@ -67,6 +68,15 @@ async function tmdbGet(apiKey: string, path: string, fetchImpl: FetchLike): Prom
   if (response.status === 404) return null;
   if (!response.ok) throw new ProviderError("tmdb", `TMDB returned ${response.status}.`);
   return readJson(response);
+}
+
+/** The title TMDB returns for one language. An empty translation name is left alone so a real translation is not replaced by the original. */
+function applyLanguageTitle(hit: SourceHit, kind: TitleKind, baseline: string | null, localized: Record<string, unknown> | null, language: string) {
+  const localName =
+    text(kind === "movie" ? localized?.title : localized?.name) ?? text(localized?.title) ?? text(localized?.name);
+  if (!localName) return;
+  if (baseline && normalizeTitle(localName) === normalizeTitle(baseline)) return;
+  hit.localTitles = { ...hit.localTitles, [language]: localName };
 }
 
 function hitFromTmdb(kind: TitleKind, body: Record<string, unknown>): SourceHit {
@@ -79,6 +89,7 @@ function hitFromTmdb(kind: TitleKind, body: Record<string, unknown>): SourceHit 
     posterUrl: posterFromPath(text(body.poster_path)),
     originalTitle: original && original !== title ? original : original,
     localTitles: localTitlesFromTranslations(body.translations),
+    episodeTitles: {},
     runtimeMinutes: runtimeMinutes(kind === "movie" ? body.runtime : body.episode_run_time),
     rating: parseRating(body.vote_average),
     genres: genreNames(body.genres),
@@ -111,7 +122,54 @@ function pickTmdbResult(kind: TitleKind, payload: unknown, identity: Identity): 
   return acceptSearchScore(bestScore) ? bestId : null;
 }
 
-export async function lookupTmdb(identity: Identity, apiKey: string, fetchImpl: FetchLike = fetch): Promise<SourceHit | null> {
+function seasonNumbers(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const numbers: number[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const season = typeof record?.season_number === "number" ? record.season_number : null;
+    const count = typeof record?.episode_count === "number" ? record.episode_count : 0;
+    if (season == null || !Number.isInteger(season) || season < 0 || season > 80 || count < 1) continue;
+    numbers.push(season);
+  }
+  return numbers;
+}
+
+/** Episode names in one language. TMDB repeats the original name when a translation is missing. */
+async function seasonEpisodeTitles(
+  id: string,
+  language: string,
+  seasons: unknown,
+  apiKey: string,
+  fetchImpl: FetchLike,
+): Promise<Record<string, string>> {
+  const titles: Record<string, string> = {};
+  for (const season of seasonNumbers(seasons)) {
+    let body: unknown = null;
+    try {
+      body = await tmdbGet(apiKey, `/tv/${id}/season/${season}`, fetchImpl, language);
+    } catch {
+      continue;
+    }
+    const episodes = asRecord(body)?.episodes;
+    if (!Array.isArray(episodes)) continue;
+    for (const item of episodes) {
+      const row = asRecord(item);
+      const episode = typeof row?.episode_number === "number" ? row.episode_number : null;
+      const name = text(row?.name);
+      if (episode == null || !Number.isInteger(episode) || episode < 0 || !name) continue;
+      titles[`${season}:${episode}`] = name;
+    }
+  }
+  return titles;
+}
+
+export async function lookupTmdb(
+  identity: Identity,
+  apiKey: string,
+  fetchImpl: FetchLike = fetch,
+  titleLanguage = "",
+): Promise<SourceHit | null> {
   const kindPath = identity.kind === "movie" ? "movie" : "tv";
   const known = normalizeNumericId(identity.tmdbId);
   let id = known;
@@ -145,7 +203,18 @@ export async function lookupTmdb(identity: Identity, apiKey: string, fetchImpl: 
   const details = await tmdbGet(apiKey, `/${kindPath}/${id}?append_to_response=external_ids,translations`, fetchImpl);
   const record = asRecord(details);
   if (!record) return null;
-  return hitFromTmdb(identity.kind, record);
+  const hit = hitFromTmdb(identity.kind, record);
+  const language = titleLanguage.trim().toLowerCase();
+  if (language && hit.tmdbId) {
+    const localized = asRecord(await tmdbGet(apiKey, `/${kindPath}/${hit.tmdbId}`, fetchImpl, language));
+    const baseline = text(identity.kind === "movie" ? record.title : record.name);
+    applyLanguageTitle(hit, identity.kind, baseline, localized, language);
+  }
+  if (identity.kind === "series" && language && hit.tmdbId) {
+    const names = await seasonEpisodeTitles(hit.tmdbId, language, record.seasons, apiKey, fetchImpl);
+    if (Object.keys(names).length) hit.episodeTitles = { [language]: names };
+  }
+  return hit;
 }
 
 function omdbHit(body: Record<string, unknown>): SourceHit | null {
@@ -198,13 +267,14 @@ export async function lookupOnline(
   identity: Identity,
   keys: Partial<Record<ProviderId, string>>,
   fetchImpl: FetchLike = fetch,
+  titleLanguage = "",
 ): Promise<Omit<OnlineMeta, "fetchedAt">> {
   const hits: SourceHit[] = [];
   const problems: string[] = [];
   let next = identity;
   if (keys.tmdb) {
     try {
-      const hit = await lookupTmdb(next, keys.tmdb, fetchImpl);
+      const hit = await lookupTmdb(next, keys.tmdb, fetchImpl, titleLanguage);
       if (hit) {
         hits.push(hit);
         next = {
