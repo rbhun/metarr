@@ -1,11 +1,11 @@
-import { readDeployState, requestDeploy } from "@/lib/deploy";
+import { deployStatus, requestDeploy } from "@/lib/deploy";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(readDeployState());
+  return NextResponse.json(await deployStatus());
 }
 
 export async function POST() {
@@ -22,5 +22,5 @@ export async function POST() {
       { status: 409 },
     );
   }
-  return NextResponse.json({ result, ...readDeployState() });
+  return NextResponse.json({ result, ...(await deployStatus()) });
 }

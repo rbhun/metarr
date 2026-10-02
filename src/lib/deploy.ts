@@ -19,6 +19,10 @@ export type DeployState = {
   version: string;
   /** The host watcher is installed, so the Update button can work. */
   available: boolean;
+  /** Version published on main, when GitHub could be read. */
+  remoteVersion: string | null;
+  /** Main is a newer version than this copy. */
+  updateAvailable: boolean;
   requestedAt: string | null;
   stuck: boolean;
   run: DeployRun | null;
@@ -72,6 +76,64 @@ export function parseDeployRun(text: string | null): DeployRun | null {
   }
 }
 
+/** `1` when `left` is newer, `-1` when it is older. `0.0.10` is newer than `0.0.9`. */
+export function compareVersions(left: string, right: string): number {
+  const parts = (value: string) =>
+    value.split(".").map((part) => {
+      const number = Number(part);
+      return Number.isInteger(number) && number >= 0 ? number : 0;
+    });
+  const a = parts(left);
+  const b = parts(right);
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+export function versionFromSource(text: string): string | null {
+  const match = /export const VERSION = "(\d+\.\d+\.\d+)"/.exec(text);
+  return match?.[1] ?? null;
+}
+
+export function updateIsAvailable(current: string, remote: string | null): boolean {
+  return remote != null && compareVersions(remote, current) > 0;
+}
+
+const PUBLISHED_VERSION_URL = "https://raw.githubusercontent.com/rbhun/metarr/main/src/lib/version.ts";
+const PUBLISHED_CACHE_MS = 15 * 60 * 1000;
+const PUBLISHED_RETRY_MS = 60 * 1000;
+
+let publishedCache: { at: number; version: string | null } | null = null;
+
+async function fetchPublishedVersion(): Promise<string | null> {
+  try {
+    const response = await fetch(PUBLISHED_VERSION_URL, { signal: AbortSignal.timeout(4_000), cache: "no-store" });
+    if (!response.ok) return null;
+    return versionFromSource(await response.text());
+  } catch {
+    return null;
+  }
+}
+
+/** The version on main. A successful read is kept for 15 minutes; a failure is tried again after a minute. */
+export async function publishedVersion(now = Date.now()): Promise<string | null> {
+  const cached = publishedCache;
+  if (cached && now - cached.at < (cached.version ? PUBLISHED_CACHE_MS : PUBLISHED_RETRY_MS)) return cached.version;
+  const version = await fetchPublishedVersion();
+  if (!version && cached?.version && now - cached.at < PUBLISHED_CACHE_MS) return cached.version;
+  publishedCache = { at: now, version };
+  return version;
+}
+
+export async function deployStatus(directory = deployRunDir(), now = Date.now()): Promise<DeployState> {
+  const state = readDeployState(directory, now);
+  const remoteVersion = await publishedVersion(now);
+  return { ...state, remoteVersion, updateAvailable: updateIsAvailable(state.version, remoteVersion) };
+}
+
 export function readDeployState(directory = deployRunDir(), now = Date.now()): DeployState {
   const request = path.join(directory, "deploy-request");
   let requestedAt: string | null = null;
@@ -86,6 +148,8 @@ export function readDeployState(directory = deployRunDir(), now = Date.now()): D
   return {
     version: VERSION,
     available: readText(path.join(directory, "watcher")) != null,
+    remoteVersion: null,
+    updateAvailable: false,
     requestedAt,
     stuck,
     run: parseDeployRun(readText(path.join(directory, "deploy-status.json"))),

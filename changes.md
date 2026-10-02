@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.138
+
+- Keep the disk read for multi-part rewrap on the server, so the title page no longer pulls node:fs into the browser bundle and the image build can finish.
+
+## 0.0.137
+
+- Show in Settings when main has a newer Metarr version, so an update is visible before it is installed.
+
 ## 0.0.136
 
 - Treat a three-part movie the same as a two-part one: the Versions filter is Multi-part, and a rewrap joins all of the labeled parts.

@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { fileExtension, splitIdentity } from "@/lib/media";
 
 const AVI = new Set(["avi", "divx"]);
@@ -119,19 +118,6 @@ export function splitSources(filePath: string, readDirectory: (directory: string
   const ordered = orderedSplit(found);
   if (!ordered?.some((member) => member.path.replace(/\\/g, "/").toLowerCase() === filePath.replace(/\\/g, "/").toLowerCase())) return null;
   return ordered.map((member) => member.path);
-}
-
-/** Parts beside this file when the folder can be read. */
-export function splitSourcesOnDisk(filePath: string): string[] | null {
-  return splitSources(filePath, (directory) => {
-    if (!directory) return null;
-    try {
-      if (!fs.statSync(directory).isDirectory()) return null;
-      return fs.readdirSync(directory);
-    } catch {
-      return null;
-    }
-  });
 }
 
 /** The MKV lands beside the source under the same name, so sidecar subtitles keep matching. A split set uses joinedTarget instead. */

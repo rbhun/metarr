@@ -12,7 +12,7 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { pathOnPlex } from "@/lib/detect/paths";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
-import { canRewrap, joinedTarget, sourceKind, splitSourcesOnDisk } from "@/lib/rewrap/source";
+import { canRewrap, joinedTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   finishRewrap,
@@ -28,6 +28,19 @@ import { scratchRoot } from "@/lib/scratch";
 import { startSync } from "@/lib/sync";
 
 const SYNC_AFTER_MS = 2 * 60 * 1000;
+
+/** Parts beside this file when the folder can be read. */
+function splitSourcesOnDisk(filePath: string): string[] | null {
+  return splitSources(filePath, (directory) => {
+    if (!directory) return null;
+    try {
+      if (!fs.statSync(directory).isDirectory()) return null;
+      return fs.readdirSync(directory);
+    } catch {
+      return null;
+    }
+  });
+}
 
 const globalForRewrap = globalThis as {
   __metarrRewrap?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null };
