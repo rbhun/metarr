@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
-import { insertSourceRecords, migrate, queryEpisodes, queryLibrary, saveEnrichment, setMeta } from "@/lib/db";
+import { countTitlesAfter, insertSourceRecords, migrate, queryEpisodes, queryLibrary, saveEnrichment, setMeta, titlesForLookup } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { lookupOnline } from "@/lib/online-lookup";
 import { displayEpisodeTitle, displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
@@ -290,4 +290,50 @@ test("episode rows show the saved local title", () => {
   assert.equal(episodes.find((episode) => episode.episode === 1)?.localTitle, "A célpont");
   const found = queryLibrary({ kind: "all", rules: [], q: "célpont", offset: 0, limit: 5 }, db);
   assert.equal(found.titles.some((title) => title.title === "The Wire"), true);
+});
+
+test("a full lookup walks every title, including ones already stored", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const first = titlesForLookup({ gaps: false, afterId: 0, limit: 1 }, db)[0];
+  assert.ok(first);
+  saveEnrichment(
+    first.matchKey,
+    first.kind,
+    {
+      status: "found",
+      sources: ["tmdb"],
+      overview: null,
+      posterUrl: null,
+      originalTitle: first.title,
+      localTitles: {},
+      episodeTitles: {},
+      runtimeMinutes: null,
+      rating: null,
+      contentRating: null,
+      genres: [],
+      imdbId: first.imdbId,
+      tmdbId: first.tmdbId,
+      tvdbId: first.tvdbId,
+      message: null,
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+    },
+    db,
+  );
+  const gaps = titlesForLookup({ gaps: true, limit: 50 }, db);
+  assert.equal(gaps.some((title) => title.id === first.id), false);
+  const seen: number[] = [];
+  let after = 0;
+  for (let step = 0; step < 20; step += 1) {
+    const batch = titlesForLookup({ gaps: false, afterId: after, limit: 2 }, db);
+    if (batch.length === 0) break;
+    for (const title of batch) seen.push(title.id);
+    after = batch[batch.length - 1].id;
+    assert.equal(countTitlesAfter(after, db), titlesForLookup({ gaps: false, afterId: after, limit: 50 }, db).length);
+  }
+  assert.equal(seen.includes(first.id), true);
+  assert.equal(new Set(seen).size, seen.length);
+  assert.equal(titlesForLookup({ gaps: false, afterId: after, limit: 10 }, db).length, 0);
 });

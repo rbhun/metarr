@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.146
+
+- Look up every title from one button, so a refresh does not depend on selecting each row.
+
 ## 0.0.145
 
 - Add Rescan files on a title’s detail panel so one movie or episode can re-read its folder on disk and the connected apps without a full library sync.

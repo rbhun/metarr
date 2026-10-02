@@ -283,6 +283,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [detail, setDetail] = useState<LibraryTitle | null>(null);
   const [detailEpisode, setDetailEpisode] = useState<LibraryEpisode | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupAllProgress, setLookupAllProgress] = useState<string | null>(null);
   const [plexBusy, setPlexBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
@@ -476,6 +477,61 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function lookupAll() {
+    if (!window.confirm("Look up every title again? Titles already stored are refreshed, including secondary titles. This can take a while.")) return;
+    setLookupBusy(true);
+    setLookupAllProgress("Looking up…");
+    let after = 0;
+    let found = 0;
+    let missing = 0;
+    let errors = 0;
+    let limitNote: string | null = null;
+    try {
+      for (let step = 0; step < 5000; step += 1) {
+        const response = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ all: true, after }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+          found?: number;
+          missing?: number;
+          errors?: number;
+          remaining?: number;
+          processedIds?: number[];
+          processed?: number;
+          message?: string | null;
+          omdbStopped?: boolean;
+        } | null;
+        if (!response.ok) throw new Error(body?.error || "Lookup failed.");
+        found += body?.found ?? 0;
+        missing += body?.missing ?? 0;
+        errors += body?.errors ?? 0;
+        if (body?.message) limitNote = body.message;
+        const processed = body?.processed ?? 0;
+        if (!processed) break;
+        const last = Math.max(...(body?.processedIds ?? []));
+        if (!Number.isFinite(last) || last <= after) break;
+        after = last;
+        const left = body?.remaining ?? 0;
+        const done = found + missing + errors;
+        setLookupAllProgress(left > 0 ? `Looking up ${done} of ${done + left}` : `Looking up ${done}`);
+        if (body?.omdbStopped || !left) break;
+      }
+      bump();
+      const parts = [`${found} found`, missing ? `${missing} unmatched` : "", errors ? `${errors} failed` : ""].filter(Boolean);
+      toast.success(
+        `Lookup finished. ${parts.join(", ")}.${limitNote ? ` ${limitNote}` : ""} Nothing was written back to Plex or the *arr apps.`,
+      );
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
+    } finally {
+      setLookupBusy(false);
+      setLookupAllProgress(null);
+    }
+  }
+
   async function detectSelected(mode: "now" | "queue") {
     const titles: number[] = [];
     const episodes: number[] = [];
@@ -549,7 +605,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <DetectStatus />
             <RemuxStatus />
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Button size="sm" variant="outline" disabled={lookupBusy} onClick={() => void lookupAll()}>
+              {lookupAllProgress ?? "Look up all"}
+            </Button>
             <span>{data?.stats.total ?? 0} titles</span>
             <span>{data?.stats.missing ?? 0} missing</span>
             <span>{data?.stats.notInPlex ?? 0} not in Plex</span>

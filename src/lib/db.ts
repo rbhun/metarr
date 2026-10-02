@@ -531,14 +531,18 @@ function loadEnrichment(keys: string[], db: Database.Database): Map<string, Onli
 }
 
 export function titlesForLookup(
-  input: { ids?: number[]; gaps: boolean; limit: number },
+  input: { ids?: number[]; gaps: boolean; afterId?: number; limit: number },
   db = getDb(),
 ): Array<{ id: number; kind: TitleKind; title: string; year: number | null; imdbId: string | null; tmdbId: string | null; tvdbId: string | null; matchKey: string }> {
   const params: Array<string | number> = [];
   let where = "";
+  const walkAll = input.afterId != null && !(input.ids && input.ids.length);
   if (input.ids && input.ids.length) {
     where = `WHERE id IN (${input.ids.map(() => "?").join(", ")})`;
     params.push(...input.ids);
+  } else if (walkAll) {
+    where = "WHERE id > ?";
+    params.push(input.afterId ?? 0);
   } else if (input.gaps) {
     where = `WHERE match_key IS NULL OR NOT EXISTS (
       SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key
@@ -546,11 +550,12 @@ export function titlesForLookup(
       SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND e.status = 'error'
     )`;
   }
+  const order = walkAll ? "id" : "sort_title COLLATE NOCASE";
   const rows = db
     .prepare(
       `SELECT id, kind, title, year, imdb_id, tmdb_id, tvdb_id, match_key
        FROM catalog_titles ${where}
-       ORDER BY sort_title COLLATE NOCASE
+       ORDER BY ${order}
        LIMIT ?`,
     )
     .all(...params, input.limit) as Array<{
@@ -575,6 +580,11 @@ export function titlesForLookup(
     };
     return { id: row.id, ...identity, matchKey: row.match_key || enrichmentKey(identity) };
   });
+}
+
+export function countTitlesAfter(afterId: number, db = getDb()): number {
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM catalog_titles WHERE id > ?`).get(afterId) as { count: number };
+  return row.count;
 }
 
 export function countLookupRemaining(db = getDb()): number {

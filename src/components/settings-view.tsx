@@ -83,6 +83,7 @@ export function SettingsView() {
   const [plexLibrariesOpen, setPlexLibrariesOpen] = useState(false);
   const [plexLibraryError, setPlexLibraryError] = useState<string | null>(null);
   const [titleLanguage, setTitleLanguage] = useState("");
+  const [fillAllLabel, setFillAllLabel] = useState<string | null>(null);
   const [fileBrowserUrl, setFileBrowserUrl] = useState("");
   const [fileBrowserRoot, setFileBrowserRoot] = useState("");
 
@@ -312,6 +313,61 @@ export function SettingsView() {
       toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function lookupAllTitles() {
+    if (!window.confirm("Look up every title again? Titles already stored are refreshed, including secondary titles. This can take a while.")) return;
+    setBusy("fill-all");
+    setFillAllLabel("Looking up…");
+    let after = 0;
+    let found = 0;
+    let missing = 0;
+    let errors = 0;
+    let limitNote: string | null = null;
+    try {
+      for (let step = 0; step < 5000; step += 1) {
+        const response = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ all: true, after }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+          found?: number;
+          missing?: number;
+          errors?: number;
+          remaining?: number;
+          processedIds?: number[];
+          processed?: number;
+          message?: string | null;
+          omdbStopped?: boolean;
+        } | null;
+        if (!response.ok) throw new Error(body?.error || "Lookup failed.");
+        found += body?.found ?? 0;
+        missing += body?.missing ?? 0;
+        errors += body?.errors ?? 0;
+        if (body?.message) limitNote = body.message;
+        const processed = body?.processed ?? 0;
+        if (!processed) break;
+        const last = Math.max(...(body?.processedIds ?? []));
+        if (!Number.isFinite(last) || last <= after) break;
+        after = last;
+        const left = body?.remaining ?? 0;
+        const done = found + missing + errors;
+        setFillAllLabel(left > 0 ? `Looking up ${done} of ${done + left}` : `Looking up ${done}`);
+        if (body?.omdbStopped || !left) break;
+      }
+      bump();
+      const parts = [`${found} found`, missing ? `${missing} unmatched` : "", errors ? `${errors} failed` : ""].filter(Boolean);
+      toast.success(
+        `Lookup finished. ${parts.join(", ")}.${limitNote ? ` ${limitNote}` : ""} Nothing was written back to Plex or the *arr apps.`,
+      );
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
+    } finally {
+      setBusy(null);
+      setFillAllLabel(null);
     }
   }
 
@@ -696,13 +752,16 @@ export function SettingsView() {
           <CardHeader>
             <CardTitle>Fill missing metadata</CardTitle>
             <CardDescription>
-              Looks up titles that have not been found yet with the online sources above. Results stay in the local database.
-              Nothing is written back to Plex or the *arr apps. Selected titles can still be refreshed from the library.
+              Fill missing metadata looks up titles that have not been found yet. Look up all titles refreshes every title, including ones already stored, so a new secondary language is filled in.
+              Results stay in the local database. Nothing is written back to Plex or the *arr apps.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button size="sm" variant="outline" onClick={() => void fillMissingMetadata()} disabled={busy === "fill-metadata"}>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => void fillMissingMetadata()} disabled={busy === "fill-metadata" || busy === "fill-all"}>
               {busy === "fill-metadata" ? "Looking up…" : "Fill missing metadata"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void lookupAllTitles()} disabled={busy === "fill-metadata" || busy === "fill-all"}>
+              {fillAllLabel ?? "Look up all titles"}
             </Button>
           </CardContent>
         </Card>
