@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SyncCancelledError, isSyncCancelled, runWithSyncAbort, throwIfSyncCancelled } from "@/lib/sync-cancel";
+import { SyncCancelledError, isSyncCancelled, setSyncAbortSignal, throwIfSyncCancelled } from "@/lib/sync-cancel";
 
 test("throwIfSyncCancelled throws when the signal is aborted", () => {
   const controller = new AbortController();
@@ -8,13 +8,16 @@ test("throwIfSyncCancelled throws when the signal is aborted", () => {
   assert.throws(() => throwIfSyncCancelled(controller.signal), SyncCancelledError);
 });
 
-test("runWithSyncAbort exposes the signal to throwIfSyncCancelled", async () => {
+test("setSyncAbortSignal exposes the active sync abort to throwIfSyncCancelled", () => {
   const controller = new AbortController();
-  await runWithSyncAbort(controller.signal, async () => {
+  setSyncAbortSignal(controller.signal);
+  try {
     throwIfSyncCancelled();
     controller.abort();
     assert.throws(() => throwIfSyncCancelled(), SyncCancelledError);
-  });
+  } finally {
+    setSyncAbortSignal(null);
+  }
 });
 
 test("isSyncCancelled recognizes the error", () => {

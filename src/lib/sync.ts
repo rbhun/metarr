@@ -23,7 +23,7 @@ import { queueFormatRefresh } from "@/lib/detect/format-refresh";
 import { askPlexToReadSidecars } from "@/lib/detect/publish";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
-import { isSyncCancelled, runWithSyncAbort, throwIfSyncCancelled } from "@/lib/sync-cancel";
+import { isSyncCancelled, setSyncAbortSignal, throwIfSyncCancelled } from "@/lib/sync-cancel";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
 type Memory = {
@@ -125,7 +125,12 @@ async function runSync(only?: ConnectorId) {
   const status = memory();
   const abort = status.abort;
   if (!abort) return;
-  await runWithSyncAbort(abort.signal, () => runSyncBody(only));
+  setSyncAbortSignal(abort.signal);
+  try {
+    await runSyncBody(only);
+  } finally {
+    setSyncAbortSignal(null);
+  }
 }
 
 function markCancelled(status: Memory, only?: ConnectorId) {

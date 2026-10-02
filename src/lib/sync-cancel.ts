@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 /** Thrown when the user stops a library sync. */
 export class SyncCancelledError extends Error {
   constructor(message = "Sync cancelled.") {
@@ -12,16 +10,16 @@ export function isSyncCancelled(error: unknown): boolean {
   return error instanceof SyncCancelledError || (error instanceof Error && error.name === "SyncCancelledError");
 }
 
-const storage = new AsyncLocalStorage<AbortSignal>();
+let active: AbortSignal | null = null;
 
-export function syncAbortSignal(): AbortSignal | undefined {
-  return storage.getStore();
+export function setSyncAbortSignal(signal: AbortSignal | null): void {
+  active = signal;
 }
 
-export function runWithSyncAbort<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
-  return storage.run(signal, work);
+export function syncAbortSignal(): AbortSignal | undefined {
+  return active ?? undefined;
 }
 
 export function throwIfSyncCancelled(signal?: AbortSignal | null): void {
-  if (signal?.aborted || syncAbortSignal()?.aborted) throw new SyncCancelledError();
+  if (signal?.aborted || active?.aborted) throw new SyncCancelledError();
 }
