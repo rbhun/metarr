@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.144
+
+- Fix the image build: TypeScript rejected a part-number match that could be null, so `npm run build` failed in Docker.
+
 ## 0.0.143
 
 - Add Cancel sync on the sync window so a long library sync can be stopped without closing the app.

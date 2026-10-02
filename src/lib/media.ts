@@ -1120,7 +1120,7 @@ function seasonOrIndexSegment(segment: string): boolean {
 /** The file or folder name starts with this part number, as in `07.avi` or `07 - Title`. */
 function startsWithIndex(segment: string, index: number): boolean {
   const match = segment.trim().match(/^0*(\d{1,2})(?=\.[a-z0-9]{1,5}$|[^a-z0-9]|$)/i);
-  return Boolean(match) && Number(match[1]) === index;
+  return match != null && Number(match[1]) === index;
 }
 
 /**
