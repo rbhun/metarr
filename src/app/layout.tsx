@@ -8,7 +8,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Metarr",
-  description: "Local metadata overview for Plex, Radarr, Sonarr, and Bazarr.",
+  description:
+    "One library for Plex, Radarr, Sonarr, and Bazarr: editions, extras, sidecars, and missing subtitles. Detect languages and write them into the file. Remux discs and rewrap AVI, TS, and M2TS to MKV. Filter, push folders to Plex, and look up posters. Metadata stays in local SQLite.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

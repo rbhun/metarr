@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, bonusFlag, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -130,6 +130,23 @@ test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("History of the World - Part 1.avi"), null);
   assert.equal(multiPartLabel("/movies/Airplane II/Airplane.2.mkv"), null);
   assert.equal(multiPartLabel(null), null);
+
+  const cd1 = "/movies/Foo/Foo CD1.avi";
+  const cd2 = "/movies/Foo/Foo CD2.avi";
+  const joined = "/movies/Foo/Foo.mkv";
+  const other = "/movies/Foo/Foo 1080p.mkv";
+  assert.equal(splitIdentity(cd1)?.stem, "Foo");
+  assert.equal(splitIdentity(cd1)?.index, 1);
+  assert.equal(splitIdentity(cd2)?.key, splitIdentity(cd1)?.key);
+  assert.equal(splitIdentity("/movies/Lawrence/Lawrence (1962) - 1 of 2.mkv")?.stem, "Lawrence (1962)");
+  assert.equal(splitIdentity("/movies/Lawrence/Lawrence (1962) - 02 of 02.mkv")?.index, 2);
+  assert.equal(splitIdentity("/movies/Foo/CD1/movie.avi")?.directory, "/movies/Foo");
+  assert.equal(splitIdentity("/movies/Foo/CD2/movie.avi")?.key, splitIdentity("/movies/Foo/CD1/movie.avi")?.key);
+  assert.equal(splitIdentity("/movies/The Godfather Part II.mkv"), null);
+  assert.equal(copyGroupId(cd1, [cd1, cd2, joined, other]), copyGroupId(cd2, [cd1, cd2, joined, other]));
+  assert.equal(copyGroupId(joined, [cd1, cd2, joined, other]), copyGroupId(cd1, [cd1, cd2, joined, other]));
+  assert.notEqual(copyGroupId(other, [cd1, cd2, joined, other]), copyGroupId(cd1, [cd1, cd2, joined, other]));
+  assert.equal(new Set([cd1, cd2, joined].map((file) => copyGroupId(file, [cd1, cd2, joined]))).size, 1);
 });
 
 test("a sample name and a tiny extra file are marked, a feature is not", () => {

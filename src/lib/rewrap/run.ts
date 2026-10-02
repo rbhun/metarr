@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { languageCode } from "@/lib/media";
-import { rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { joinedTarget, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
@@ -37,7 +37,7 @@ export function rewrapArgs(
   input: string,
   output: string,
   probe: Probe,
-  options: { languages: Array<string | null>; subtitleLanguages?: Array<string | null>; firstLanguage: string },
+  options: { languages: Array<string | null>; subtitleLanguages?: Array<string | null>; firstLanguage: string; concat?: boolean },
 ): { args: string[]; video: number; audio: number; subtitles: number; firstMoved: boolean; converted: number } {
   const video = probe.streams.filter((stream) => stream.codecType === "video");
   const audio = probe.streams
@@ -52,7 +52,9 @@ export function rewrapArgs(
   const first = options.firstLanguage ? languageCode(options.firstLanguage) : null;
   const ordered = first ? [...audio.filter((item) => item.code === first), ...audio.filter((item) => item.code !== first)] : audio;
   const firstMoved = ordered.length > 0 && ordered[0] !== audio[0];
-  const args = ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts", "-i", input];
+  const args = ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts"];
+  if (options.concat) args.push("-f", "concat", "-safe", "0");
+  args.push("-i", input);
   for (const stream of video) args.push("-map", `0:${stream.index}`);
   for (const item of ordered) args.push("-map", `0:${item.stream.index}`);
   for (const item of subtitles) args.push("-map", `0:${item.stream.index}`);
@@ -160,13 +162,24 @@ export function checkRewrap(source: Probe, result: Probe, expected: { video: num
     return `The MKV is missing a stream from the ${kind}, so it was not saved.`;
   }
   if (source.duration && result.duration && Math.abs(source.duration - result.duration) > Math.max(5, source.duration * 0.02)) {
-    return `The MKV runs ${Math.round(result.duration)} s but the ${kind} runs ${Math.round(source.duration)} s, so it was not saved.`;
+    const verb = kind === "parts" ? "run" : "runs";
+    return `The MKV runs ${Math.round(result.duration)} s but the ${kind} ${verb} ${Math.round(source.duration)} s, so it was not saved.`;
   }
   return null;
 }
 
+function streamSignature(probe: Probe): string {
+  return probe.streams.map((stream) => `${stream.codecType}:${stream.codecName ?? ""}`).join("|");
+}
+
+function concatList(files: string[]): string {
+  return `${files.map((file) => `file '${file.replace(/'/g, `'\\''`)}'`).join("\n")}\n`;
+}
+
 export async function rewrapAvi(options: {
   source: string;
+  /** Ordered parts of one labeled split. A single source is copied under its own name. */
+  sources?: string[];
   workDir: string;
   languages: Array<string | null>;
   subtitleLanguages?: Array<string | null>;
@@ -175,27 +188,45 @@ export async function rewrapAvi(options: {
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
   const { source, workDir, onProgress } = options;
+  const sources = options.sources && options.sources.length > 1 ? options.sources : [source];
+  const joining = sources.length > 1;
   const kind = sourceKind(source);
-  const target = rewrapTarget(source);
+  const target = (joining ? joinedTarget(sources[0] ?? source) : null) ?? rewrapTarget(source);
   const name = path.basename(target);
-  onProgress(0, `Reading the ${kind}`);
-  const input = await probe(source);
+  onProgress(0, joining ? `Reading ${sources.length} parts` : `Reading the ${kind}`);
+  const probed = [];
+  for (const file of sources) probed.push(await probe(file));
+  const first = probed[0];
+  if (!first) throw new Error("ffprobe found no video stream in this file.");
+  const signature = streamSignature(first);
+  if (probed.some((item) => streamSignature(item) !== signature)) {
+    throw new Error("The parts do not share the same video and audio, so they were not joined.");
+  }
+  const duration = probed.reduce((sum, item) => sum + (item.duration ?? 0), 0);
+  const input: Probe = { streams: first.streams, duration: duration > 0 ? duration : null };
+  const listPath = path.join(workDir, "parts.txt");
   const temp = path.join(workDir, name);
-  const plan = rewrapArgs(source, temp, input, {
+  const plan = rewrapArgs(joining ? listPath : source, temp, input, {
     languages: options.languages,
     subtitleLanguages: options.subtitleLanguages,
     firstLanguage: options.firstLanguage,
+    concat: joining,
   });
   const tracks = [plural(plan.video, "video stream"), plural(plan.audio, "audio track"), plan.subtitles ? plural(plan.subtitles, "subtitle") : null]
     .filter(Boolean)
     .join(", ");
   const moved = plan.firstMoved ? ` ${options.firstLanguage} audio goes first.` : "";
   const flac = plan.converted ? ` ${plural(plan.converted, "PCM audio track")} ${plan.converted === 1 ? "is" : "are"} stored as lossless FLAC.` : "";
-  if (options.dryRun) return `Dry run: would copy ${tracks} into ${target} without re-encoding.${moved}${flac} Nothing was written.`;
+  const joined = joining ? ` Joined from ${sources.length} parts.` : "";
+  if (options.dryRun) {
+    const action = joining ? `join ${sources.length} parts and copy` : "copy";
+    return `Dry run: would ${action} ${tracks} into ${target} without re-encoding.${moved}${flac} Nothing was written.`;
+  }
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the ${kind}.`);
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(workDir, { recursive: true });
   try {
+    if (joining) fs.writeFileSync(listPath, concatList(sources));
     let lastWrite = 0;
     await runTool("ffmpeg", plan.args, REWRAP_TIMEOUT_MS, (line) => {
       const percent = progressFromLine(line, input.duration);
@@ -206,11 +237,12 @@ export async function rewrapAvi(options: {
       onProgress(percent, `Rewrapping ${percent}%`);
     });
     onProgress(99, "Checking the MKV");
-    const problem = checkRewrap(input, await probe(temp), plan, kind);
+    const problem = checkRewrap(input, await probe(temp), plan, joining ? "parts" : kind);
     if (problem) throw new Error(problem);
     onProgress(100, "Saving the MKV");
     deliverFile(temp, target);
-    return `Saved ${name} with ${tracks}.${moved}${flac} The ${kind} was left in place.`;
+    const left = joining ? `The ${kind} files were left in place.` : `The ${kind} was left in place.`;
+    return `Saved ${name} with ${tracks}.${joined}${moved}${flac} ${left}`;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

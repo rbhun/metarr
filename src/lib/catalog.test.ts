@@ -25,6 +25,8 @@ function titles(db: Database.Database) {
     rating: number | null;
     subtitle_wanted: string;
     quality_name: string | null;
+    version_count: number;
+    version_flags: string;
   }>;
 }
 
@@ -152,6 +154,12 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
   assert.ok(names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("The Godfather"));
   assert.ok(!names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("Dune"));
   assert.deepEqual(names([{ id: "dup", field: "version", op: "eq", value: "duplicate" }]), ["The Matrix"]);
+  const lawrence = byTitle.get("Lawrence of Arabia");
+  assert.equal(lawrence?.version_count, 1);
+  assert.match(lawrence?.version_flags ?? "", /(?:^|,)split(?:,|$)/);
+  assert.deepEqual(names([{ id: "split", field: "version", op: "eq", value: "split" }]), ["Lawrence of Arabia"]);
+  assert.ok(!names([{ id: "split-dup", field: "version", op: "eq", value: "duplicate" }]).includes("Lawrence of Arabia"));
+  assert.ok(!names([{ id: "split-none", field: "version", op: "eq", value: "none" }]).includes("Lawrence of Arabia"));
   assert.ok(names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("Heat"));
   assert.ok(names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("The Godfather"));
   assert.ok(!names([{ id: "none", field: "version", op: "eq", value: "none" }]).includes("The Matrix"));

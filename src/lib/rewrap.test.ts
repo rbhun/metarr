@@ -6,9 +6,9 @@ import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
-import { avisFromFile } from "@/lib/rewrap/candidates";
+import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
 import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, type Probe } from "@/lib/rewrap/run";
-import { canRewrap, isAvi, rewrappedPathFor, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { canRewrap, isAvi, joinedTarget, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   parseLanguages,
@@ -20,6 +20,7 @@ import {
   readRewrapSettings,
   retryFailedRewrap,
   rewrapTotals,
+  settleSplitRewraps,
   writeRewrapSettings,
 } from "@/lib/rewrap/store";
 
@@ -252,6 +253,97 @@ test("a real Xvid AVI rewraps into an MKV beside it and the AVI stays", { skip: 
     );
     const dry = await rewrapAvi({ source: avi, workDir: path.join(root, "work", "job-3"), languages: [], firstLanguage: "", dryRun: true, onProgress: () => undefined });
     assert.match(dry, /^Dry run: would copy 1 video stream, 2 audio tracks into .*Film \(1999\)\.mkv/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a labeled split joins into one MKV, and a missing part stays a single file", () => {
+  assert.equal(joinedTarget("/movies/Foo/Foo CD1.avi"), "/movies/Foo/Foo.mkv");
+  assert.equal(joinedTarget("/movies/Lawrence/Lawrence (1962) - 1 of 2.avi"), "/movies/Lawrence/Lawrence (1962).mkv");
+  assert.equal(joinedTarget("/movies/Film.avi"), null);
+  const read = (directory: string) => (directory === "/movies/Foo" ? ["Foo CD1.avi", "Foo CD2.avi", "notes.txt"] : null);
+  assert.deepEqual(splitSources("/movies/Foo/Foo CD2.avi", read), ["/movies/Foo/Foo CD1.avi", "/movies/Foo/Foo CD2.avi"]);
+  assert.deepEqual(
+    splitSources("/movies/Foo/CD1/movie.avi", (directory) => {
+      if (directory === "/movies/Foo/CD1" || directory === "/movies/Foo/CD2") return ["movie.avi"];
+      if (directory === "/movies/Foo") return ["CD1", "CD2"];
+      return null;
+    }),
+    ["/movies/Foo/CD1/movie.avi", "/movies/Foo/CD2/movie.avi"],
+  );
+  assert.equal(splitSources("/movies/Foo/Foo CD1.avi", () => ["Foo CD1.avi"]), null);
+  assert.equal(splitSources("/movies/Foo/Foo CD1.avi", () => ["Foo CD1.avi", "Foo CD3.avi"]), null);
+  assert.deepEqual(
+    splitSources("/movies/Bar/Bar - 2 of 3.avi", (directory) =>
+      directory === "/movies/Bar" ? ["Bar - 1 of 3.avi", "Bar - 2 of 3.avi", "Bar - 3 of 3.avi"] : null,
+    ),
+    ["/movies/Bar/Bar - 1 of 3.avi", "/movies/Bar/Bar - 2 of 3.avi", "/movies/Bar/Bar - 3 of 3.avi"],
+  );
+  assert.equal(joinedTarget("/movies/Bar/Bar - 3 of 3.avi"), "/movies/Bar/Bar.mkv");
+  const plan = rewrapArgs("parts.txt", "Foo.mkv", XVID, { languages: ["English"], firstLanguage: "", concat: true });
+  assert.match(plan.args.join(" "), /-f concat -safe 0 -i parts.txt/);
+  const bundled = bundleRewraps([
+    { path: "/movies/Foo/Foo CD2.avi", label: "Foo", languages: ["hun"] },
+    { path: "/movies/Foo/Foo CD1.avi", label: "Foo", languages: ["eng"] },
+    { path: "/movies/Other.avi", label: "Other" },
+  ])
+    .map((group) => group.map((item) => item.path))
+    .sort((left, right) => left[0]!.localeCompare(right[0]!));
+  assert.deepEqual(bundled, [
+    ["/movies/Foo/Foo CD1.avi", "/movies/Foo/Foo CD2.avi"],
+    ["/movies/Other.avi"],
+  ]);
+});
+
+test("joining a split marks the other queued part done", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueRewraps(db, [{ path: "/m/Foo CD1.avi" }, { path: "/m/Foo CD2.avi" }]);
+  const first = claimNextRewrap(db);
+  settleSplitRewraps(db, ["/m/Foo CD1.avi", "/m/Foo CD2.avi"], "Saved Foo.mkv.", first!.id);
+  finishRewrap(db, first!.id, "done", "Saved Foo.mkv.");
+  assert.deepEqual(rewrapTotals(db), { pending: 0, running: 0, done: 2, failed: 0 });
+  assert.deepEqual([...finishedRewrapPaths(db)].sort(), ["/m/Foo CD1.avi", "/m/Foo CD2.avi"]);
+  db.close();
+});
+
+test("two real AVI parts join into one MKV and both parts stay", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-split-"));
+  try {
+    const movie = path.join(root, "Foo");
+    fs.mkdirSync(movie);
+    const write = (name: string, tone: string) => {
+      const file = path.join(movie, name);
+      execFileSync("ffmpeg", [
+        "-v", "error",
+        "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=2",
+        "-f", "lavfi", "-i", `sine=frequency=${tone}:duration=2`,
+        "-map", "0", "-map", "1",
+        "-c:v", "mpeg4", "-vtag", "XVID", "-c:a", "libmp3lame",
+        file,
+      ]);
+      return file;
+    };
+    const cd1 = write("Foo CD1.avi", "440");
+    const cd2 = write("Foo CD2.avi", "660");
+    const message = await rewrapAvi({
+      source: cd1,
+      sources: [cd1, cd2],
+      workDir: path.join(root, "work"),
+      languages: ["English"],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    const mkv = path.join(movie, "Foo.mkv");
+    assert.match(message, /Saved Foo\.mkv with 1 video stream, 1 audio track\. Joined from 2 parts\./);
+    assert.ok(fs.existsSync(cd1) && fs.existsSync(cd2) && fs.existsSync(mkv));
+    assert.equal(fs.existsSync(path.join(movie, "Foo CD1.mkv")), false);
+    const probe = JSON.parse(
+      execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_name:stream_tags=language", "-of", "json", mkv]).toString(),
+    ) as { format: { duration: string }; streams: Array<{ codec_name: string; tags?: { language?: string } }> };
+    assert.ok(Math.abs(Number(probe.format.duration) - 4) < 0.5);
+    assert.equal(probe.streams[1]?.tags?.language, "eng");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

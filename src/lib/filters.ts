@@ -397,9 +397,14 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     if (!value) return null;
     let match: { sql: string; params: Array<string | number> } | null = null;
     if (value === "none") {
-      match = { sql: `(IFNULL(version_count, 0) <= 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+      match = {
+        sql: `(IFNULL(version_count, 0) <= 1 AND IFNULL(version_editions, '') = '' AND (',' || IFNULL(version_flags, '') || ',') NOT LIKE '%,split,%')`,
+        params: [],
+      };
     } else if (value === "duplicate") {
       match = { sql: `(IFNULL(version_count, 0) > 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+    } else if (value === "split") {
+      match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE '%,split,%'`, params: [] };
     } else if (value === "extra" || value === "outtake" || value === "comic-relief" || value === "trailer") {
       match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE ?`, params: [`%,${value},%`] };
     } else {

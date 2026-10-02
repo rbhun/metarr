@@ -1103,30 +1103,116 @@ function partIndex(index: number): string | null {
   return `Part ${index}`;
 }
 
+type PartHit = { index: number; total: number | null; start: number; end: number };
+
+function hitFrom(match: RegExpMatchArray, index: number, total: number | null): PartHit | null {
+  if (total == null) {
+    if (!partIndex(index)) return null;
+  } else if (!partPair(index, total)) return null;
+  return { index, total, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length };
+}
+
+/** The part token in one name, using the same rules as the library pill. */
+function partHit(source: string): PartHit | null {
+  const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const tight = of ? null : source.match(/(?:^|[^a-z0-9])0*(\d{1,2})of0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const counted = of ?? tight;
+  if (counted) {
+    const hit = hitFrom(counted, Number(counted[1]), Number(counted[2]));
+    if (hit) return hit;
+  }
+  const slash = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/);
+  if (slash) {
+    const hit = hitFrom(slash, Number(slash[1]), Number(slash[2]));
+    if (hit) return hit;
+  }
+  const disc = source.match(/(?:^|[^a-z0-9])(?:cd|disc|disk|dvd)\s*[._-]?\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const split = source.match(/(?:^|[^a-z0-9])(?:part|pt)0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const loose = disc ?? split;
+  if (!loose) return null;
+  return hitFrom(loose, Number(loose[1]), null);
+}
+
+function stemAround(base: string, hit: PartHit): string {
+  const left = base.slice(0, hit.start).replace(/[\s._-]+$/g, "");
+  const right = base.slice(hit.end).replace(/^[\s._-]+/g, "");
+  return [left, right].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+export type SplitIdentity = {
+  index: number;
+  total: number | null;
+  /** Folder the joined file belongs in. For `Movie/CD1/file.avi` this is `Movie`. */
+  directory: string;
+  /** File name with the part token removed, for the joined MKV. */
+  stem: string;
+  /** Directory plus stem, so CD1 and CD2 of the same movie share one copy. */
+  key: string;
+};
+
+function groupKey(directory: string, stem: string): string {
+  return `${directory.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase()}\0${stem.toLowerCase()}`;
+}
+
+/**
+ * A labeled split file, such as "CD1" or "1 of 2". A sequel title like "Part II" is not a split.
+ * The token is read from the file name, or from the folder when the file itself has none.
+ */
+export function splitIdentity(filePath: string | null | undefined): SplitIdentity | null {
+  if (!filePath?.trim()) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+  const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const dot = file.lastIndexOf(".");
+  const base = dot > 0 ? file.slice(0, dot) : file;
+  const named = partHit(base);
+  if (named) {
+    const stem = stemAround(base, named);
+    if (!stem) return null;
+    return { index: named.index, total: named.total, directory, stem, key: groupKey(directory, stem) };
+  }
+  const parentSlash = directory.lastIndexOf("/");
+  const parent = parentSlash >= 0 ? directory.slice(parentSlash + 1) : directory;
+  const folder = parent ? partHit(parent) : null;
+  if (!folder || !base.trim()) return null;
+  const grand = parentSlash >= 0 ? directory.slice(0, parentSlash) : "";
+  return { index: folder.index, total: folder.total, directory: grand, stem: base, key: groupKey(grand, base) };
+}
+
+/**
+ * One logical copy. Split parts share a key, and a file named like the joined movie
+ * (the stem with the part token removed) belongs to that same copy.
+ */
+export function copyGroupId(filePath: string | null | undefined, peers: Array<string | null | undefined> = []): string {
+  const split = splitIdentity(filePath);
+  if (split) return split.key;
+  if (filePath?.trim()) {
+    const normalized = filePath.replace(/\\/g, "/");
+    const slash = normalized.lastIndexOf("/");
+    const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+    const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    const dot = file.lastIndexOf(".");
+    const stem = (dot > 0 ? file.slice(0, dot) : file).trim();
+    if (stem) {
+      const plain = groupKey(directory, stem);
+      if (peers.some((peer) => peer !== filePath && splitIdentity(peer)?.key === plain)) return plain;
+    }
+  }
+  return `file:${(filePath ?? "").replace(/\\/g, "/").toLowerCase()}`;
+}
+
 /** A split file, such as "1 of 2" or "CD1". A sequel title like "Part II" or "Part 2" is left alone. */
 export function multiPartLabel(...sources: Array<string | null | undefined>): string | null {
-  let stacked: string | null = null;
+  let stacked: PartHit | null = null;
   for (const source of sources) {
     if (!source?.trim()) continue;
-    const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const tight = of ? null : source.match(/(?:^|[^a-z0-9])0*(\d{1,2})of0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const counted = of ?? tight;
-    if (counted) {
-      const label = partPair(Number(counted[1]), Number(counted[2]));
-      if (label) return label;
-    }
-    const slash = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/);
-    if (slash) {
-      const label = partPair(Number(slash[1]), Number(slash[2]));
-      if (label) return label;
-    }
-    if (stacked) continue;
-    const disc = source.match(/(?:^|[^a-z0-9])(?:cd|disc|disk|dvd)\s*[._-]?\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const split = source.match(/(?:^|[^a-z0-9])(?:part|pt)0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const index = disc ?? split;
-    if (index) stacked = partIndex(Number(index[1]));
+    const hit = partHit(source);
+    if (!hit) continue;
+    if (hit.total != null) return partPair(hit.index, hit.total);
+    if (!stacked) stacked = hit;
   }
-  return stacked;
+  return stacked ? partIndex(stacked.index) : null;
 }
 
 export function editionLabel(filePath: string | null | undefined): string | null {

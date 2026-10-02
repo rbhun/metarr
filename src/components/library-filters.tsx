@@ -57,6 +57,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "No English subs", rule: { field: "subtitles", op: "missing", value: "English" } },
   { label: "3D only", rule: { field: "stereo", op: "eq", value: "yes" } },
   { label: "Duplicate versions", rule: { field: "version", op: "eq", value: "duplicate" } },
+  { label: "Multi-part", rule: { field: "version", op: "eq", value: "split" } },
   { label: "Hungarian", rule: { field: "language", op: "includes", value: "Hungarian" } },
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
 ];
@@ -142,6 +143,7 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
       <select className={selectClass} aria-label="Versions" value={rule.value} onChange={(event) => onChange(event.target.value)}>
         <option value="none">None</option>
         <option value="duplicate">Duplicate</option>
+        <option value="split">Multi-part</option>
         <option value="extra">{VERSION_FLAG_LABEL.extra}</option>
         <option value="outtake">{VERSION_FLAG_LABEL.outtake}</option>
         <option value="comic-relief">{VERSION_FLAG_LABEL["comic-relief"]}</option>

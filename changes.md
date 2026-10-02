@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.136
+
+- Treat a three-part movie the same as a two-part one: the Versions filter is Multi-part, and a rewrap joins all of the labeled parts.
+
+## 0.0.135
+
+- Join a labeled split movie, such as CD1 and CD2 or 1 of 2, into one MKV when rewrapping. Those movies have their own Two-part filter and no longer show up as duplicates.
+
+## 0.0.134
+
+- Describe the library, language detection, disc remux, and rewrap features in one place.
+
 ## 0.0.133
 
 - Filter the library by movie or series, and by length in minutes.

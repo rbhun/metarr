@@ -298,6 +298,41 @@ export function demoRecords(): SourceDraft[] {
     ["The Matrix", matrixHd.path, matrixSd.path],
   );
 
+  const lawrenceCd1 = video({
+    container: "avi",
+    path: "/movies/Lawrence of Arabia (1962)/Lawrence of Arabia (1962) - CD1.avi",
+    resolution: "480p",
+    qualityName: "DVD",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 1500,
+  });
+  const lawrenceCd2 = video({
+    container: "avi",
+    path: "/movies/Lawrence of Arabia (1962)/Lawrence of Arabia (1962) - CD2.avi",
+    resolution: "480p",
+    qualityName: "DVD",
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    bitrateKbps: 1500,
+  });
+  const lawrence = withMedia(
+    sourceDraft({
+      connector: "plex",
+      kind: "movie",
+      externalKey: "item:lawrence",
+      title: "Lawrence of Arabia",
+      year: 1962,
+      imdbId: "tt0056172",
+      tmdbId: "947",
+      rating: 8.3,
+      genres: ["Adventure", "History"],
+      monitored: true,
+    }),
+    [lawrenceCd1, lawrenceCd2],
+    ["Lawrence of Arabia", lawrenceCd1.path, lawrenceCd2.path],
+  );
+
   const parasiteFile = video({
     path: "/movies/Parasite (2019)/Parasite (2019).mkv",
     qualityName: "Bluray-1080p",
@@ -699,6 +734,7 @@ export function demoRecords(): SourceDraft[] {
     duneRadarr,
     duneBazarr,
     matrix,
+    lawrence,
     parasitePlex,
     parasiteRadarr,
     parasiteBazarr,

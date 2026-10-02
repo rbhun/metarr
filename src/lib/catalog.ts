@@ -17,6 +17,8 @@ import {
   reconcileAudio,
   reconcileSubtitles,
   tagFileOrigin,
+  copyGroupId,
+  splitIdentity,
   resolutionRank,
   buildDetail,
   summarizeFiles,
@@ -315,6 +317,10 @@ function withTitleFlag(title: string, flags: string): string {
 function versionColumns(files: MediaFile[]) {
   const versions = versionsFrom(files);
   const featureVersions = versions.filter((version) => !version.flags.some((flag) => flag === "extra" || flag === "outtake" || flag === "comic-relief" || flag === "trailer"));
+  const featurePaths = featureVersions.map((version) => version.path ?? version.name);
+  const split = featureVersions.some((version) => splitIdentity(version.path ?? version.name));
+  const flags = [...new Set(versions.flatMap((version) => version.flags))];
+  if (split) flags.push("split");
   return {
     versions,
     versionsJson: JSON.stringify(versions),
@@ -323,10 +329,10 @@ function versionColumns(files: MediaFile[]) {
       .filter((resolution): resolution is string => Boolean(resolution))
       .join(","),
     versionHdrs: versions.map((version) => version.hdr).join(","),
-    versionFlags: [...new Set(versions.flatMap((version) => version.flags))].join(","),
+    versionFlags: flags.join(","),
     versionEditions: [...new Set(featureVersions.map((version) => version.edition).filter((edition): edition is string => Boolean(edition)))].join(","),
-    // Bonus files do not count toward Duplicate / None — only the main feature copies do.
-    versionCount: featureVersions.length,
+    // Bonus files do not count toward Duplicate / None. Split parts are one copy, not two.
+    versionCount: new Set(featurePaths.map((filePath) => copyGroupId(filePath, featurePaths))).size,
   };
 }
 
@@ -341,7 +347,7 @@ function bestResolution(values: Array<string | null>): string | null {
 const HOVER_KEY = "source_hover";
 let hoverReady = false;
 
-const VERSION_FILTER_KEY = "version_filter_v2";
+const VERSION_FILTER_KEY = "version_filter_v3";
 
 /** Rebuild stored titles once so language tooltips and version filter columns exist without another sync. */
 export function ensureHoverSources(db: Database.Database) {

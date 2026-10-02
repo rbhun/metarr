@@ -9,9 +9,10 @@ import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
+import { pathOnPlex } from "@/lib/detect/paths";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
-import { canRewrap, sourceKind } from "@/lib/rewrap/source";
+import { canRewrap, joinedTarget, sourceKind, splitSourcesOnDisk } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   finishRewrap,
@@ -19,6 +20,7 @@ import {
   readRewrapSettings,
   releaseRunningRewrap,
   rewrapTotals,
+  settleSplitRewraps,
   updateRewrapProgress,
   writeRewrapPause,
 } from "@/lib/rewrap/store";
@@ -71,10 +73,10 @@ function existsFile(candidate: string): boolean {
   }
 }
 
-/** The copy is about as large as the source, in scratch and then in the movie folder. */
-function roomFor(file: string, directories: string[]): boolean {
+/** The copy is about as large as the sources, in scratch and then in the movie folder. */
+function roomFor(bytes: number, directories: string[]): boolean {
   try {
-    const needed = fs.statSync(file).size + 512 * 1024 * 1024;
+    const needed = bytes + 512 * 1024 * 1024;
     return directories.every((directory) => {
       fs.mkdirSync(directory, { recursive: true });
       const space = fs.statfsSync(directory);
@@ -140,21 +142,31 @@ async function step() {
     const known = currentLanguages(db, job.path);
     const directory = path.dirname(local);
     const rehearsal = dryRun();
+    const sources = splitSourcesOnDisk(local) ?? [local];
+    const outputDir = sources.length > 1 ? path.dirname(joinedTarget(local) ?? local) : directory;
     if (rehearsal) {
-      const problem = discFolderProblem(directory);
+      const problem = discFolderProblem(outputDir);
       if (problem) {
         finishRewrap(db, job.id, "failed", `Dry run: ${sourceText(problem, kind)}`);
         return;
       }
     } else {
-      assertWritableDiscFolder(directory);
-      if (!roomFor(local, [path.dirname(workDir), directory])) {
-        finishRewrap(db, job.id, "failed", `There is not enough free space for a copy of this ${kind}, so nothing was written.`);
+      assertWritableDiscFolder(outputDir);
+      let bytes = 0;
+      try {
+        for (const file of sources) bytes += fs.statSync(file).size;
+      } catch {
+        bytes = 0;
+      }
+      if (bytes > 0 && !roomFor(bytes, [path.dirname(workDir), outputDir])) {
+        const space = sources.length > 1 ? "to join these parts" : `for a copy of this ${kind}`;
+        finishRewrap(db, job.id, "failed", `There is not enough free space ${space}, so nothing was written.`);
         return;
       }
     }
     const message = await rewrapAvi({
       source: local,
+      sources,
       workDir,
       languages: known?.languages ?? job.languages,
       subtitleLanguages: known?.subtitleLanguages ?? job.subtitleLanguages,
@@ -162,10 +174,20 @@ async function step() {
       dryRun: rehearsal,
       onProgress: (percent, text) => updateRewrapProgress(db, job.id, percent, text),
     });
+    if (!rehearsal && sources.length > 1) {
+      const maps = readDetectSettings(db).pathMaps;
+      const partners = new Set<string>(sources);
+      for (const file of sources) partners.add(pathOnPlex(file, maps));
+      for (const [libraryPath] of libraryAvis(db)) {
+        const resolved = resolveMediaPath(libraryPath, maps, existsFile);
+        if (resolved && sources.some((file) => file.toLowerCase() === resolved.toLowerCase())) partners.add(libraryPath);
+      }
+      settleSplitRewraps(db, [...partners], message, job.id);
+    }
     let told = "";
     if (!rehearsal) {
       try {
-        told = await announceFolder(db, [path.dirname(job.path), directory]);
+        told = await announceFolder(db, [path.dirname(job.path), directory, outputDir]);
       } catch {
         told = "Plex and the *arr apps could not be asked to rescan.";
       }
