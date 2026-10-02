@@ -175,6 +175,58 @@ export function episodeTitleKey(season: number | null, episode: number | null): 
 }
 
 /** The episode name in the chosen language, hidden when it repeats the library title. */
+/** The file name’s local title, when it matches one stored episode name and not several of the same length. */
+export function matchLocalEpisode(source: string, titles: Record<string, string> | null | undefined): string | null {
+  const haystack = normalizeTitle(source);
+  if (!haystack || !titles) return null;
+  let bestKey: string | null = null;
+  let bestLength = 0;
+  let tied = false;
+  for (const [key, name] of Object.entries(titles)) {
+    const needle = normalizeTitle(name);
+    if (needle.length < 8 || !haystack.includes(needle)) continue;
+    if (needle.length > bestLength) {
+      bestKey = key;
+      bestLength = needle.length;
+      tied = false;
+    } else if (needle.length === bestLength && key !== bestKey) {
+      tied = true;
+    }
+  }
+  return tied ? null : bestKey;
+}
+
+export type RecognizedEpisode = { season: number | null; episode: number | null; title: string };
+
+/**
+ * The Sonarr episode a file is actually naming.
+ * The local title picks a TMDB episode. Sonarr’s own row wins when its English title is that episode, even if the numbers differ.
+ */
+export function recognizeEpisode(
+  source: string,
+  episodeTitles: Record<string, Record<string, string>> | null | undefined,
+  language: string | null,
+  episodes: RecognizedEpisode[],
+): RecognizedEpisode | null {
+  const code = language?.trim().toLowerCase();
+  if (!code) return null;
+  const key = matchLocalEpisode(source, episodeTitles?.[code]);
+  if (!key) return null;
+  const [seasonText, episodeText] = key.split(":");
+  const season = Number(seasonText);
+  const episode = Number(episodeText);
+  if (!Number.isInteger(season) || !Number.isInteger(episode)) return null;
+  const english = episodeTitles?.en?.[key]?.trim();
+  if (english) {
+    const titled = episodes.filter((row) => row.title.trim() && normalizeTitle(row.title) === normalizeTitle(english));
+    if (titled.length === 1) return { season: titled[0].season, episode: titled[0].episode, title: titled[0].title };
+  }
+  const numbered = episodes.find((row) => row.season === season && row.episode === episode);
+  if (numbered) return { season: numbered.season, episode: numbered.episode, title: numbered.title };
+  if (english) return { season, episode, title: english };
+  return { season, episode, title: episodeTitles?.[code]?.[key]?.trim() || "" };
+}
+
 export function displayEpisodeTitle(
   title: string,
   episodeTitles: Record<string, Record<string, string>> | null | undefined,

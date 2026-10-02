@@ -5,7 +5,7 @@ import { rebuildCatalog } from "@/lib/catalog";
 import { countTitlesAfter, insertSourceRecords, migrate, queryEpisodes, queryLibrary, saveEnrichment, setMeta, titlesForLookup } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { lookupOnline } from "@/lib/online-lookup";
-import { displayEpisodeTitle, displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
+import { displayEpisodeTitle, displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, matchLocalEpisode, mergeHits, recognizeEpisode, type SourceHit } from "@/lib/online";
 
 const godfather = {
   kind: "movie" as const,
@@ -336,4 +336,40 @@ test("a full lookup walks every title, including ones already stored", () => {
   assert.equal(seen.includes(first.id), true);
   assert.equal(new Set(seen).size, seen.length);
   assert.equal(titlesForLookup({ gaps: false, afterId: after, limit: 10 }, db).length, 0);
+});
+
+test("a file named in the local language matches the Sonarr episode", () => {
+  const titles = {
+    hu: {
+      "1:1": "A villámkő titka (1)",
+      "1:4": "A villámkő titka (4)",
+      "1:7": "Amit ma megtehetsz",
+    },
+    en: {
+      "1:4": "Plunder & Lightning (4)",
+      "1:7": "Time Waits for No Bear",
+    },
+  };
+  const episodes = [
+    { season: 1, episode: 4, title: "Plunder & Lightning (4)" },
+    { season: 1, episode: 14, title: "Time Waits for No Bear" },
+  ];
+  assert.equal(matchLocalEpisode("/tv/TaleSpin/4.-a villámkő titka 4.avi", titles.hu), "1:4");
+  assert.equal(matchLocalEpisode("/tv/TaleSpin/TaleSpin - S01E07.avi", titles.hu), null);
+  assert.deepEqual(recognizeEpisode("4.-a villámkő titka 4.avi", titles, "hu", episodes), {
+    season: 1,
+    episode: 4,
+    title: "Plunder & Lightning (4)",
+  });
+  assert.deepEqual(recognizeEpisode("/dvd/12 - Amit ma megtehetsz.avi", titles, "hu", episodes), {
+    season: 1,
+    episode: 14,
+    title: "Time Waits for No Bear",
+  });
+  assert.deepEqual(
+    recognizeEpisode("Amit ma megtehetsz.avi", { hu: titles.hu }, "hu", [
+      { season: 1, episode: 7, title: "Time Waits for No Bear" },
+    ]),
+    { season: 1, episode: 7, title: "Time Waits for No Bear" },
+  );
 });

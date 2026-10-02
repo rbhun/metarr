@@ -251,6 +251,8 @@ export type LibraryEpisode = {
   episode: number | null;
   title: string;
   localTitle: string | null;
+  /** Set when the file name matches a different episode than the one Sonarr assigned. */
+  recognized: { season: number | null; episode: number | null; title: string } | null;
   hasFile: boolean;
   wanted: boolean;
   container: string | null;

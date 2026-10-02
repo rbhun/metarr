@@ -6,8 +6,8 @@ import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
-import { ensureListedSource } from "@/lib/media";
-import { displayEpisodeTitle, displayLocalTitle, enrichmentKey } from "@/lib/online";
+import { ensureListedSource, normalizeTitle } from "@/lib/media";
+import { displayEpisodeTitle, displayLocalTitle, enrichmentKey, recognizeEpisode, type RecognizedEpisode } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
 import type {
@@ -1468,14 +1468,29 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
        ORDER BY COALESCE(season, 9999), COALESCE(episode, 9999), title`,
     )
     .all(catalogId) as EpisodeRow[];
+  const identities: RecognizedEpisode[] = rows.map((row) => ({ season: row.season, episode: row.episode, title: row.title }));
   return rows.map((row) => {
     const app = row.in_sonarr === 1 ? "sonarr" : null;
+    const versions = parseVersions(row.versions_json);
+    const sources = [row.path, row.title, ...versions.flatMap((version) => [version.path, version.name])].filter(
+      (value): value is string => Boolean(value),
+    );
+    let recognized: RecognizedEpisode | null = null;
+    for (const source of sources) {
+      const match = recognizeEpisode(source, episodeTitles, language, identities);
+      if (!match) continue;
+      const sameEpisode = match.season === row.season && match.episode === row.episode && normalizeTitle(match.title) === normalizeTitle(row.title);
+      if (sameEpisode) continue;
+      recognized = match;
+      break;
+    }
     return {
     id: row.id,
     season: row.season,
     episode: row.episode,
     title: row.title,
     localTitle: displayEpisodeTitle(row.title, episodeTitles, language, row.season, row.episode),
+    recognized,
     hasFile: row.has_file === 1,
     wanted: row.wanted === 1,
     container: row.container,
@@ -1492,7 +1507,7 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     subtitleTracks: ensureListedSource(subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
-    versions: parseVersions(row.versions_json).map((version) => ({
+    versions: versions.map((version) => ({
       ...version,
       audioTracks: ensureListedSource(audio(version.path, version.audioTracks, detections), app),
       subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),

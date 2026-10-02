@@ -139,6 +139,15 @@ function Poster({ title, className }: { title: LibraryTitle; className?: string 
   );
 }
 
+function RecognizedLine({ episode }: { episode: LibraryEpisode }) {
+  if (!episode.recognized) return null;
+  return (
+    <p className="text-sm">
+      Matches {episodeCode(episode.recognized.season, episode.recognized.episode)} {episode.recognized.title}
+    </p>
+  );
+}
+
 function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () => void; action?: React.ReactNode }) {
   const rating = displayRating(title.rating, title.online);
   const runtime = formatRuntime(title.runtimeMinutes ?? title.online?.runtimeMinutes);
@@ -1170,6 +1179,7 @@ function EpisodeRows({
                                 {episodeCode(episode.season, episode.episode)} {episode.title}
                               </p>
                               {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+                              <RecognizedLine episode={episode} />
                               <p className="text-xs text-muted-foreground">
                                 {formatRuntime(episode.runtimeMinutes)}
                                 {episode.airDate ? ` · ${episode.airDate}` : ""}
@@ -1335,6 +1345,7 @@ function EpisodeList({
                           {episodeCode(episode.season, episode.episode)} {episode.title}
                         </p>
                         {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+                        <RecognizedLine episode={episode} />
                         {episode.versions.length > 1 ? (
                           <div className="mt-1">
                             <VersionLines

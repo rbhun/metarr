@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.147
+
+- Match a file’s local-language title to the episode list, and show that episode’s English name and Sonarr number.
+
 ## 0.0.146
 
 - Look up every title from one button, so a refresh does not depend on selecting each row.

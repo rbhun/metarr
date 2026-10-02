@@ -205,6 +205,11 @@ export function TitleDetail({
                 {!episode && title.year ? <span className="ml-2 font-normal text-muted-foreground">{title.year}</span> : null}
               </SheetTitle>
               {episode?.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+              {episode?.recognized ? (
+                <p className="text-sm">
+                  Matches {episodeCode(episode.recognized.season, episode.recognized.episode)} {episode.recognized.title}
+                </p>
+              ) : null}
               {!episode && title.localTitle ? <p className="text-sm text-muted-foreground">{title.localTitle}</p> : null}
               <SheetDescription>
                 {episode

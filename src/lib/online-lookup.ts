@@ -212,7 +212,13 @@ export async function lookupTmdb(
   }
   if (identity.kind === "series" && language && hit.tmdbId) {
     const names = await seasonEpisodeTitles(hit.tmdbId, language, record.seasons, apiKey, fetchImpl);
-    if (Object.keys(names).length) hit.episodeTitles = { [language]: names };
+    const stored: Record<string, Record<string, string>> = {};
+    if (Object.keys(names).length) stored[language] = names;
+    if (language !== "en") {
+      const english = await seasonEpisodeTitles(hit.tmdbId, "en", record.seasons, apiKey, fetchImpl);
+      if (Object.keys(english).length) stored.en = english;
+    }
+    if (Object.keys(stored).length) hit.episodeTitles = stored;
   }
   return hit;
 }
