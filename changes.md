@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.153
+
+- Show this container's CPU next to the whole-machine figure, so a rip's load is distinct from Plex or the rest of the VM.
+
 ## 0.0.152
 
 - Put CPU use on the version row, right-aligned, in the sidebar and the phone menu.
