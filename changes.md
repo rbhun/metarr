@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.152
+
+- Put CPU use on the version row, right-aligned, in the sidebar and the phone menu.
+
 ## 0.0.151
 
 - Show CPU use in the top of the sidebar and the phone menu, so load from a rip or language check is visible without opening a shell.

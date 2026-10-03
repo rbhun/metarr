@@ -182,9 +182,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <>
                 <div className="min-w-0 flex-1">
-                  <CpuReadout className="mb-1" />
                   <p className="text-sm font-semibold tracking-tight">Metarr</p>
-                  <p className="text-xs text-muted-foreground">{VERSION}</p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">{VERSION}</p>
+                    <CpuReadout />
+                  </div>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
                 </div>
                 <Button
@@ -213,9 +215,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </SheetTrigger>
               <SheetContent side="left" className="bg-sidebar">
                 <SheetHeader>
-                  <CpuReadout />
                   <SheetTitle>Metarr</SheetTitle>
-                  <p className="text-xs text-muted-foreground">{VERSION}</p>
+                  <div className="flex items-baseline justify-between gap-2 pr-8">
+                    <p className="text-xs text-muted-foreground">{VERSION}</p>
+                    <CpuReadout />
+                  </div>
                 </SheetHeader>
                 <div className="px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
