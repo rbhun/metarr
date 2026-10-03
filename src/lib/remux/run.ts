@@ -25,23 +25,53 @@ function childNamed(directory: string, name: string): string | null {
   }
 }
 
-/** Largest .m2ts under BDMV/STREAM of a Blu-ray folder source; null for ISOs, DVDs or when unreadable. */
-export function largestStreamFile(source: string): { name: string; bytes: number } | null {
-  if (!source.startsWith("file:")) return null;
-  const bdmv = childNamed(source.slice(5), "bdmv");
-  const stream = bdmv ? childNamed(bdmv, "stream") : null;
-  if (!stream) return null;
-  let best: { name: string; bytes: number } | null = null;
+export type StreamFile = { name: string; bytes: number };
+
+/** The .m2ts files under BDMV/STREAM of a Blu-ray folder source, largest first, or why there are none. */
+export function streamFiles(source: string): { files: StreamFile[]; problem: string | null } {
+  if (!source.startsWith("file:")) return { files: [], problem: "not a Blu-ray folder (an ISO or a DVD)" };
+  const root = source.slice(5);
+  const bdmv = childNamed(root, "bdmv");
+  if (!bdmv) return { files: [], problem: `no BDMV folder in ${root}` };
+  const stream = childNamed(bdmv, "stream");
+  if (!stream) return { files: [], problem: `no STREAM folder in ${bdmv}` };
+  let names: string[];
   try {
-    for (const name of fs.readdirSync(stream)) {
-      if (!name.toLowerCase().endsWith(".m2ts")) continue;
-      const bytes = fs.statSync(path.join(stream, name)).size;
-      if (!best || bytes > best.bytes) best = { name, bytes };
-    }
-  } catch {
-    return null;
+    names = fs.readdirSync(stream);
+  } catch (caught) {
+    return { files: [], problem: `cannot list ${stream}: ${caught instanceof Error ? caught.message : "unknown error"}` };
   }
-  return best;
+  const files: StreamFile[] = [];
+  let unreadable = 0;
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith(".m2ts")) continue;
+    try {
+      files.push({ name, bytes: fs.statSync(path.join(stream, name)).size });
+    } catch {
+      unreadable += 1;
+    }
+  }
+  files.sort((a, b) => b.bytes - a.bytes);
+  const problem = files.length ? (unreadable ? `${unreadable} .m2ts files could not be read` : null) : `no readable .m2ts files in ${stream}`;
+  return { files, problem };
+}
+
+export function largestStreamFile(source: string): StreamFile | null {
+  return streamFiles(source).files[0] ?? null;
+}
+
+/** Plain-text overview for Tasks → MakeMKV log: what is on the disc next to what MakeMKV offered. */
+export function discSummary(source: string, titles: DiscTitle[], chosen: DiscTitle | null, stream: { files: StreamFile[]; problem: string | null }): string {
+  const lines = [`Source: ${source}`, `MakeMKV titles: ${titles.length}`];
+  if (chosen) lines.push(`Chosen: ${titleName(chosen)}, ${clock(chosen.seconds)}, ${formatBytes(chosen.bytes)}`);
+  lines.push("", "Largest MakeMKV titles:");
+  for (const title of [...titles].sort((a, b) => b.bytes - a.bytes || b.seconds - a.seconds).slice(0, 15)) {
+    lines.push(`  ${titleName(title)}  ${clock(title.seconds)}  ${formatBytes(title.bytes)}  clips ${title.segments ?? "?"}`);
+  }
+  lines.push("", "Largest stream files on the disc:");
+  for (const file of stream.files.slice(0, 10)) lines.push(`  ${file.name}  ${formatBytes(file.bytes)}`);
+  if (stream.problem) lines.push(`  (${stream.problem})`);
+  return `${lines.join("\n")}\n`;
 }
 
 /** Null when MakeMKV's chosen title could hold the disc's largest stream file. */
@@ -228,7 +258,15 @@ export async function ripDisc(options: {
   const titles = parseDiscTitles(info);
   const main = mainTitle(titles);
   if (!main) throw new Error("MakeMKV did not find a title on this disc.");
-  const missing = missingFeatureMessage(main, largestStreamFile(source));
+  const stream = streamFiles(source);
+  if (logDir) {
+    try {
+      fs.writeFileSync(path.join(logDir, "disc.txt"), discSummary(source, titles, main, stream));
+    } catch {
+      // The summary is only for diagnosis.
+    }
+  }
+  const missing = missingFeatureMessage(main, stream.files[0] ?? null);
   if (missing) throw new Error(missing);
   if (options.dryRun) {
     const target = path.join(outputDir, `${safeBaseName(label)}.mkv`);

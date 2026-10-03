@@ -3,7 +3,7 @@ import path from "node:path";
 
 const KEEP = 30;
 const TAIL = 400_000;
-const FILES = ["info-output.txt", "info-debug.txt", "mkv-output.txt", "mkv-debug.txt"];
+const FILES = ["disc.txt", "info-output.txt", "info-debug.txt", "mkv-output.txt", "mkv-debug.txt"];
 
 /** Always under the app data folder, never on the media drive. */
 function logRoot(dbName: string) {

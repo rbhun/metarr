@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.152
+
+- The MakeMKV log starts with a disc summary: the largest MakeMKV titles with the clips they play, and the largest stream files in the Blu-ray folder. One unreadable stream file no longer switches off the check that stops a rip when MakeMKV skips the main film.
+
 ## 0.0.151
 
 - Add Do not wait for Plex in Settings, so language checks, disc remux, and rewrap keep going while Plex is scanning or someone is playing.
