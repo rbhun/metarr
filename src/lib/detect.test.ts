@@ -14,7 +14,7 @@ import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { audioCodecFromName, languageFromAudioName } from "@/lib/detect/audio-name";
@@ -795,6 +795,29 @@ test("clearing a filter removes only that status and keeps the language", () => 
   assert.equal(listJobs(db, { status: "done", page: 1, pageSize: 50 }).total, 1);
   const stored = db.prepare(`SELECT language FROM detect_results WHERE path = '/done.mkv'`).get() as { language: string };
   assert.equal(stored.language, "Hungarian");
+  db.close();
+});
+
+test("removing one waiting or failed language check leaves the others", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(
+    db,
+    [
+      { path: "/a.mkv", kind: "subtitle", ordinal: 0, label: "A", format: "PGS", placement: "internal", streamLabel: null },
+      { path: "/b.mkv", kind: "subtitle", ordinal: 0, label: "B", format: "PGS", placement: "internal", streamLabel: null },
+    ],
+    "immediate",
+  );
+  const first = claimNextJob(db, true);
+  finishJob(db, first!.id, "failed", "Could not read.");
+  const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 10 }).jobs[0];
+  assert.ok(waiting);
+  assert.equal(removeJob(db, waiting.id), true);
+  assert.equal(listJobs(db, { status: "pending", page: 1, pageSize: 10 }).total, 0);
+  assert.equal(removeJob(db, first!.id), true);
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 10 }).total, 0);
+  assert.equal(removeJob(db, first!.id), false);
   db.close();
 });
 

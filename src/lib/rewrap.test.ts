@@ -18,6 +18,7 @@ import {
   hasImmediateRewrap,
   parseFirstLanguage,
   readRewrapSettings,
+  removeRewrapJob,
   retryFailedRewrap,
   rewrapTotals,
   settleSplitRewraps,
@@ -116,6 +117,22 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.deepEqual([...finishedRewrapPaths(db)], ["/m/Film.avi"]);
   assert.equal(retryFailedRewrap(db, old!.id), "retried");
   assert.equal(rewrapTotals(db).pending, 1);
+  db.close();
+});
+
+test("removing one waiting or failed rewrap leaves the others", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueRewraps(db, [{ path: "/m/Wait.avi", label: "Wait" }, { path: "/m/Fail.avi", label: "Fail" }]);
+  const fail = claimNextRewrap(db);
+  assert.ok(fail);
+  finishRewrap(db, fail.id, "failed", "No.");
+  const waiting = db.prepare(`SELECT id FROM rewrap_jobs WHERE status = 'pending'`).get() as { id: number };
+  assert.equal(removeRewrapJob(db, waiting.id), true);
+  assert.equal(rewrapTotals(db).pending, 0);
+  assert.equal(removeRewrapJob(db, fail.id), true);
+  assert.equal(rewrapTotals(db).failed, 0);
+  assert.equal(removeRewrapJob(db, fail.id), false);
   db.close();
 });
 

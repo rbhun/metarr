@@ -21,6 +21,7 @@ import {
   finishMerge,
   mergeTotals,
   readMergeSettings,
+  removeMergeJob,
   retryFailedMerge,
   writeMergeSettings,
 } from "@/lib/merge/store";
@@ -261,4 +262,23 @@ test("merge queue is manual and can be turned off", () => {
   finishMerge(db, job!.id, "failed", "nope");
   assert.equal(retryFailedMerge(db, job!.id), "retried");
   assert.deepEqual(mergeTotals(db), { pending: 1, running: 0, done: 0, failed: 0 });
+});
+
+test("removing one waiting or failed merge leaves the others", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueMerges(db, [
+    { leftPath: "/m/a.mkv", rightPath: "/m/b.mkv", videoPath: "/m/a.mkv", label: "First" },
+    { leftPath: "/m/c.mkv", rightPath: "/m/d.mkv", videoPath: "/m/c.mkv", label: "Second" },
+  ]);
+  const first = claimNextMerge(db);
+  assert.ok(first);
+  finishMerge(db, first.id, "failed", "No.");
+  const waiting = db.prepare(`SELECT id FROM merge_jobs WHERE status = 'pending'`).get() as { id: number };
+  assert.equal(removeMergeJob(db, waiting.id), true);
+  assert.equal(mergeTotals(db).pending, 0);
+  assert.equal(removeMergeJob(db, first.id), true);
+  assert.equal(mergeTotals(db).failed, 0);
+  assert.equal(removeMergeJob(db, first.id), false);
+  db.close();
 });

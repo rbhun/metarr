@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.161
+
+- Add Remove on waiting and failed Tasks rows so one queued or failed job can be dropped without clearing the whole list.
+
 ## 0.0.160
 
 - Cap how long ffmpeg holds a rewrap in memory. With no cap, a sparse Blu-ray subtitle kept a 50 GB M2TS in RAM until the process was killed, which showed up as "ffmpeg exited with code null."
