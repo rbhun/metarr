@@ -16,6 +16,7 @@ import {
   pathKey,
   readFolderScan,
   scanOneFile,
+  underKnownSeries,
 } from "@/lib/folder-scan";
 import { insertSourceRecords, loadSourceRecords, parseVersions } from "@/lib/db";
 import type { SourceDraft } from "@/lib/types";
@@ -157,7 +158,9 @@ export async function rescanTitle(
     if (!local) continue;
     try {
       const match = chooseMatch(known, videoPath, scan.roots) ?? chooseMatch(known, local, scan.roots);
-      const drafted = await scanOneFile(local, match);
+      const drafted = await scanOneFile(local, match, {
+        underSeries: underKnownSeries(known, videoPath, scan.roots) || underKnownSeries(known, local, scan.roots),
+      });
       if (!drafted) continue;
       drafts.push({
         ...drafted,

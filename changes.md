@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.163
+
+- Do not invent standalone movie titles from unmatched files under a known series folder, so Season folders, Specials, and loose videos without episode codes stay off the library as separate red titles.
+
 ## 0.0.162
 
 - Do not invent movie titles from series Features or Extras folders, so Top Gear featurettes and Two and a Half Men extras stay off the library as separate titles.
