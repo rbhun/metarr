@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const KEEP = 30;
-const TAIL = 400_000;
+const TAIL = 8_000_000;
 const FILES = ["disc.txt", "info-output.txt", "info-debug.txt", "mkv-output.txt", "mkv-debug.txt"];
 
 /** Always under the app data folder, never on the media drive. */

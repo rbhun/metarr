@@ -457,3 +457,35 @@ test("the MakeMKV log starts with what is on the disc next to what MakeMKV offer
   assert.match(text, /\(1 \.m2ts files could not be read\)/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a disc with a long title list keeps every title, so the feature at the top is not cut off", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-longinfo-"));
+  const fake = path.join(dir, "makemkvcon");
+  fs.writeFileSync(
+    fake,
+    [
+      "#!/bin/sh",
+      'echo \'TINFO:0,9,0,"2:19:01"\'',
+      'echo \'TINFO:0,11,0,"34668134400"\'',
+      'echo \'TINFO:0,16,0,"00010.mpls"\'',
+      'i=0; while [ $i -lt 6000 ]; do echo \'SINFO:0,1,30,0,"Lossless conversion of a long attribute value for padding"\'; i=$((i+1)); done',
+      'echo \'TINFO:86,9,0,"0:01:12"\'',
+      'echo \'TINFO:86,11,0,"320864256"\'',
+      'echo \'TINFO:86,16,0,"00469.m2ts"\'',
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const message = await ripDisc({
+    binary: fake,
+    source: "iso:/nowhere.iso",
+    outputDir: dir,
+    workDir: path.join(dir, "work"),
+    label: "Fight Club (1999)",
+    extras: false,
+    home: dir,
+    dryRun: true,
+    onProgress: () => undefined,
+  });
+  assert.match(message, /^Dry run: would remux title 0 \(00010\.mpls\), 2:19, 32\.3 GB/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

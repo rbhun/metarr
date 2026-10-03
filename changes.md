@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.153
+
+- Read MakeMKV's whole title list. Metarr kept only the last 200 KB of MakeMKV's output, so on discs with a hundred titles the first titles, usually the film's playlists, were cut off before parsing; Fight Club showed 20 of 107 titles and ripped a clip. The MakeMKV log page now shows up to 8 MB per section.
+
 ## 0.0.152
 
 - The MakeMKV log starts with a disc summary: the largest MakeMKV titles with the clips they play, and the largest stream files in the Blu-ray folder. One unreadable stream file no longer switches off the check that stops a rip when MakeMKV skips the main film.

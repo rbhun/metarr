@@ -9,6 +9,8 @@ import { formatBytes } from "@/lib/format";
 import { mainTitle, parseDiscTitles, progressPercent, type DiscTitle } from "@/lib/remux/robot";
 
 const RIP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+const PROGRESS = /^PRG[VCT]:/;
 /** A remux keeps every byte of the chosen streams; far less than MakeMKV announced means the wrong or a broken title. */
 const MIN_SIZE_SHARE = 0.25;
 
@@ -193,7 +195,16 @@ function runMakeMkv(
       env: { ...process.env, HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let output = "";
+    // Every line except progress counters: a disc with a hundred titles prints megabytes of TINFO/SINFO,
+    // and the title list must stay whole for parsing.
+    const kept: string[] = [];
+    let keptBytes = 0;
+    const keep = (text: string) => {
+      if (keptBytes > MAX_OUTPUT_BYTES) return;
+      kept.push(text);
+      keptBytes += text.length;
+    };
+    const collected = () => kept.join("");
     let settled = false;
     const fail = (error: Error) => {
       if (settled) return;
@@ -207,12 +218,12 @@ function runMakeMkv(
     }, RIP_TIMEOUT_MS);
     const stdout = readline.createInterface({ input: child.stdout });
     stdout.on("line", (line) => {
-      output = `${output}${line}\n`.slice(-200_000);
+      if (!PROGRESS.test(line)) keep(`${line}\n`);
       onLine(line);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      output = `${output}${text}`.slice(-200_000);
+      keep(text);
       for (const line of text.split(/\r?\n/)) {
         if (line.trim()) onLine(line);
       }
@@ -228,6 +239,7 @@ function runMakeMkv(
       );
     });
     child.on("close", (code, signal) => {
+      const output = collected();
       saveOutput(logDir, home, step, output, code, signal);
       if (settled) return;
       settled = true;
