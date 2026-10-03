@@ -15,7 +15,7 @@ import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { mainTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
-import { makemkvFailure, makemkvMessages, ripDisc, undersizedMessage } from "@/lib/remux/run";
+import { largestStreamFile, makemkvFailure, makemkvMessages, missingFeatureMessage, ripDisc, undersizedMessage } from "@/lib/remux/run";
 import { prepareMakemkvLogDir, readMakemkvLog } from "@/lib/remux/logs";
 import { makemkvSource, outputDirectory, resolveDiscPath } from "@/lib/remux/source";
 import {
@@ -414,4 +414,26 @@ test("the feature is the largest title, even when a small clip reports a longer 
     /^MakeMKV saved only 181 MB of the 32\.0 GB title 0 \(00010\.mpls\), so nothing was saved next to the disc\./,
   );
   assert.equal(undersizedMessage({ ...main!, bytes: 0 }, 1), null);
+});
+
+test("a Blu-ray folder whose big stream file is in no MakeMKV title is not ripped", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-bd-"));
+  const stream = path.join(dir, "BDMV", "STREAM");
+  fs.mkdirSync(stream, { recursive: true });
+  const big = fs.openSync(path.join(stream, "00349.m2ts"), "w");
+  fs.ftruncateSync(big, 32 * 1024 ** 3);
+  fs.closeSync(big);
+  fs.writeFileSync(path.join(stream, "00469.m2ts"), "x");
+  const largest = largestStreamFile(`file:${dir}`);
+  assert.deepEqual(largest, { name: "00349.m2ts", bytes: 32 * 1024 ** 3 });
+  assert.equal(largestStreamFile(`iso:${dir}/x.iso`), null);
+  const clip = { index: 86, seconds: 1, outputName: null, bytes: 288 * 1024 ** 2, sourceFile: "00469.m2ts" };
+  assert.match(
+    missingFeatureMessage(clip, largest) ?? "",
+    /^MakeMKV did not offer the main film: its largest title is title 86 \(00469\.m2ts\), 288 MB, but 00349\.m2ts on the disc is 32\.0 GB\. Nothing was ripped\./,
+  );
+  const feature = { ...clip, index: 0, bytes: 33 * 1024 ** 3, sourceFile: "00010.mpls" };
+  assert.equal(missingFeatureMessage(feature, largest), null);
+  assert.equal(missingFeatureMessage(clip, { name: "small.m2ts", bytes: 900 * 1024 ** 2 }), null);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

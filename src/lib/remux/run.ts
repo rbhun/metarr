@@ -16,6 +16,44 @@ function titleName(title: DiscTitle): string {
   return `title ${title.index}${title.sourceFile ? ` (${title.sourceFile})` : ""}`;
 }
 
+function childNamed(directory: string, name: string): string | null {
+  try {
+    const entry = fs.readdirSync(directory).find((item) => item.toLowerCase() === name);
+    return entry ? path.join(directory, entry) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Largest .m2ts under BDMV/STREAM of a Blu-ray folder source; null for ISOs, DVDs or when unreadable. */
+export function largestStreamFile(source: string): { name: string; bytes: number } | null {
+  if (!source.startsWith("file:")) return null;
+  const bdmv = childNamed(source.slice(5), "bdmv");
+  const stream = bdmv ? childNamed(bdmv, "stream") : null;
+  if (!stream) return null;
+  let best: { name: string; bytes: number } | null = null;
+  try {
+    for (const name of fs.readdirSync(stream)) {
+      if (!name.toLowerCase().endsWith(".m2ts")) continue;
+      const bytes = fs.statSync(path.join(stream, name)).size;
+      if (!best || bytes > best.bytes) best = { name, bytes };
+    }
+  } catch {
+    return null;
+  }
+  return best;
+}
+
+/** Null when MakeMKV's chosen title could hold the disc's largest stream file. */
+export function missingFeatureMessage(title: DiscTitle, largest: { name: string; bytes: number } | null): string | null {
+  if (!largest || largest.bytes < 1024 ** 3 || !title.bytes || largest.bytes <= title.bytes * 2) return null;
+  return (
+    `MakeMKV did not offer the main film: its largest title is ${titleName(title)}, ${formatBytes(title.bytes)}, ` +
+    `but ${largest.name} on the disc is ${formatBytes(largest.bytes)}. Nothing was ripped. ` +
+    `Open the MakeMKV log in Tasks (info-output) to see what MakeMKV said about ${largest.name}.`
+  );
+}
+
 /** Null when the saved MKV is plausibly the whole title. */
 export function undersizedMessage(title: DiscTitle, savedBytes: number): string | null {
   if (!title.bytes || savedBytes >= title.bytes * MIN_SIZE_SHARE) return null;
@@ -190,6 +228,8 @@ export async function ripDisc(options: {
   const titles = parseDiscTitles(info);
   const main = mainTitle(titles);
   if (!main) throw new Error("MakeMKV did not find a title on this disc.");
+  const missing = missingFeatureMessage(main, largestStreamFile(source));
+  if (missing) throw new Error(missing);
   if (options.dryRun) {
     const target = path.join(outputDir, `${safeBaseName(label)}.mkv`);
     const others = extras && titles.length > 1 ? ` and ${titles.length - 1} other titles as -other files` : "";

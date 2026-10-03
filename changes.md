@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.150
+
+- Do not rip a Blu-ray folder when MakeMKV offers no title that could hold the disc's largest stream file. On Fight Club MakeMKV never listed the 32 GB feature, so Metarr saved a 288 MB clip; now the task fails and names the missing file.
+
 ## 0.0.149
 
 - Rename a file whose name is a secondary-language episode title to Show - S01E07 - English title, so Sonarr can import it and search for the episodes that are still missing.
