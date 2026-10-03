@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.151
+
+- Add Do not wait for Plex in Settings, so language checks, disc remux, and rewrap keep going while Plex is scanning or someone is playing.
+
 ## 0.0.150
 
 - Do not rip a Blu-ray folder when MakeMKV offers no title that could hold the disc's largest stream file. On Fight Club MakeMKV never listed the 32 GB feature, so Metarr saved a 288 MB clip; now the task fails and names the missing file.

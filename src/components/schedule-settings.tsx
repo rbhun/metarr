@@ -61,6 +61,7 @@ export function ScheduleSettings() {
   const [busy, setBusy] = useState(false);
   const [clock, setClock] = useState<Clock | null>(null);
   const [zone, setZone] = useState("");
+  const [skipPlex, setSkipPlex] = useState<boolean | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -91,12 +92,45 @@ export function ScheduleSettings() {
           const body = (await response.json()) as { settings?: Hours };
           if (body.settings) setRewrap({ enabled: body.settings.enabled, startHour: body.settings.startHour, endHour: body.settings.endHour });
         }),
+        fetch("/api/preferences", { cache: "no-store" })
+          .then(async (response) => {
+            if (!response.ok) {
+              setSkipPlex(false);
+              return;
+            }
+            const body = (await response.json()) as { skipPlexWait?: boolean };
+            setSkipPlex(body.skipPlexWait === true);
+          })
+          .catch(() => setSkipPlex(false)),
       ]).catch(() => undefined);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
-  if (!sync || !detect || !remux || !rewrap) return null;
+  if (!sync || !detect || !remux || !rewrap || skipPlex == null) return null;
+
+  async function saveSkipPlex(value: boolean) {
+    const previous = skipPlex;
+    setSkipPlex(value);
+    setBusy(true);
+    try {
+      const response = await fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skipPlexWait: value }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || "Could not save the Plex wait.");
+      }
+      toast.success(value ? "Queues will not wait for Plex." : "Queues will wait while Plex is busy.");
+    } catch (caught) {
+      setSkipPlex(previous);
+      toast.error(caught instanceof Error ? caught.message : "Could not save the Plex wait.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveOne(request: Promise<Response>, saved: string) {
     setBusy(true);
@@ -230,6 +264,21 @@ export function ScheduleSettings() {
               <RefreshCw className={status?.running ? "animate-spin" : undefined} />
               {status?.running ? "Syncing" : "Sync now"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Plex</CardTitle>
+          <CardDescription>
+            Language checks, disc remux, and rewrap wait while Plex is scanning or someone is playing. A job started with Detect now, Convert, or Rewrap now already starts right away.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+            <Label htmlFor="skip-plex-wait">Do not wait for Plex</Label>
+            <Switch id="skip-plex-wait" checked={skipPlex} disabled={busy} onCheckedChange={(value) => void saveSkipPlex(value === true)} />
           </div>
         </CardContent>
       </Card>

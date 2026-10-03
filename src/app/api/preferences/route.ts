@@ -1,4 +1,5 @@
 import { normalizeBaseUrl } from "@/lib/connectors/http";
+import { setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { getDb, getMeta, setMeta } from "@/lib/db";
 import { titleLanguage } from "@/lib/title-language";
 import { NextResponse } from "next/server";
@@ -11,6 +12,7 @@ function preferences(db = getDb()) {
     titleLanguage: titleLanguage(getMeta(db, "title_language")),
     fileBrowserUrl: getMeta(db, "file_browser_url"),
     fileBrowserRoot: getMeta(db, "file_browser_root"),
+    skipPlexWait: skipPlexWait(db),
   };
 }
 
@@ -46,6 +48,9 @@ export async function PUT(request: Request) {
   if ("fileBrowserRoot" in record) {
     const root = typeof record.fileBrowserRoot === "string" ? record.fileBrowserRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "") : "";
     setMeta(db, "file_browser_root", root);
+  }
+  if ("skipPlexWait" in record) {
+    setSkipPlexWait(db, record.skipPlexWait === true);
   }
   return NextResponse.json(preferences(db));
 }
