@@ -11,7 +11,7 @@ import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
-import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
+import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
@@ -898,6 +898,20 @@ test("an unread subtitle file is a failed check, not a finished one", () => {
   assert.equal(finishedStatus({ language: null, message: "The subtitle file is not readable text." }), "failed");
   assert.equal(finishedStatus({ language: null, message: "This language cannot be reliably recognized." }), "failed");
   assert.equal(finishedStatus({ language: "Hungarian", message: null }), "done");
+});
+
+test("do not wait for plex lets a queue pass a server that would otherwise be checked", async () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  assert.equal(skipPlexWait(db), false);
+  db.prepare(`UPDATE connectors SET base_url = 'http://127.0.0.1:9', api_key = 'token', enabled = 1 WHERE id = 'plex'`).run();
+  setSkipPlexWait(db, true);
+  const started = Date.now();
+  assert.equal(await plexIsBusy(db), false);
+  assert.equal(await plexLibraryBusy(db), false);
+  assert.ok(Date.now() - started < 500);
+  setSkipPlexWait(db, false);
+  assert.equal(skipPlexWait(db), false);
 });
 
 test("plex background work and transcodes count as busy", () => {

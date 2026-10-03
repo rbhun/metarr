@@ -6,6 +6,8 @@ export type DiscTitle = {
   bytes: number;
   /** Playlist or stream file the title comes from (attribute 16), e.g. 00800.mpls. */
   sourceFile: string | null;
+  /** Clip numbers the title plays (attribute 26), e.g. "349,350". */
+  segments: string | null;
 };
 
 function durationSeconds(value: string): number {
@@ -25,10 +27,11 @@ export function parseDiscTitles(output: string): DiscTitle[] {
     const index = Number(match[1]);
     const attribute = Number(match[2]);
     const value = match[3] ?? match[4] ?? "";
-    const title = titles.get(index) ?? { index, seconds: 0, outputName: null, bytes: 0, sourceFile: null };
+    const title = titles.get(index) ?? { index, seconds: 0, outputName: null, bytes: 0, sourceFile: null, segments: null };
     if (attribute === 9) title.seconds = durationSeconds(value);
     if (attribute === 11 && /^\d+$/.test(value)) title.bytes = Number(value);
     if (attribute === 16 && value) title.sourceFile = value;
+    if (attribute === 26 && value) title.segments = value;
     if (attribute === 27 && value) title.outputName = value;
     titles.set(index, title);
   }

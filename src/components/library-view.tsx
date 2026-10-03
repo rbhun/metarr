@@ -618,6 +618,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <Button size="sm" variant="outline" disabled={lookupBusy} onClick={() => void lookupAll()}>
               {lookupAllProgress ?? "Look up all"}
             </Button>
+            {filtersActive ? <span>{filtered} matching</span> : null}
             <span>{data?.stats.total ?? 0} titles</span>
             <span>{data?.stats.missing ?? 0} missing</span>
             <span>{data?.stats.notInPlex ?? 0} not in Plex</span>

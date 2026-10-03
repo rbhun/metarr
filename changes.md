@@ -1,20 +1,36 @@
 # Changes
 
-## 0.0.154
+## 0.0.158
 
 - Read this process's cgroup for container CPU so the figure is this container, not the whole machine.
 
-## 0.0.153
+## 0.0.157
 
 - Show this container's CPU next to the whole-machine figure, so a rip's load is distinct from Plex or the rest of the VM.
 
-## 0.0.152
+## 0.0.156
 
 - Put CPU use on the version row, right-aligned, in the sidebar and the phone menu.
 
-## 0.0.151
+## 0.0.155
 
 - Show CPU use in the top of the sidebar and the phone menu, so load from a rip or language check is visible without opening a shell.
+
+## 0.0.154
+
+- Show how many titles match the current library filter next to the totals.
+
+## 0.0.153
+
+- Read MakeMKV's whole title list. Metarr kept only the last 200 KB of MakeMKV's output, so on discs with a hundred titles the first titles, usually the film's playlists, were cut off before parsing; Fight Club showed 20 of 107 titles and ripped a clip. The MakeMKV log page now shows up to 8 MB per section.
+
+## 0.0.152
+
+- The MakeMKV log starts with a disc summary: the largest MakeMKV titles with the clips they play, and the largest stream files in the Blu-ray folder. One unreadable stream file no longer switches off the check that stops a rip when MakeMKV skips the main film.
+
+## 0.0.151
+
+- Add Do not wait for Plex in Settings, so language checks, disc remux, and rewrap keep going while Plex is scanning or someone is playing.
 
 ## 0.0.150
 
