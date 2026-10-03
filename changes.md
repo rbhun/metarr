@@ -1,5 +1,21 @@
 # Changes
 
+## 0.0.158
+
+- Read this process's cgroup for container CPU so the figure is this container, not the whole machine.
+
+## 0.0.157
+
+- Show this container's CPU next to the whole-machine figure, so a rip's load is distinct from Plex or the rest of the VM.
+
+## 0.0.156
+
+- Put CPU use on the version row, right-aligned, in the sidebar and the phone menu.
+
+## 0.0.155
+
+- Show CPU use in the top of the sidebar and the phone menu, so load from a rip or language check is visible without opening a shell.
+
 ## 0.0.154
 
 - Show how many titles match the current library filter next to the totals.
