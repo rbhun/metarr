@@ -1,5 +1,6 @@
 "use client";
 
+import { CpuReadout } from "@/components/cpu-readout";
 import { TaskCount } from "@/components/detect-tasks";
 import { RemuxCount } from "@/components/remux-tasks";
 import { VERSION } from "@/lib/version";
@@ -165,22 +166,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         >
           <div className={cn("flex items-start gap-2 py-4", collapsed ? "justify-center px-2" : "px-4")}>
-            {collapsed ? null : (
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold tracking-tight">Metarr</p>
-                <p className="text-xs text-muted-foreground">{VERSION}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-2">
+                <CpuReadout compact />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Expand sidebar"
+                  aria-expanded={false}
+                  onClick={toggleCollapsed}
+                >
+                  <PanelLeftOpen />
+                </Button>
               </div>
+            ) : (
+              <>
+                <div className="min-w-0 flex-1">
+                  <CpuReadout className="mb-1" />
+                  <p className="text-sm font-semibold tracking-tight">Metarr</p>
+                  <p className="text-xs text-muted-foreground">{VERSION}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Collapse sidebar"
+                  aria-expanded={true}
+                  onClick={toggleCollapsed}
+                >
+                  <PanelLeftClose />
+                </Button>
+              </>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!collapsed}
-              onClick={toggleCollapsed}
-            >
-              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-            </Button>
           </div>
           <div className={cn(collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
@@ -196,6 +213,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </SheetTrigger>
               <SheetContent side="left" className="bg-sidebar">
                 <SheetHeader>
+                  <CpuReadout />
                   <SheetTitle>Metarr</SheetTitle>
                   <p className="text-xs text-muted-foreground">{VERSION}</p>
                 </SheetHeader>

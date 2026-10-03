@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.151
+
+- Show CPU use in the top of the sidebar and the phone menu, so load from a rip or language check is visible without opening a shell.
+
 ## 0.0.150
 
 - Do not rip a Blu-ray folder when MakeMKV offers no title that could hold the disc's largest stream file. On Fight Club MakeMKV never listed the 32 GB feature, so Metarr saved a 288 MB clip; now the task fails and names the missing file.
