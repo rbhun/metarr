@@ -194,6 +194,32 @@ export function updateRewrapProgress(db: Database.Database, id: number, progress
   db.prepare(`UPDATE rewrap_jobs SET progress = ?, message = ? WHERE id = ? AND status = 'running'`).run(progress, message.slice(0, 500), id);
 }
 
+/** Mark the other parts of a joined movie done, so a second queued part does not run. */
+export function settleSplitRewraps(db: Database.Database, paths: string[], message: string, exceptId: number) {
+  const wanted = new Set(paths.map((item) => item.toLowerCase()));
+  const now = new Date().toISOString();
+  const text = message.trim().slice(0, 1000);
+  const pending = db.prepare(`SELECT id, path FROM rewrap_jobs WHERE status = 'pending'`).all() as Array<{ id: number; path: string }>;
+  const mark = db.prepare(`UPDATE rewrap_jobs SET status = 'done', message = ?, progress = NULL, finished_at = ? WHERE id = ? AND status = 'pending'`);
+  const existing = db.prepare(
+    `SELECT 1 AS ok FROM rewrap_jobs WHERE lower(path) = lower(?) AND status IN ('pending', 'running', 'done') LIMIT 1`,
+  );
+  const insert = db.prepare(
+    `INSERT INTO rewrap_jobs (path, label, languages, immediate, status, message, created_at, finished_at) VALUES (?, ?, '[]', 0, 'done', ?, ?, ?)`,
+  );
+  const write = db.transaction(() => {
+    for (const row of pending) {
+      if (row.id === exceptId || !wanted.has(row.path.toLowerCase())) continue;
+      mark.run(text, now, row.id);
+    }
+    for (const filePath of paths) {
+      if (existing.get(filePath)) continue;
+      insert.run(filePath, path.basename(filePath) || filePath, text, now, now);
+    }
+  });
+  write();
+}
+
 export function finishRewrap(db: Database.Database, id: number, status: "done" | "failed", message: string | null) {
   const text =
     message && message.trim() ? message.trim().slice(0, 1000) : status === "failed" ? "Rewrap failed with no further detail from ffmpeg." : null;

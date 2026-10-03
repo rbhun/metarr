@@ -5,7 +5,7 @@ import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-forma
 import { languageFromProbeTags } from "@/lib/detect/audio";
 import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
-import { sidecarTracks } from "@/lib/detect/sidecars";
+import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
@@ -13,6 +13,7 @@ import { fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqu
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
+import { throwIfSyncCancelled } from "@/lib/sync-cancel";
 import type Database from "better-sqlite3";
 
 const ROOTS_KEY = "folder_roots";
@@ -303,9 +304,12 @@ export function listVideos(root: string): string[] {
   return found;
 }
 
-/** The streams inside the file, then the subtitle files beside it. */
+/** The streams inside the file, then the subtitle and separate audio files beside it. */
 function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } {
-  return { ...probed, subtitles: [...probed.subtitles, ...sidecarTracks(filePath)] };
+  return {
+    audio: [...probed.audio, ...audioSidecarTracks(filePath)],
+    subtitles: [...probed.subtitles, ...sidecarTracks(filePath)],
+  };
 }
 
 /** Probe one video. Used after a language write so the folder scanner does not walk the library. */
@@ -326,6 +330,7 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]!;
     onProgress({ message: `Files · ${index + 1}/${files.length} ${path.basename(file)}`, fetched: index, total: files.length });
+    throwIfSyncCancelled();
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);

@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@/lib/types";
+import { SyncCancelledError, syncAbortSignal } from "@/lib/sync-cancel";
 
 export type ProgressUpdate = {
   message: string;
@@ -43,14 +44,18 @@ export function rejectUrlAsKey(apiKey: string, baseUrl: string): string | null {
 }
 
 export async function fetchJson(url: string, headers: Record<string, string>, timeoutMs = 25000): Promise<unknown> {
+  const cancel = syncAbortSignal();
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   let response: Response;
   try {
     response = await fetch(url, {
       headers,
       cache: "no-store",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
+    if (cancel?.aborted) throw new SyncCancelledError();
     const name = error instanceof Error ? error.name : "";
     if (name === "TimeoutError" || name === "AbortError") {
       throw new Error("Timed out waiting for the server.");

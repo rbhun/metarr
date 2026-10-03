@@ -1,5 +1,6 @@
-import { countLookupRemaining, enabledProviderKeys, getDb, saveEnrichment, titlesForLookup } from "@/lib/db";
+import { countLookupRemaining, countTitlesAfter, enabledProviderKeys, getDb, getMeta, saveEnrichment, titlesForLookup } from "@/lib/db";
 import { lookupOnline } from "@/lib/online-lookup";
+import { titleLanguage } from "@/lib/title-language";
 import { markOmdbExhausted, reserveOmdbRequest } from "@/lib/omdb-quota";
 import type { ProviderId } from "@/lib/types";
 import { NextResponse } from "next/server";
@@ -25,7 +26,9 @@ export async function POST(request: Request) {
   if (hasIds && ids.length === 0) {
     return NextResponse.json({ processed: 0, processedIds: [], remaining: 0, found: 0, missing: 0, errors: 0 });
   }
-  const gaps = !hasIds;
+  const all = record.all === true && !hasIds;
+  const afterId = all ? Math.max(0, Math.trunc(Number(record.after) || 0)) : undefined;
+  const gaps = !hasIds && !all;
   const keys = enabledProviderKeys();
   if (!keys.tmdb && !keys.omdb) {
     return NextResponse.json(
@@ -34,13 +37,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const batch = titlesForLookup({ ids: ids.length ? ids : undefined, gaps, limit: BATCH });
+  const batch = titlesForLookup({
+    ids: ids.length ? ids : undefined,
+    gaps,
+    ...(afterId != null ? { afterId } : {}),
+    limit: BATCH,
+  });
   let found = 0;
   let missing = 0;
   let errors = 0;
   let omdbStopped = false;
   let message: string | null = null;
   const db = getDb();
+  const language = titleLanguage(getMeta(db, "title_language"));
   const processedIds: number[] = [];
   for (const title of batch) {
     const active: Partial<Record<ProviderId, string>> = { ...keys };
@@ -54,7 +63,7 @@ export async function POST(request: Request) {
       omdbStopped = true;
       break;
     }
-    const meta = await lookupOnline(title, active);
+    const meta = await lookupOnline(title, active, fetch, language);
     const omdbLimited = meta.message === "OMDb daily request limit reached.";
     if (omdbLimited) {
       markOmdbExhausted(db);
@@ -73,11 +82,14 @@ export async function POST(request: Request) {
     else missing += 1;
   }
 
+  const cursor = processedIds.length ? Math.max(...processedIds) : (afterId ?? 0);
   const remaining = omdbStopped
     ? 0
     : ids.length
       ? Math.max(0, ids.length - processedIds.length)
-      : countLookupRemaining(db);
+      : all
+        ? countTitlesAfter(cursor, db)
+        : countLookupRemaining(db);
   return NextResponse.json({
     processed: processedIds.length,
     processedIds,

@@ -11,10 +11,11 @@ import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import type { DetectJob } from "@/lib/detect/store";
 import { readPgsImages, scaleBitmap, writePng } from "@/lib/detect/pgs";
-import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubCanvasSize, vobsubExtractArgs } from "@/lib/detect/picture";
 import { isPictureSubtitle } from "@/lib/detect/targets";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
+import { subtitleSampleIsText } from "@/lib/detect/subtitle-name";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { idle } from "@/lib/idle";
 import { languageName } from "@/lib/media";
@@ -371,7 +372,7 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
         timedOut = true;
         continue;
       }
-      if (agreed.language && transcript.join(" ").trim().length >= 80) break;
+      if (samples.length >= 2 && agreed.language && transcript.join(" ").trim().length >= 80) break;
     }
     if (transport && samples.length === 0 && !readSample) {
       const outcome = await listenSlice(openingWindow(fileSize, packetBytes(file)), sampleOffsets(heard.duration).length);
@@ -549,8 +550,38 @@ async function tightenFrame(file: string) {
   fs.renameSync(tight, file);
 }
 
+function subtitleFileIsText(file: string): boolean {
+  let handle: number;
+  try {
+    handle = fs.openSync(file, "r");
+  } catch {
+    return true;
+  }
+  try {
+    const buffer = Buffer.alloc(256_000);
+    const bytes = fs.readSync(handle, buffer, 0, buffer.length, 0);
+    return subtitleSampleIsText(buffer.subarray(0, bytes));
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
+function looseVobSubCanvas(file: string): string {
+  const indexPath = file.replace(/\.sub$/i, ".idx");
+  try {
+    return vobsubCanvasSize(fs.readFileSync(indexPath, "utf8").slice(0, 8_000));
+  } catch {
+    return vobsubCanvasSize(null);
+  }
+}
+
 async function vobsubFrames(file: string, ordinal: number, directory: string): Promise<string[]> {
-  await runCommand("ffmpeg", vobsubExtractArgs(file, ordinal, 600, path.join(directory, "cue-%02d.png")), 60_000);
+  const loose = /\.sub$/i.test(file);
+  await runCommand(
+    "ffmpeg",
+    vobsubExtractArgs(file, ordinal, loose ? 0 : 600, path.join(directory, "cue-%02d.png"), loose ? looseVobSubCanvas(file) : null),
+    60_000,
+  );
   const frames = fs.readdirSync(directory).filter((name) => name.endsWith(".png"));
   for (const name of frames) {
     try {
@@ -609,11 +640,7 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
       const buffer = Buffer.alloc(256_000);
       const bytes = fs.readSync(handle, buffer, 0, buffer.length, 0);
       const sample = buffer.subarray(0, bytes);
-      let noisy = 0;
-      for (const byte of sample) {
-        if (byte === 0 || byte < 9 || (byte > 13 && byte < 32)) noisy += 1;
-      }
-      if (bytes === 0 || noisy / bytes > 0.02) {
+      if (!subtitleSampleIsText(sample)) {
         return { language: null, role: null, confidence: 0, message: "The subtitle file is not readable text." };
       }
       raw = decodeSubtitleBytes(sample);
@@ -637,6 +664,13 @@ async function detectTextSubtitle(job: DetectJob, file: string): Promise<Detecti
 
 export async function detectTrack(job: DetectJob, file: string): Promise<DetectionOutcome> {
   if (job.kind === "audio") return detectAudio(job, file);
+  if (/\.sub$/i.test(file) && !subtitleFileIsText(file)) {
+    try {
+      return await detectPictureSubtitle(job, file);
+    } catch {
+      return { language: null, role: null, confidence: 0, message: "The subtitle file is not readable text." };
+    }
+  }
   if (isPictureSubtitle(job.format) && job.placement !== "external") return detectPictureSubtitle(job, file);
   try {
     const text = await detectTextSubtitle(job, file);

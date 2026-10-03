@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -105,6 +105,17 @@ test("a 1080p SDR file stays listed beside a 2160p HDR file", () => {
   assert.equal(resolvedResolution({ resolution: null, height: 336, path: "/movies/Fantasia.avi" }), "336p");
 });
 
+test("special release markers in the file name become edition labels", () => {
+  assert.equal(editionLabel("/movies/Film-extended.mkv"), "Extended");
+  assert.equal(editionLabel("/movies/Film-theatrical.mkv"), "Theatrical");
+  assert.equal(editionLabel("/movies/Film-restored.mkv"), "Restored");
+  assert.equal(editionLabel("/movies/Film-directors.mkv"), "Director's Cut");
+  assert.equal(editionLabel("/movies/Film-directors-cut.mkv"), "Director's Cut");
+  assert.equal(editionLabel("/movies/Film-anniversary.mkv"), "Anniversary");
+  assert.equal(editionLabel("/movies/Film.Extended.Cut.1080p.mkv"), "Extended");
+  assert.equal(editionLabel("/movies/Film.mkv"), null);
+});
+
 test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("/movies/Lawrence/Lawrence (1962) - 1 of 2.mkv"), "1 of 2");
   assert.equal(multiPartLabel("/movies/Lawrence/Lawrence (1962) - 02 of 02.mkv"), "2 of 2");
@@ -119,6 +130,31 @@ test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("History of the World - Part 1.avi"), null);
   assert.equal(multiPartLabel("/movies/Airplane II/Airplane.2.mkv"), null);
   assert.equal(multiPartLabel(null), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/TaleSpin - S01E07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07/TaleSpin - S01E07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07 - Time Waits for No Bear.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/07.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/1/07/S01E07.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 2/2/S01E14 Stormy Weather.avi"), null);
+  assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/13/The Idol Rich.avi"), null);
+  assert.equal(multiPartLabel("/movies/Foo/Movie (1/2).mkv"), "1 of 2");
+
+  const cd1 = "/movies/Foo/Foo CD1.avi";
+  const cd2 = "/movies/Foo/Foo CD2.avi";
+  const joined = "/movies/Foo/Foo.mkv";
+  const other = "/movies/Foo/Foo 1080p.mkv";
+  assert.equal(splitIdentity(cd1)?.stem, "Foo");
+  assert.equal(splitIdentity(cd1)?.index, 1);
+  assert.equal(splitIdentity(cd2)?.key, splitIdentity(cd1)?.key);
+  assert.equal(splitIdentity("/movies/Lawrence/Lawrence (1962) - 1 of 2.mkv")?.stem, "Lawrence (1962)");
+  assert.equal(splitIdentity("/movies/Lawrence/Lawrence (1962) - 02 of 02.mkv")?.index, 2);
+  assert.equal(splitIdentity("/movies/Foo/CD1/movie.avi")?.directory, "/movies/Foo");
+  assert.equal(splitIdentity("/movies/Foo/CD2/movie.avi")?.key, splitIdentity("/movies/Foo/CD1/movie.avi")?.key);
+  assert.equal(splitIdentity("/movies/The Godfather Part II.mkv"), null);
+  assert.equal(copyGroupId(cd1, [cd1, cd2, joined, other]), copyGroupId(cd2, [cd1, cd2, joined, other]));
+  assert.equal(copyGroupId(joined, [cd1, cd2, joined, other]), copyGroupId(cd1, [cd1, cd2, joined, other]));
+  assert.notEqual(copyGroupId(other, [cd1, cd2, joined, other]), copyGroupId(cd1, [cd1, cd2, joined, other]));
+  assert.equal(new Set([cd1, cd2, joined].map((file) => copyGroupId(file, [cd1, cd2, joined]))).size, 1);
 });
 
 test("a sample name and a tiny extra file are marked, a feature is not", () => {
@@ -142,6 +178,38 @@ test("a sample name and a tiny extra file are marked, a feature is not", () => {
   assert.deepEqual(versions.find((version) => version.name === "Sample.mkv")?.flags, ["sample", "short"]);
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("sample"));
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("short"));
+});
+
+test("extras, featurettes, outtakes, and comic relief are labeled from the path", () => {
+  assert.equal(bonusFlag("/movies/Film/Featurettes/Making Of.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Extras/Interview.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Features/Bonus Clip.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Special Features/Gallery.mkv"), "extra");
+  assert.equal(bonusFlag("/movies/Film/Outtakes/Bloopers.mkv"), "outtake");
+  assert.equal(bonusFlag("/movies/Film/Film-comic-relief.mkv"), "comic-relief");
+  assert.equal(bonusFlag("/movies/Film/Trailers/Teaser.mkv"), "trailer");
+  assert.equal(bonusFlag("/movies/Film/Film.mkv"), null);
+  assert.equal(bonusFlag("/movies/Film/Film.Feature.mkv"), null);
+  const feature: MediaFile = {
+    container: "mkv",
+    path: "/movies/Film/Film.mkv",
+    qualityName: null,
+    resolution: "1080p",
+    hdr: "none",
+    is3d: false,
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    fileBytes: 8_000_000_000,
+  };
+  const versions = versionsFrom([
+    feature,
+    { ...feature, path: "/movies/Film/Featurettes/Looking Back.mkv", resolution: "480p", fileBytes: 400_000_000 },
+    { ...feature, path: "/movies/Film/Outtakes/Gag Reel.mkv", resolution: "480p", fileBytes: 200_000_000 },
+  ]);
+  assert.equal(versions[0]?.name, "Film.mkv");
+  assert.deepEqual(versions[0]?.flags, []);
+  assert.ok(versions.find((version) => version.name === "Looking Back.mkv")?.flags.includes("extra"));
+  assert.ok(versions.find((version) => version.name === "Gag Reel.mkv")?.flags.includes("outtake"));
 });
 
 test("a blank audio track takes the language Radarr already listed when the order lines up", () => {

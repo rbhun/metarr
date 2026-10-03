@@ -21,6 +21,8 @@ export type OnlineMeta = {
   posterUrl: string | null;
   originalTitle: string | null;
   localTitles: Record<string, string>;
+  /** Translated episode names for one language, keyed by `season:episode`. */
+  episodeTitles: Record<string, Record<string, string>>;
   runtimeMinutes: number | null;
   rating: number | null;
   contentRating: string | null;
@@ -63,6 +65,10 @@ export type AudioTrack = {
   codec: string | null;
   streamIndex?: number | null;
   label?: string | null;
+  /** A separate audio file beside the video (for example .ac3 in an audio subfolder). */
+  file?: string | null;
+  /** An audio file on disk that Plex does not list. */
+  folderOnly?: boolean;
   detectedLanguage?: string | null;
   detectedRole?: "commentary" | "short" | null;
   fromFile?: boolean;
@@ -244,6 +250,9 @@ export type LibraryEpisode = {
   season: number | null;
   episode: number | null;
   title: string;
+  localTitle: string | null;
+  /** Set when the file name matches a different episode than the one Sonarr assigned. */
+  recognized: { season: number | null; episode: number | null; title: string } | null;
   hasFile: boolean;
   wanted: boolean;
   container: string | null;

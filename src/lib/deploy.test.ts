@@ -4,12 +4,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { parseDeployRun, readDeployState, requestDeploy } from "@/lib/deploy";
+import { compareVersions, parseDeployRun, readDeployState, requestDeploy, updateIsAvailable, versionFromSource } from "@/lib/deploy";
 import { VERSION } from "@/lib/version";
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "metarr-run-"));
 }
+
+test("an update is available only when main publishes a newer version", () => {
+  assert.equal(compareVersions("0.0.10", "0.0.9"), 1);
+  assert.equal(compareVersions("0.0.136", "0.0.137"), -1);
+  assert.equal(compareVersions("0.0.136", "0.0.136"), 0);
+  assert.equal(versionFromSource('export const VERSION = "0.0.137";\n'), "0.0.137");
+  assert.equal(versionFromSource("no version here"), null);
+  assert.equal(updateIsAvailable("0.0.136", "0.0.137"), true);
+  assert.equal(updateIsAvailable("0.0.136", "0.0.136"), false);
+  assert.equal(updateIsAvailable("0.0.136", null), false);
+});
 
 test("without the host helper the Update button stays off", () => {
   const run = tempDir();

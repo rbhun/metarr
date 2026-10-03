@@ -11,14 +11,15 @@ import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
-import { plexActivitiesBusy, plexTranscodeBusy } from "@/lib/detect/plex";
+import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
-import { assignSidecars, languageFromSubtitleName, sidecarTracks } from "@/lib/detect/sidecars";
-import { folderOnlySubtitleNote, markSubtitlePresence, PLEX_ONLY_SUBTITLE, plexReadsSidecar, reconcileSubtitles } from "@/lib/media";
+import { audioCodecFromName, languageFromAudioName } from "@/lib/detect/audio-name";
+import { assignSidecars, audioSidecarTracks, FOLDER_ONLY_AUDIO, languageFromSubtitleName, sidecarTracks, withAudioSidecars } from "@/lib/detect/sidecars";
+import { crossCheckAudio, folderOnlySubtitleNote, markSubtitlePresence, PLEX_ONLY_SUBTITLE, plexReadsSidecar, reconcileSubtitles } from "@/lib/media";
 import type { SubtitleTrack } from "@/lib/types";
 import { rollupSubtitles } from "@/lib/detect/rollup";
 import { audioTargets, subtitleTargets } from "@/lib/detect/track";
@@ -29,7 +30,8 @@ import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeF
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths, unreadSidecars } from "@/lib/detect/publish";
-import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubExtractArgs } from "@/lib/detect/picture";
+import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubCanvasSize, vobsubExtractArgs } from "@/lib/detect/picture";
+import { subtitleSampleIsText } from "@/lib/detect/subtitle-name";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { audioLines, shownLanguage, subtitleNote } from "@/lib/format";
 import { migrate } from "@/lib/db";
@@ -108,6 +110,11 @@ test("language votes need a confident majority", () => {
     { language: "hu", probability: 0.55 },
     { language: "en", probability: 0.52 },
   ]).language, null);
+  assert.equal(agreeLanguage([
+    { language: "en", probability: 0.91 },
+    { language: "hu", probability: 0.84 },
+  ]).language, null);
+  assert.deepEqual(agreeLanguage([{ language: "hu", probability: 0.91 }]), { language: "hu", confidence: 0.91 });
 });
 
 test("subtitle cues drop timestamps and ass styling", () => {
@@ -309,6 +316,40 @@ test("a subtitle in the subs folder is the external file", () => {
   assert.equal(named[0]?.file?.endsWith("subs/Ace Ventura.srt"), true);
 });
 
+test("a separate ac3 beside the video or in an audio folder is listed as not in Plex", () => {
+  assert.equal(languageFromAudioName("Film.hu.ac3"), "Hungarian");
+  assert.equal(audioCodecFromName("Film.hu.ac3"), "Dolby Digital");
+  assert.equal(audioCodecFromName("Film.eac3"), "Dolby Digital Plus");
+  const video = "/movies/Heat (1995)/Heat (1995).mkv";
+  const beside = audioSidecarTracks(video, ["Heat (1995).mkv", "Heat (1995).hu.ac3", "Heat (1995).en.srt"]);
+  assert.equal(beside.length, 1);
+  assert.equal(beside[0]?.language, "Hungarian");
+  assert.equal(beside[0]?.codec, "Dolby Digital");
+  assert.equal(beside[0]?.file, "/movies/Heat (1995)/Heat (1995).hu.ac3");
+  assert.equal(beside[0]?.folderOnly, true);
+  assert.equal(beside[0]?.conflict, FOLDER_ONLY_AUDIO);
+  const nested = audioSidecarTracks(video, ["Heat (1995).mkv", "audio/Heat (1995).en.ac3"]);
+  assert.equal(nested[0]?.file, "/movies/Heat (1995)/audio/Heat (1995).en.ac3");
+  assert.equal(nested[0]?.language, "English");
+  const plex = [{ language: "English", layout: "5.1", codec: "DTS" }];
+  const checked = crossCheckAudio(plex, [
+    { language: "English", layout: "5.1", codec: "DTS", fromFile: true },
+    ...beside,
+  ]);
+  assert.equal(checked.length, 2);
+  assert.equal(checked[0]?.language, "English");
+  assert.equal(checked[0]?.folderOnly, undefined);
+  assert.equal(checked[1]?.folderOnly, true);
+  assert.equal(checked[1]?.sources?.plex, null);
+  const merged = withAudioSidecars(video, plex, ["Heat (1995).mkv", "Heat (1995).hu.ac3"]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1]?.file?.endsWith("Heat (1995).hu.ac3"), true);
+  assert.equal(
+    withAudioSidecars(video, checked, ["Heat (1995).mkv", "Heat (1995).hu.ac3"]).filter((track) => track.file).length,
+    1,
+  );
+});
+
 test("a series unknown subtitle queues every episode that still has it", () => {
   const tracks = rollupSubtitles([
     {
@@ -341,13 +382,27 @@ test("a detected stereo or mono track can be heard again until it is commentary"
   assert.equal(audioTargets("/movies/Alien.mkv", { ...stereo, language: "English" }, 3, "Alien").length, 0);
   assert.equal(audioTargets("/movies/Adjustment.m2ts", { ...stereo, detectedLanguage: "Portuguese", detectedRole: "short", fromFile: true }, 1, "Film").length, 0);
   assert.equal(audioTargets("/movies/Adjustment.m2ts", { language: null, layout: "2.0", codec: "AC3", fromFile: true, detectedLanguage: "English" }, 9, "Film").length, 0);
+  const external = {
+    language: null,
+    layout: null,
+    codec: "Dolby Digital",
+    file: "/movies/Alien/audio/Alien.ac3",
+    fromFile: true,
+    folderOnly: true,
+  };
+  assert.deepEqual(audioTargets("/movies/Alien.mkv", external, 0, "Alien").map((target) => target.path), ["/movies/Alien/audio/Alien.ac3"]);
+  assert.equal(audioTargets("/movies/Alien.mkv", { ...external, language: "English" }, 0, "Alien").length, 0);
 });
 
 test("an audio sample is taken at 10 and 20 minutes and keeps the decoded packets", () => {
   assert.deepEqual(sampleOffsets(6360), [600, 1200]);
   assert.deepEqual(sampleOffsets(null), [600, 1200]);
-  assert.deepEqual(sampleOffsets(15 * 60), [600]);
-  assert.deepEqual(sampleOffsets(40), [20]);
+  assert.deepEqual(sampleOffsets(15 * 60), [600, 180]);
+  assert.deepEqual(sampleOffsets(20 * 60), [600, 180]);
+  assert.deepEqual(sampleOffsets(21 * 60), [600, 1200]);
+  assert.deepEqual(sampleOffsets(40), [20, 1]);
+  assert.deepEqual(sampleOffsets(114), [57, 1]);
+  assert.deepEqual(sampleOffsets(2), [1]);
   assert.equal(clipStart(600, 3_600), 4_200);
   assert.equal(clipStart(600, 0), 600);
   assert.equal(clipStart(600, null), 600);
@@ -480,6 +535,17 @@ test("a vobsub picture is drawn as an image and cropped to the text", () => {
   assert.match(args[args.indexOf("-filter_complex") + 1] ?? "", /\[0:s:2\].*\[sub\]/);
   assert.equal(args[args.indexOf("-map") + 1], "[sub]");
   assert.equal(args[args.indexOf("-c:v") + 1], "png");
+  assert.equal(args.includes("-canvas_size"), false);
+});
+
+test("a binary sub file is a picture and a microdvd sub file is text", () => {
+  assert.equal(subtitleSampleIsText(Buffer.from("{1}{50}Hello there\n")), true);
+  assert.equal(subtitleSampleIsText(Buffer.from([0x00, 0x00, 0x01, 0xba, 0x44, 0x00, 0x00, 0x01, 0xbd])), false);
+  const loose = vobsubExtractArgs("/movies/Film.sub", 0, 0, "/tmp/cue-%02d.png", vobsubCanvasSize(null));
+  assert.ok(loose.indexOf("-canvas_size") < loose.indexOf("-i"));
+  assert.equal(loose[loose.indexOf("-canvas_size") + 1], "1920x1080");
+  assert.equal(loose[loose.indexOf("-ss") + 1], "0");
+  assert.equal(vobsubCanvasSize("# VobSub index file\nsize: 720x576\n"), "720x576");
 });
 
 test("pgs bitmap text is read back from the subtitle stream", () => {
@@ -832,6 +898,20 @@ test("an unread subtitle file is a failed check, not a finished one", () => {
   assert.equal(finishedStatus({ language: null, message: "The subtitle file is not readable text." }), "failed");
   assert.equal(finishedStatus({ language: null, message: "This language cannot be reliably recognized." }), "failed");
   assert.equal(finishedStatus({ language: "Hungarian", message: null }), "done");
+});
+
+test("do not wait for plex lets a queue pass a server that would otherwise be checked", async () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  assert.equal(skipPlexWait(db), false);
+  db.prepare(`UPDATE connectors SET base_url = 'http://127.0.0.1:9', api_key = 'token', enabled = 1 WHERE id = 'plex'`).run();
+  setSkipPlexWait(db, true);
+  const started = Date.now();
+  assert.equal(await plexIsBusy(db), false);
+  assert.equal(await plexLibraryBusy(db), false);
+  assert.ok(Date.now() - started < 500);
+  setSkipPlexWait(db, false);
+  assert.equal(skipPlexWait(db), false);
 });
 
 test("plex background work and transcodes count as busy", () => {

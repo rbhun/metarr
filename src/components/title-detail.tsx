@@ -45,6 +45,7 @@ export function TitleDetail({
   fileBrowserRoot = "",
   onOpenChange,
   onLookup,
+  onRescanned,
 }: {
   title: LibraryTitle | null;
   episode?: LibraryEpisode | null;
@@ -54,9 +55,12 @@ export function TitleDetail({
   fileBrowserRoot?: string;
   onOpenChange: (open: boolean) => void;
   onLookup: (id: number) => void;
+  onRescanned?: (catalogId: number | null) => void;
 }) {
   const [arrBusy, setArrBusy] = useState<"open" | "search" | "plex" | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
+  const [rescanBusy, setRescanBusy] = useState(false);
+  const [renameBusy, setRenameBusy] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const router = useRouter();
   async function detectNow() {
@@ -68,6 +72,45 @@ export function TitleDetail({
       toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
     } finally {
       setDetectBusy(false);
+    }
+  }
+  async function rescanFiles() {
+    if (!title) return;
+    setRescanBusy(true);
+    try {
+      const response = await fetch(`/api/library/${title.id}/rescan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
+      });
+      const body = (await response.json()) as { message?: string; error?: string; catalogId?: number | null };
+      if (!response.ok) throw new Error(body.error || "The rescan failed.");
+      toast.success(body.message || "Files re-read.");
+      onRescanned?.(body.catalogId ?? title.id);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The rescan failed.");
+    } finally {
+      setRescanBusy(false);
+    }
+  }
+  async function renameForSonarr() {
+    if (!title) return;
+    if (!window.confirm("Rename files whose secondary-language title matches an episode to Show - S01E07 - English title, then ask Sonarr to rescan and search for episodes that are still missing?")) return;
+    setRenameBusy(true);
+    try {
+      const response = await fetch(`/api/library/${title.id}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
+      });
+      const body = (await response.json()) as { message?: string; error?: string; catalogId?: number | null };
+      if (!response.ok) throw new Error(body.error || "The rename failed.");
+      toast.success(body.message || "Files renamed.");
+      onRescanned?.(body.catalogId ?? title.id);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The rename failed.");
+    } finally {
+      setRenameBusy(false);
     }
   }
   const rating = title ? displayRating(title.rating, title.online) : { value: null, source: null };
@@ -182,6 +225,12 @@ export function TitleDetail({
                 {episode ? `${episodeCode(episode.season, episode.episode)} ${episode.title}` : title.title}
                 {!episode && title.year ? <span className="ml-2 font-normal text-muted-foreground">{title.year}</span> : null}
               </SheetTitle>
+              {episode?.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+              {episode?.recognized ? (
+                <p className="text-sm">
+                  Matches {episodeCode(episode.recognized.season, episode.recognized.episode)} {episode.recognized.title}
+                </p>
+              ) : null}
               {!episode && title.localTitle ? <p className="text-sm text-muted-foreground">{title.localTitle}</p> : null}
               <SheetDescription>
                 {episode
@@ -197,6 +246,28 @@ export function TitleDetail({
                 <Button size="sm" variant="outline" className="w-fit" disabled={detectBusy} onClick={() => void detectNow()}>
                   {detectBusy ? "Queuing…" : "Detect languages now"}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-fit"
+                  disabled={rescanBusy || !(file?.path || file?.versions.some((version) => version.path))}
+                  onClick={() => void rescanFiles()}
+                  title="Re-read this title’s files on disk and from the connected apps"
+                >
+                  {rescanBusy ? "Scanning…" : "Rescan files"}
+                </Button>
+                {title.kind === "series" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    disabled={renameBusy}
+                    onClick={() => void renameForSonarr()}
+                    title="Rename a file that contains a secondary-language episode title to Show - S01E07 - English title, then ask Sonarr to rescan"
+                  >
+                    {renameBusy ? "Renaming…" : "Rename for Sonarr"}
+                  </Button>
+                ) : null}
                 {canConvert ? (
                   <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void convertDisc()} title="Remux the disc to MKV now, without waiting for the overnight window">
                     {convertBusy ? "Starting…" : "Convert"}
@@ -309,7 +380,7 @@ export function TitleDetail({
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Video</dt>
                   <dd className="mt-1 flex flex-wrap items-center gap-1">
-                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, episode?.title ?? title.title)} sources={hoverFlags ? fileHoverSources(hoverFlags, configured, file?.versions[0]?.presence) : undefined} />
+                    <MediaPills container={file?.container} resolution={file?.resolution} frameRate={file?.detail?.frameRate} part={multiPartLabel(file?.path, file?.versions[0]?.name, episode?.title ?? title.title)} edition={file?.versions[0]?.edition} sources={hoverFlags ? fileHoverSources(hoverFlags, configured, file?.versions[0]?.presence) : undefined} />
                     <span>{[file?.qualityName, file?.bitrateKbps ? formatBitrate(file.bitrateKbps) : null].filter(Boolean).join(" · ")}</span>
                   </dd>
                 </div>

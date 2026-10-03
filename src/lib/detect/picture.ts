@@ -72,12 +72,22 @@ export function pgsSliceArgs(ordinal: number, output: string): string[] {
   ];
 }
 
-export function vobsubExtractArgs(file: string, ordinal: number, startSeconds: number, output: string): string[] {
+/** Display size from a VobSub index. A loose `.sub` with no index is drawn on a 1080p canvas. */
+export function vobsubCanvasSize(idx: string | null | undefined): string {
+  const match = idx?.match(/^size:\s*(\d+)\s*x\s*(\d+)/im);
+  const width = Number(match?.[1]);
+  const height = Number(match?.[2]);
+  if (!width || !height || width > 7680 || height > 4320) return "1920x1080";
+  return `${width}x${height}`;
+}
+
+export function vobsubExtractArgs(file: string, ordinal: number, startSeconds: number, output: string, canvas: string | null = null): string[] {
   return [
     "-hide_banner",
     "-loglevel",
     "error",
     "-y",
+    ...(canvas ? ["-canvas_size", canvas] : []),
     "-ss",
     String(startSeconds),
     "-t",

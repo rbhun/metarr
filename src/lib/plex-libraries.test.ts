@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { listPlexLibraries, plexFolderToScan, plexLibraryFolders } from "@/lib/connectors/plex";
 import { pathOnPlex } from "@/lib/detect/paths";
+import { uniqueScanFolders } from "@/lib/plex-scan";
 
 test("Plex library list keeps movies and shows", () => {
   const libraries = listPlexLibraries({
@@ -53,6 +54,20 @@ test("a scan targets the movie or show folder, including a numbered disc stream"
   );
   assert.equal(plexFolderToScan(locations, "/mnt/other/Loose.mkv"), null);
   assert.deepEqual(plexFolderToScan(locations, "/mnt/media/Movies/loose.mkv"), { key: "1", path: "/mnt/media/Movies" });
+});
+
+test("several episodes of one show become one Plex scan", () => {
+  assert.deepEqual(
+    uniqueScanFolders([
+      { key: "2", path: "/mnt/media/TV/Two and a Half Men" },
+      { key: "2", path: "/mnt/media/TV/Two and a Half Men/" },
+      { key: "1", path: "/mnt/media/Movies/Glass Tiger (2001)" },
+    ]),
+    [
+      { key: "2", path: "/mnt/media/TV/Two and a Half Men" },
+      { key: "1", path: "/mnt/media/Movies/Glass Tiger (2001)" },
+    ],
+  );
 });
 
 test("a local path is rewritten to the path Plex is watching", () => {

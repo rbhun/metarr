@@ -1,8 +1,140 @@
 # Changes
 
-## 0.0.126
+## 0.0.159
 
 - Beta version merge: find titles with two similar-length copies that carry different audio, compare frames, and manually combine them into one MKV that keeps the better video plus every audio and subtitle track. The demo library includes Blade Runner 2049 as a sample pair.
+
+## 0.0.158
+
+- Read this process's cgroup for container CPU so the figure is this container, not the whole machine.
+
+## 0.0.157
+
+- Show this container's CPU next to the whole-machine figure, so a rip's load is distinct from Plex or the rest of the VM.
+
+## 0.0.156
+
+- Put CPU use on the version row, right-aligned, in the sidebar and the phone menu.
+
+## 0.0.155
+
+- Show CPU use in the top of the sidebar and the phone menu, so load from a rip or language check is visible without opening a shell.
+
+## 0.0.154
+
+- Show how many titles match the current library filter next to the totals.
+
+## 0.0.153
+
+- Read MakeMKV's whole title list. Metarr kept only the last 200 KB of MakeMKV's output, so on discs with a hundred titles the first titles, usually the film's playlists, were cut off before parsing; Fight Club showed 20 of 107 titles and ripped a clip. The MakeMKV log page now shows up to 8 MB per section.
+
+## 0.0.152
+
+- The MakeMKV log starts with a disc summary: the largest MakeMKV titles with the clips they play, and the largest stream files in the Blu-ray folder. One unreadable stream file no longer switches off the check that stops a rip when MakeMKV skips the main film.
+
+## 0.0.151
+
+- Add Do not wait for Plex in Settings, so language checks, disc remux, and rewrap keep going while Plex is scanning or someone is playing.
+
+## 0.0.150
+
+- Do not rip a Blu-ray folder when MakeMKV offers no title that could hold the disc's largest stream file. On Fight Club MakeMKV never listed the 32 GB feature, so Metarr saved a 288 MB clip; now the task fails and names the missing file.
+
+## 0.0.149
+
+- Rename a file whose name is a secondary-language episode title to Show - S01E07 - English title, so Sonarr can import it and search for the episodes that are still missing.
+
+## 0.0.148
+
+- Rip the largest Blu-ray title instead of the longest. On discs with hundreds of clips one clip can report a broken, hours-long duration, so a 181 MB clip was saved as the movie. A rip far smaller than MakeMKV announced now fails instead of being saved, and the result names the playlist, length and size.
+
+## 0.0.147
+
+- Match a file’s local-language title to the episode list, and show that episode’s English name and Sonarr number.
+
+## 0.0.146
+
+- Look up every title from one button, so a refresh does not depend on selecting each row.
+
+## 0.0.145
+
+- Add Rescan files on a title’s detail panel so one movie or episode can re-read its folder on disk and the connected apps without a full library sync.
+
+## 0.0.144
+
+- Fix the image build: TypeScript rejected a part-number match that could be null, so `npm run build` failed in Docker.
+
+## 0.0.143
+
+- Add Cancel sync on the sync window so a long library sync can be stopped without closing the app.
+
+## 0.0.142
+
+- Show the secondary title under the library name. TMDB is asked in the chosen language, because the translation list often has no name.
+
+## 0.0.141
+
+- Show each episode’s title in the secondary language. The names come from TMDB when the series is looked up.
+
+## 0.0.140
+
+- Keep a spoken language only when the sample points agree, so one clip cannot label a Hungarian episode as English or Japanese.
+
+## 0.0.139
+
+- An episode path such as Season 1/07 is no longer labeled as part 1 of 7.
+
+## 0.0.138
+
+- Keep the disk read for multi-part rewrap on the server, so the title page no longer pulls node:fs into the browser bundle and the image build can finish.
+
+## 0.0.137
+
+- Show in Settings when main has a newer Metarr version, so an update is visible before it is installed.
+
+## 0.0.136
+
+- Treat a three-part movie the same as a two-part one: the Versions filter is Multi-part, and a rewrap joins all of the labeled parts.
+
+## 0.0.135
+
+- Join a labeled split movie, such as CD1 and CD2 or 1 of 2, into one MKV when rewrapping. Those movies have their own Two-part filter and no longer show up as duplicates.
+
+## 0.0.134
+
+- Describe the library, language detection, disc remux, and rewrap features in one place.
+
+## 0.0.133
+
+- Filter the library by movie or series, and by length in minutes.
+
+## 0.0.132
+
+- Read a binary `.sub` subtitle as pictures, so its language can be recognized instead of being rejected as unreadable text.
+
+## 0.0.131
+
+- Add Push to Plex on the selected rows, so those folders are scanned again.
+
+## 0.0.130
+
+- Extras, featurettes, outtakes, comic relief, and trailers are labeled on each version row from the file or folder name (including common subfolders like Featurettes and Outtakes). Bonus copies do not count as Duplicate versions. The Versions filter can also pick Extra, Outtake, Comic Relief, or Trailer. The demo Godfather title includes a featurette and outtakes.
+
+## 0.0.129
+
+- The library Filters menu has a Versions filter: None (a single unlabeled copy), Duplicate (multiple copies with no edition label), or a specific edition such as Theatrical or Director's Cut. The demo Matrix title has two unlabeled copies so Duplicate is easy to try.
+
+## 0.0.128
+
+- Separate audio files beside a video (or in an `audio` subfolder), such as `.ac3`, are found and listed even though Plex ignores them. They show as external rows marked "not in Plex", with the language from the file name when it is tagged. The demo Godfather title includes a Hungarian `.ac3` example.
+
+## 0.0.127
+
+- Special releases marked in the file name (extended, theatrical, restored, directors, anniversary) show a label on each version row in the library, so different cuts of the same title are easy to tell apart. The demo library includes Kingdom of Heaven with theatrical and director’s cuts so the labels are easy to spot.
+
+## 0.0.126
+
+- Sample a short audio track near the start as well as the middle, so a cut-off extra can still be heard.
 
 ## 0.0.125
 

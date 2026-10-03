@@ -1,15 +1,29 @@
 import { languageName } from "@/lib/media";
 
 const CLIP_SECONDS = 20;
+const THREE_MINUTES = 3 * 60;
 const TEN_MINUTES = 10 * 60;
 const TWENTY_MINUTES = 20 * 60;
 
-/** Titles and the opening scene are skipped. A short file is sampled at its middle instead. */
+/**
+ * Titles and the opening scene are skipped. A file that cannot reach 10 minutes
+ * is sampled at its middle, then near the start, so a cut-off file still has a clip.
+ * A file that reaches only one of the later marks also gets a clip at 3 minutes,
+ * so one window cannot decide the language on its own.
+ */
 export function sampleOffsets(duration: number | null): number[] {
   const fits = (offset: number) => duration == null || duration > offset + CLIP_SECONDS;
   const marks = [TEN_MINUTES, TWENTY_MINUTES].filter(fits);
-  if (marks.length > 0) return marks;
-  return [Math.max(1, Math.floor((duration ?? CLIP_SECONDS) / 2))];
+  if (marks.length >= 2) return marks;
+  if (marks.length === 1) {
+    const earlier = THREE_MINUTES;
+    if (fits(earlier) && earlier !== marks[0]) return [marks[0]!, earlier];
+    return marks;
+  }
+  const middle = Math.max(1, Math.floor((duration ?? CLIP_SECONDS) / 2));
+  const early = 1;
+  if (early >= middle) return [middle];
+  return [middle, early];
 }
 
 /**

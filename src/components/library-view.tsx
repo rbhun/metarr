@@ -37,7 +37,7 @@ import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versi
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
-import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
+import { openService, pushToPlex, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 
 type KindFilter = "all" | TitleKind;
@@ -46,6 +46,8 @@ type SelectedRow = {
   key: string;
   label: string;
   path: string | null;
+  catalogId: number;
+  episodeId?: number;
 };
 
 const COLUMNS = 8;
@@ -55,6 +57,7 @@ function titleSelection(title: LibraryTitle): SelectedRow {
     key: `title:${title.id}`,
     label: title.year ? `${title.title} (${title.year})` : title.title,
     path: title.versions.length > 1 ? title.versions.map((version) => version.path).filter(Boolean).join(" | ") : title.path,
+    catalogId: title.id,
   };
 }
 
@@ -63,6 +66,8 @@ function episodeSelection(series: LibraryTitle, episode: LibraryEpisode): Select
     key: `episode:${episode.id}`,
     label: `${series.title} ${episodeCode(episode.season, episode.episode)} ${episode.title}`.trim(),
     path: episode.versions.length > 1 ? episode.versions.map((version) => version.path).filter(Boolean).join(" | ") : episode.path,
+    catalogId: series.id,
+    episodeId: episode.id,
   };
 }
 
@@ -134,6 +139,15 @@ function Poster({ title, className }: { title: LibraryTitle; className?: string 
   );
 }
 
+function RecognizedLine({ episode }: { episode: LibraryEpisode }) {
+  if (!episode.recognized) return null;
+  return (
+    <p className="text-sm">
+      Matches {episodeCode(episode.recognized.season, episode.recognized.episode)} {episode.recognized.title}
+    </p>
+  );
+}
+
 function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () => void; action?: React.ReactNode }) {
   const rating = displayRating(title.rating, title.online);
   const runtime = formatRuntime(title.runtimeMinutes ?? title.online?.runtimeMinutes);
@@ -146,7 +160,7 @@ function TitleCell({ title, onOpen, action }: { title: LibraryTitle; onOpen: () 
             {title.title}
             {title.year ? <span className="ml-1.5 font-normal text-muted-foreground">{title.year}</span> : null}
           </p>
-          {title.localTitle ? <p className="text-xs text-muted-foreground">{title.localTitle}</p> : null}
+          {title.localTitle ? <p className="text-sm text-muted-foreground">{title.localTitle}</p> : null}
           <p className="text-xs text-muted-foreground">
             {title.kind === "movie" ? "Movie" : `${title.episodeFileCount} of ${title.episodeCount} episodes on disk`}
             {rating.value != null ? ` · ${formatRating(rating.value)}` : ""}
@@ -179,6 +193,7 @@ function VideoSummary({
   note,
   length,
   part,
+  edition,
   sources,
 }: {
   container: string | null;
@@ -193,6 +208,7 @@ function VideoSummary({
   note?: string | null;
   length?: string | null;
   part?: string | null;
+  edition?: string | null;
   sources?: FileSources;
 }) {
   return (
@@ -201,7 +217,7 @@ function VideoSummary({
         <p className={cn("whitespace-nowrap", playableClass(playableLabel))}>{playableText(playableLabel)}</p>
       ) : null}
       <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} flags={flags} sources={sources} />
+        <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} edition={edition} flags={flags} sources={sources} />
         {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
         {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
       </p>
@@ -237,6 +253,7 @@ function VersionBands({
             flags={version.flags}
             length={lengthText(version)}
             part={multiPartLabel(version.path, version.name)}
+            edition={version.edition}
             sources={sourcesFor?.(version)}
           />
           <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} />
@@ -275,6 +292,8 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [detail, setDetail] = useState<LibraryTitle | null>(null);
   const [detailEpisode, setDetailEpisode] = useState<LibraryEpisode | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupAllProgress, setLookupAllProgress] = useState<string | null>(null);
+  const [plexBusy, setPlexBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
@@ -467,6 +486,61 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function lookupAll() {
+    if (!window.confirm("Look up every title again? Titles already stored are refreshed, including secondary titles. This can take a while.")) return;
+    setLookupBusy(true);
+    setLookupAllProgress("Looking up…");
+    let after = 0;
+    let found = 0;
+    let missing = 0;
+    let errors = 0;
+    let limitNote: string | null = null;
+    try {
+      for (let step = 0; step < 5000; step += 1) {
+        const response = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ all: true, after }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+          found?: number;
+          missing?: number;
+          errors?: number;
+          remaining?: number;
+          processedIds?: number[];
+          processed?: number;
+          message?: string | null;
+          omdbStopped?: boolean;
+        } | null;
+        if (!response.ok) throw new Error(body?.error || "Lookup failed.");
+        found += body?.found ?? 0;
+        missing += body?.missing ?? 0;
+        errors += body?.errors ?? 0;
+        if (body?.message) limitNote = body.message;
+        const processed = body?.processed ?? 0;
+        if (!processed) break;
+        const last = Math.max(...(body?.processedIds ?? []));
+        if (!Number.isFinite(last) || last <= after) break;
+        after = last;
+        const left = body?.remaining ?? 0;
+        const done = found + missing + errors;
+        setLookupAllProgress(left > 0 ? `Looking up ${done} of ${done + left}` : `Looking up ${done}`);
+        if (body?.omdbStopped || !left) break;
+      }
+      bump();
+      const parts = [`${found} found`, missing ? `${missing} unmatched` : "", errors ? `${errors} failed` : ""].filter(Boolean);
+      toast.success(
+        `Lookup finished. ${parts.join(", ")}.${limitNote ? ` ${limitNote}` : ""} Nothing was written back to Plex or the *arr apps.`,
+      );
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Lookup failed.");
+    } finally {
+      setLookupBusy(false);
+      setLookupAllProgress(null);
+    }
+  }
+
   async function detectSelected(mode: "now" | "queue") {
     const titles: number[] = [];
     const episodes: number[] = [];
@@ -499,6 +573,18 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function pushSelected() {
+    const items = [...selected.values()].map((row) => ({ catalogId: row.catalogId, episodeId: row.episodeId }));
+    setPlexBusy(true);
+    try {
+      toast.success(await pushToPlex(items));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not ask Plex to scan.");
+    } finally {
+      setPlexBusy(false);
+    }
+  }
+
   async function copySelected() {
     const rows = [...selected.values()];
     const text = rows.map((row) => `${row.label}\t${row.path ?? "no file"}`).join("\n");
@@ -528,7 +614,11 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <DetectStatus />
             <RemuxStatus />
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Button size="sm" variant="outline" disabled={lookupBusy} onClick={() => void lookupAll()}>
+              {lookupAllProgress ?? "Look up all"}
+            </Button>
+            {filtersActive ? <span>{filtered} matching</span> : null}
             <span>{data?.stats.total ?? 0} titles</span>
             <span>{data?.stats.missing ?? 0} missing</span>
             <span>{data?.stats.notInPlex ?? 0} not in Plex</span>
@@ -597,6 +687,9 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <span className="text-muted-foreground">Marks rows in this browser only.</span>
             <Button size="sm" variant="outline" onClick={() => void copySelected()}>
               Copy titles and paths
+            </Button>
+            <Button size="sm" variant="outline" disabled={plexBusy} onClick={() => void pushSelected()}>
+              {plexBusy ? "Pushing…" : "Push to Plex"}
             </Button>
             <Button
               size="sm"
@@ -769,8 +862,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   bitrateKbps={version.bitrateKbps}
                                   playableLabel={version.playableLabel}
                                   missing={version.missing}
+                                  flags={version.flags}
                                   length={lengthText(version)}
                                   part={multiPartLabel(version.path, version.name, title.title)}
+                                  edition={version.edition}
                                   sources={fileHoverSources(title, data?.configured ?? [], version.presence)}
                                 />
                                 </CellScroll>
@@ -797,8 +892,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   bitrateKbps={title.bitrateKbps}
                                   playableLabel={title.playableLabel}
                                   missing={title.versions[0]?.missing}
+                                  flags={title.versions[0]?.flags}
                                   note={title.playableNote}
                                   part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                  edition={title.versions[0]?.edition}
                                   sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                                 />
                                 </CellScroll>
@@ -907,8 +1004,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 bitrateKbps={title.bitrateKbps}
                                 playableLabel={title.playableLabel}
                                 missing={title.versions[0]?.missing}
+                                flags={title.versions[0]?.flags}
                                 note={title.playableNote}
                                 part={multiPartLabel(title.path, title.versions[0]?.name, title.title)}
+                                edition={title.versions[0]?.edition}
                                 sources={fileHoverSources(title, data?.configured ?? [], title.versions[0]?.presence)}
                               />
                             </dd>
@@ -971,6 +1070,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
           }
         }}
         onLookup={(id) => void lookup([id])}
+        onRescanned={(catalogId) => {
+          setDetailEpisode(null);
+          if (catalogId == null) {
+            setDetail(null);
+          } else if (detail && detail.id !== catalogId) {
+            setDetail({ ...detail, id: catalogId });
+          }
+          bump();
+        }}
       />
     </div>
   );
@@ -1071,6 +1179,8 @@ function EpisodeRows({
                               <p className="font-medium">
                                 {episodeCode(episode.season, episode.episode)} {episode.title}
                               </p>
+                              {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+                              <RecognizedLine episode={episode} />
                               <p className="text-xs text-muted-foreground">
                                 {formatRuntime(episode.runtimeMinutes)}
                                 {episode.airDate ? ` · ${episode.airDate}` : ""}
@@ -1108,6 +1218,7 @@ function EpisodeRows({
                                 flags={version.flags}
                                 length={lengthText(version)}
                                 part={multiPartLabel(version.path, version.name)}
+                                edition={version.edition}
                                 sources={fileHoverSources(
                                   { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
                                   configured,
@@ -1138,7 +1249,9 @@ function EpisodeRows({
                                 bitrateKbps={null}
                                 playableLabel={episode.playableLabel}
                                 missing={episode.versions[0]?.missing}
+                                flags={episode.versions[0]?.flags}
                                 part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                                edition={episode.versions[0]?.edition}
                                 sources={fileHoverSources(
                                   { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },
                                   configured,
@@ -1232,6 +1345,8 @@ function EpisodeList({
                         <p className="font-medium">
                           {episodeCode(episode.season, episode.episode)} {episode.title}
                         </p>
+                        {episode.localTitle ? <p className="text-sm text-muted-foreground">{episode.localTitle}</p> : null}
+                        <RecognizedLine episode={episode} />
                         {episode.versions.length > 1 ? (
                           <div className="mt-1">
                             <VersionLines
@@ -1252,6 +1367,7 @@ function EpisodeList({
                               resolution={episode.resolution}
                               frameRate={episode.detail?.frameRate}
                               part={multiPartLabel(episode.path, episode.versions[0]?.name, episode.title)}
+                              edition={episode.versions[0]?.edition}
                               flags={episode.versions[0]?.flags}
                               sources={fileHoverSources(
                                 { inPlex: episode.inPlex, inSonarr: episode.inSonarr, inBazarr: episode.inBazarr },

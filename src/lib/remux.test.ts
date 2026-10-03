@@ -14,8 +14,8 @@ import { assertWritableDiscFolder, friendlyFsError, missingPathMessage, remuxWor
 import { convertedFileFor, listDiscCandidates } from "@/lib/remux/candidates";
 import { discsFromFile } from "@/lib/remux/discs";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
-import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
-import { makemkvFailure, makemkvMessages, ripDisc } from "@/lib/remux/run";
+import { mainTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
+import { discSummary, largestStreamFile, makemkvFailure, makemkvMessages, missingFeatureMessage, ripDisc, streamFiles, undersizedMessage } from "@/lib/remux/run";
 import { prepareMakemkvLogDir, readMakemkvLog } from "@/lib/remux/logs";
 import { makemkvSource, outputDirectory, resolveDiscPath } from "@/lib/remux/source";
 import {
@@ -72,8 +72,8 @@ test("a disc counts as converted only when the title also has a playable video f
 test("robot info keeps the longest title and reads progress", () => {
   const titles = parseDiscTitles(INFO);
   assert.equal(titles.length, 3);
-  assert.equal(longestTitle(titles)?.index, 1);
-  assert.equal(longestTitle(titles)?.seconds, 2 * 3600 + 14 * 60 + 32);
+  assert.equal(mainTitle(titles)?.index, 1);
+  assert.equal(mainTitle(titles)?.seconds, 2 * 3600 + 14 * 60 + 32);
   assert.equal(progressPercent("PRGV:32768,0,65536"), 50);
   assert.equal(progressPercent("PRGV:65536,0,65536"), 100);
   assert.equal(progressPercent("MSG:1,0,0,\"hi\""), null);
@@ -217,7 +217,7 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(titleIdForPath(db, "/movies/Avatar (2009)/Avatar.hun.srt"), avatar.titleId);
   assert.equal(titleIdForPath(db, "/nowhere/Film.mkv"), null);
   assert.equal(titleIdForPath(db, "/movies/Unknown.mkv"), null);
-  assert.equal(queryLibrary({ kind: "all", rules: [], q: "", offset: 0, limit: 1, id: avatar.titleId }).titles[0]?.id, avatar.titleId);
+  assert.equal(queryLibrary({ kind: "all", rules: [], q: "", offset: 0, limit: 1, id: avatar.titleId }, db).titles[0]?.id, avatar.titleId);
   const byPath = enqueuePaths(
     db,
     [
@@ -389,5 +389,103 @@ test("a DVD whose listed VOB is gone still opens from its VIDEO_TS folder", () =
     /^Gone \(2000\) is not in .*Movies\. It was moved, renamed or removed/,
   );
   assert.match(unreadablePathMessage("/nowhere-metarr/Movies/x.iso"), /\/nowhere-metarr does not exist inside Metarr/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the feature is the largest title, even when a small clip reports a longer duration", () => {
+  const info = [
+    'TINFO:0,9,0,"2:19:01"',
+    'TINFO:0,11,0,"34359738368"',
+    'TINFO:0,16,0,"00010.mpls"',
+    'TINFO:95,9,0,"26:30:12"',
+    'TINFO:95,11,0,"189792256"',
+    'TINFO:95,16,0,"00377.m2ts"',
+    'TINFO:7,9,0,"0:01:30"',
+    'TINFO:7,11,0,"104857600"',
+  ].join("\n");
+  const titles = parseDiscTitles(info);
+  const main = mainTitle(titles);
+  assert.equal(main?.index, 0);
+  assert.equal(main?.sourceFile, "00010.mpls");
+  assert.equal(main?.bytes, 34359738368);
+  assert.equal(undersizedMessage(main!, 30 * 1024 **3), null);
+  assert.match(
+    undersizedMessage(main!, 181 * 1024 ** 2) ?? "",
+    /^MakeMKV saved only 181 MB of the 32\.0 GB title 0 \(00010\.mpls\), so nothing was saved next to the disc\./,
+  );
+  assert.equal(undersizedMessage({ ...main!, bytes: 0 }, 1), null);
+});
+
+test("a Blu-ray folder whose big stream file is in no MakeMKV title is not ripped", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-bd-"));
+  const stream = path.join(dir, "BDMV", "STREAM");
+  fs.mkdirSync(stream, { recursive: true });
+  const big = fs.openSync(path.join(stream, "00349.m2ts"), "w");
+  fs.ftruncateSync(big, 32 * 1024 ** 3);
+  fs.closeSync(big);
+  fs.writeFileSync(path.join(stream, "00469.m2ts"), "x");
+  const largest = largestStreamFile(`file:${dir}`);
+  assert.deepEqual(largest, { name: "00349.m2ts", bytes: 32 * 1024 ** 3 });
+  assert.equal(largestStreamFile(`iso:${dir}/x.iso`), null);
+  const clip = { index: 86, seconds: 60, outputName: null, bytes: 288 * 1024 ** 2, sourceFile: "00469.m2ts", segments: "469" };
+  assert.match(
+    missingFeatureMessage(clip, largest) ?? "",
+    /^MakeMKV did not offer the main film: its largest title is title 86 \(00469\.m2ts\), 288 MB, but 00349\.m2ts on the disc is 32\.0 GB\. Nothing was ripped\./,
+  );
+  const feature = { ...clip, index: 0, bytes: 33 * 1024 ** 3, sourceFile: "00010.mpls" };
+  assert.equal(missingFeatureMessage(feature, largest), null);
+  assert.equal(missingFeatureMessage(clip, { name: "small.m2ts", bytes: 900 * 1024 ** 2 }), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the MakeMKV log starts with what is on the disc next to what MakeMKV offered", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-bdsum-"));
+  const stream = path.join(dir, "bdmv", "Stream");
+  fs.mkdirSync(stream, { recursive: true });
+  fs.writeFileSync(path.join(stream, "00349.m2ts"), "x".repeat(2000));
+  fs.writeFileSync(path.join(stream, "00469.m2ts"), "x");
+  fs.symlinkSync(path.join(dir, "gone"), path.join(stream, "00001.m2ts"));
+  const found = streamFiles(`file:${dir}`);
+  assert.deepEqual(found.files.map((file) => file.name), ["00349.m2ts", "00469.m2ts"]);
+  assert.equal(found.problem, "1 .m2ts files could not be read");
+  assert.match(streamFiles(`file:${path.join(dir, "nothing")}`).problem ?? "", /^no BDMV folder in /);
+  const titles = parseDiscTitles(['TINFO:86,9,0,"0:01:00"', 'TINFO:86,11,0,"301989888"', 'TINFO:86,16,0,"00469.m2ts"', 'TINFO:86,26,0,"469"'].join("\n"));
+  const text = discSummary(`file:${dir}`, titles, titles[0]!, found);
+  assert.match(text, /Chosen: title 86 \(00469\.m2ts\), 0:01, 288 MB/);
+  assert.match(text, /title 86 \(00469\.m2ts\) {2}0:01 {2}288 MB {2}clips 469/);
+  assert.match(text, /Largest stream files on the disc:\n {2}00349\.m2ts/);
+  assert.match(text, /\(1 \.m2ts files could not be read\)/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a disc with a long title list keeps every title, so the feature at the top is not cut off", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-longinfo-"));
+  const fake = path.join(dir, "makemkvcon");
+  fs.writeFileSync(
+    fake,
+    [
+      "#!/bin/sh",
+      'echo \'TINFO:0,9,0,"2:19:01"\'',
+      'echo \'TINFO:0,11,0,"34668134400"\'',
+      'echo \'TINFO:0,16,0,"00010.mpls"\'',
+      'i=0; while [ $i -lt 6000 ]; do echo \'SINFO:0,1,30,0,"Lossless conversion of a long attribute value for padding"\'; i=$((i+1)); done',
+      'echo \'TINFO:86,9,0,"0:01:12"\'',
+      'echo \'TINFO:86,11,0,"320864256"\'',
+      'echo \'TINFO:86,16,0,"00469.m2ts"\'',
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const message = await ripDisc({
+    binary: fake,
+    source: "iso:/nowhere.iso",
+    outputDir: dir,
+    workDir: path.join(dir, "work"),
+    label: "Fight Club (1999)",
+    extras: false,
+    home: dir,
+    dryRun: true,
+    onProgress: () => undefined,
+  });
+  assert.match(message, /^Dry run: would remux title 0 \(00010\.mpls\), 2:19, 32\.3 GB/);
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -7,9 +7,12 @@ export const FILTER_FIELDS = [
   "score",
   "bitrate",
   "year",
+  "kind",
+  "length",
   "resolution",
   "hdr",
   "container",
+  "version",
   "file",
   "plex",
   "playable",
@@ -39,7 +42,9 @@ export function fieldOps(field: FilterField): FilterOp[] {
   if (LANGUAGE_FIELDS.has(field)) return field === "subtitles" ? ["includes", "excludes", "missing"] : ["includes", "excludes"];
   if (field === "genre") return ["includes", "excludes", "empty", "notEmpty"];
   if (field === "contentRating" || field === "resolution" || field === "hdr" || field === "container") return ["eq", "neq", "empty", "notEmpty"];
-  if (field === "score" || field === "bitrate" || field === "year") return ["gt", "gte", "lt", "lte", "eq", "empty", "notEmpty"];
+  if (field === "score" || field === "bitrate" || field === "year" || field === "length") return ["gt", "gte", "lt", "lte", "eq", "empty", "notEmpty"];
+  if (field === "kind") return ["eq", "neq"];
+  if (field === "version") return ["eq", "neq"];
   return ["eq"];
 }
 
@@ -56,13 +61,19 @@ export function defaultRule(id: string, field: FilterField = "language"): Filter
             ? "7"
             : field === "year"
               ? "2000"
+              : field === "kind"
+                ? "movie"
+                : field === "length"
+                  ? "90"
               : field === "resolution"
                 ? "1080p"
                 : field === "hdr"
                   ? "HDR10"
                   : field === "container"
                     ? "mkv"
-                    : field === "file"
+                    : field === "version"
+                      ? "duplicate"
+                      : field === "file"
                     ? "missing"
                     : field === "plex"
                       ? "out"
@@ -176,6 +187,13 @@ function displayedScore(): string {
   )`;
 }
 
+function numericColumn(field: "score" | "year" | "bitrate" | "length"): string {
+  if (field === "score") return displayedScore();
+  if (field === "year") return "year";
+  if (field === "length") return "runtime_minutes";
+  return "bitrate_kbps";
+}
+
 function numberValue(value: string): number | null {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -238,8 +256,8 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
       if (rule.op === "eq") return { sql: blank, params: [] };
       if (rule.op === "neq") return { sql: `NOT ${blank}`, params: [] };
     }
-    if (rule.field === "score" || rule.field === "year" || rule.field === "bitrate") {
-      const column = rule.field === "score" ? displayedScore() : rule.field === "year" ? "year" : "bitrate_kbps";
+    if (rule.field === "score" || rule.field === "year" || rule.field === "bitrate" || rule.field === "length") {
+      const column = numericColumn(rule.field);
       return { sql: `${column} IS NULL`, params: [] };
     }
   }
@@ -280,14 +298,20 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     return null;
   }
 
-  if (rule.field === "score" || rule.field === "year" || rule.field === "bitrate") {
-    const column = rule.field === "score" ? displayedScore() : rule.field === "year" ? "year" : "bitrate_kbps";
+  if (rule.field === "score" || rule.field === "year" || rule.field === "bitrate" || rule.field === "length") {
+    const column = numericColumn(rule.field);
     if (rule.op === "empty") return { sql: `${column} IS NULL`, params: [] };
     if (rule.op === "notEmpty") return { sql: `${column} IS NOT NULL`, params: [] };
     const numeric = numberValue(rule.value);
     if (numeric == null) return null;
     const compared = rule.field === "bitrate" ? numeric * 1000 : numeric;
     return compare(column, rule.op, compared);
+  }
+
+  if (rule.field === "kind" && (rule.op === "eq" || rule.op === "neq")) {
+    const value = rule.value === "movie" || rule.value === "series" ? rule.value : null;
+    if (!value) return null;
+    return { sql: rule.op === "eq" ? "kind = ?" : "kind != ?", params: [value] };
   }
 
   if (rule.field === "resolution") {
@@ -358,12 +382,36 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     const present = `(',' || IFNULL(version_flags, '') || ',')`;
     if (rule.value === "sample") return { sql: `${present} LIKE '%,sample,%'`, params: [] };
     if (rule.value === "short") return { sql: `${present} LIKE '%,short,%'`, params: [] };
-    if (rule.value === "either") return { sql: `IFNULL(version_flags, '') != ''`, params: [] };
+    if (rule.value === "either") {
+      return { sql: `(${present} LIKE '%,sample,%' OR ${present} LIKE '%,short,%')`, params: [] };
+    }
   }
 
   if (rule.field === "stereo" && rule.op === "eq") {
     if (rule.value === "yes") return { sql: "is_3d = 1", params: [] };
     if (rule.value === "no") return { sql: "is_3d = 0", params: [] };
+  }
+
+  if (rule.field === "version" && (rule.op === "eq" || rule.op === "neq")) {
+    const value = rule.value.trim();
+    if (!value) return null;
+    let match: { sql: string; params: Array<string | number> } | null = null;
+    if (value === "none") {
+      match = {
+        sql: `(IFNULL(version_count, 0) <= 1 AND IFNULL(version_editions, '') = '' AND (',' || IFNULL(version_flags, '') || ',') NOT LIKE '%,split,%')`,
+        params: [],
+      };
+    } else if (value === "duplicate") {
+      match = { sql: `(IFNULL(version_count, 0) > 1 AND IFNULL(version_editions, '') = '')`, params: [] };
+    } else if (value === "split") {
+      match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE '%,split,%'`, params: [] };
+    } else if (value === "extra" || value === "outtake" || value === "comic-relief" || value === "trailer") {
+      match = { sql: `(',' || IFNULL(version_flags, '') || ',') LIKE ?`, params: [`%,${value},%`] };
+    } else {
+      match = { sql: `(',' || IFNULL(version_editions, '') || ',') LIKE ?`, params: [`%,${value},%`] };
+    }
+    if (rule.op === "eq") return match;
+    return { sql: `NOT (${match.sql})`, params: match.params };
   }
 
   return null;

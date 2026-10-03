@@ -11,6 +11,7 @@ import { toast } from "sonner";
 
 type AviCandidate = {
   path: string;
+  paths?: string[];
   label: string;
   converted: boolean;
   convertedPath: string | null;
@@ -165,9 +166,10 @@ export function RewrapSection() {
         <h2 className="text-base font-semibold tracking-tight">AVI and M2TS files</h2>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           AVI and loose M2TS or TS files cannot store a language on each track. ffmpeg copies the video, every audio track, and the subtitles into an
-          MKV with the same name, next to it, and writes the audio and subtitle languages Metarr knows onto the tracks. Nothing is re-encoded, so the
-          quality and size stay the same; Blu-ray PCM audio is stored as lossless FLAC. Old DivX/Xvid video may still need Plex to convert it on some
-          players. The original file stays where it is. Hours and the audio order are under Settings.
+          MKV next to the file, and writes the audio and subtitle languages Metarr knows onto the tracks. A single file keeps its name. A labeled split,
+          such as CD1 through CD3 or 1 of 3, is joined into one MKV in that order. Nothing is re-encoded, so the quality and size stay the same; Blu-ray PCM
+          audio is stored as lossless FLAC. Old DivX/Xvid video may still need Plex to convert it on some players. The original files stay where they are.
+          Hours and the audio order are under Settings.
         </p>
       </div>
 
@@ -239,7 +241,14 @@ export function RewrapSection() {
                   <Checkbox checked={selected.has(file.path)} onCheckedChange={() => toggle(file.path)} className="mt-0.5" aria-label={`Select ${file.label}`} />
                   <span className="min-w-0 flex-1">
                     <span className="text-sm font-medium">{file.label}</span>
-                    <span className="mt-1 block text-xs leading-5 break-all text-muted-foreground">{file.path}</span>
+                    {(file.paths ?? [file.path]).length > 1 ? (
+                      <span className="mt-1 block text-xs text-muted-foreground">Joined into one MKV, in part order.</span>
+                    ) : null}
+                    {(file.paths ?? [file.path]).map((filePath) => (
+                      <span key={filePath} className="mt-1 block text-xs leading-5 break-all text-muted-foreground">
+                        {filePath}
+                      </span>
+                    ))}
                   </span>
                 </label>
               </li>
@@ -269,7 +278,11 @@ export function RewrapSection() {
                     {file.convertedPath ? `Rewrapped to ${fileName(file.convertedPath)}` : "Rewrap finished"}
                   </span>
                 </span>
-                <span className="mt-1 block text-xs leading-5 break-all text-muted-foreground">{file.path}</span>
+                {(file.paths ?? [file.path]).map((filePath) => (
+                  <span key={filePath} className="mt-1 block text-xs leading-5 break-all text-muted-foreground">
+                    {filePath}
+                  </span>
+                ))}
               </li>
             ))}
           </ul>

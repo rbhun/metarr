@@ -1,7 +1,7 @@
 import { getDb } from "@/lib/db";
 import { offeredSyncInterval, readSyncSchedule, writeSyncSchedule } from "@/lib/sync-schedule";
 import { kickSyncWorker, startSyncWorker } from "@/lib/sync-worker";
-import { getSyncStatus, startSync } from "@/lib/sync";
+import { cancelSync, getSyncStatus, startSync } from "@/lib/sync";
 import { CONNECTORS, type ConnectorId } from "@/lib/types";
 import { NextResponse } from "next/server";
 
@@ -51,4 +51,9 @@ export async function POST(request: Request) {
   }
   const result = startSync(only);
   return NextResponse.json(result.status, { status: result.started ? 202 : 200 });
+}
+
+export async function DELETE() {
+  const result = cancelSync();
+  return NextResponse.json(result.status, { status: result.cancelled ? 202 : 200 });
 }

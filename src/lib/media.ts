@@ -595,11 +595,11 @@ function arrOnlyLanguages(file: MediaFile, kind: "audio" | "subtitle"): string[]
   return kind === "audio" ? file.audioLanguages : file.subtitleLanguages;
 }
 
-function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string }>(tracks: T[], languages: string[]): T[] {
+function noteMissingFromArr<T extends { language: string | null; fromFile?: boolean; conflict?: string | null; placement?: string; file?: string | null }>(tracks: T[], languages: string[]): T[] {
   const known = languages.map((language) => languageName(language)?.toLowerCase()).filter((language): language is string => Boolean(language));
   if (!known.length) return tracks;
   return tracks.map((track) => {
-    if (!track.fromFile || !track.language || track.placement === "external") return track;
+    if (!track.fromFile || !track.language || track.placement === "external" || track.file) return track;
     const name = languageName(track.language)?.toLowerCase();
     if (!name || known.includes(name)) return track;
     const extra = "Radarr or Sonarr does not list this.";
@@ -607,15 +607,30 @@ function noteMissingFromArr<T extends { language: string | null; fromFile?: bool
   });
 }
 
+function markFolderAudio(track: AudioTrack): AudioTrack {
+  return {
+    ...track,
+    fromFile: true,
+    folderOnly: true,
+    sources: { ...track.sources, plex: null, ...(track.file ? { file: track.file } : {}) },
+    conflict: track.conflict ?? "This audio file is beside the video, but Plex does not list separate audio files.",
+  };
+}
+
 /** Compare a folder scan with the tracks Plex stored. The file tag wins, and a mismatch is kept on the track. */
 export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): AudioTrack[] {
-  if (!scanned.length) return reported;
-  if (!reported.length) return scanned.map((track) => ({ ...track, fromFile: true }));
-  const count = Math.max(reported.length, scanned.length);
+  const scannedInternal = scanned.filter((track) => !track.file);
+  const scannedExternal = scanned.filter((track) => track.file);
+  if (!scannedInternal.length && !scannedExternal.length) return reported;
+  if (!reported.length && !scannedInternal.length) return scannedExternal.map(markFolderAudio);
+  if (!reported.length) {
+    return [...scannedInternal.map((track) => ({ ...track, fromFile: true })), ...scannedExternal.map(markFolderAudio)];
+  }
+  const count = Math.max(reported.length, scannedInternal.length);
   const tracks: AudioTrack[] = [];
   for (let index = 0; index < count; index += 1) {
     const report = reported[index];
-    const scan = scanned[index];
+    const scan = scannedInternal[index];
     if (!scan) {
       if (report) tracks.push({ ...report, sources: { ...report.sources, file: report.sources?.file ?? null } });
       continue;
@@ -657,7 +672,7 @@ export function crossCheckAudio(reported: AudioTrack[], scanned: AudioTrack[]): 
       ...(notes.length ? { conflict: notes.join(" ") } : {}),
     });
   }
-  return tracks;
+  return [...tracks, ...scannedExternal.map(markFolderAudio)];
 }
 
 function baseOf(file: string): string {
@@ -834,8 +849,8 @@ export function mergeAudioTracks(groups: AudioTrack[][]): AudioTrack[] {
   const tracks: AudioTrack[] = [];
   const seen = new Set<string>();
   for (const track of groups.flat()) {
-    if (!track.language && !track.layout && !track.codec) continue;
-    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}`.toLowerCase();
+    if (!track.language && !track.layout && !track.codec && !track.file) continue;
+    const key = `${track.language ?? ""}|${track.layout ?? ""}|${track.codec ?? ""}|${track.streamIndex ?? ""}|${track.file ?? ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     tracks.push(track);
@@ -1061,9 +1076,11 @@ function fileName(path: string | null): string {
 }
 
 const EDITION_LABELS: Array<[RegExp, string]> = [
-  [/director'?s?\s*cut/i, "Director's Cut"],
+  [/(?:director'?s?\s*cut|directors)/i, "Director's Cut"],
   [/extended(?:\s*(?:cut|edition))?/i, "Extended"],
-  [/theatrical(?:\s*cut)?/i, "Theatrical"],
+  [/theatrical(?:\s*(?:cut|edition))?/i, "Theatrical"],
+  [/restored/i, "Restored"],
+  [/anniversary/i, "Anniversary"],
   [/unrated|\buncut\b/i, "Unrated"],
   [/open\s*matte/i, "Open Matte"],
   [/\bimax\b/i, "IMAX"],
@@ -1072,6 +1089,9 @@ const EDITION_LABELS: Array<[RegExp, string]> = [
   [/special\s*edition/i, "Special Edition"],
   [/final\s*cut/i, "Final Cut"],
 ];
+
+/** Edition labels offered by the Versions filter, in the same order as detection. */
+export const EDITION_FILTER_OPTIONS = EDITION_LABELS.map(([, label]) => label);
 
 function partPair(index: number, total: number): string | null {
   if (index < 1 || total < 2 || index > total || total > 12) return null;
@@ -1083,36 +1103,198 @@ function partIndex(index: number): string | null {
   return `Part ${index}`;
 }
 
+type PartHit = { index: number; total: number | null; start: number; end: number };
+
+function hitFrom(match: RegExpMatchArray, index: number, total: number | null): PartHit | null {
+  if (total == null) {
+    if (!partIndex(index)) return null;
+  } else if (!partPair(index, total)) return null;
+  return { index, total, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length };
+}
+
+/** `Season 1`, `Season.01`, or a folder that is only the number. */
+function seasonOrIndexSegment(segment: string): boolean {
+  return /^(?:season[\s._-]*)?0*\d{1,2}$/i.test(segment.trim());
+}
+
+/** The file or folder name starts with this part number, as in `07.avi` or `07 - Title`. */
+function startsWithIndex(segment: string, index: number): boolean {
+  const match = segment.trim().match(/^0*(\d{1,2})(?=\.[a-z0-9]{1,5}$|[^a-z0-9]|$)/i);
+  return match != null && Number(match[1]) === index;
+}
+
+/**
+ * `Season 1/07 - Title.avi` is an episode path. `Movie (1/2).mkv` keeps the slash
+ * inside one file name, so that one still counts as a split.
+ */
+function slashIsEpisodePath(source: string, match: RegExpMatchArray): boolean {
+  const text = match[0];
+  const secondAt = text.lastIndexOf(match[2] ?? "");
+  const relative = secondAt < 0 ? -1 : text.lastIndexOf("/", secondAt);
+  if (relative < 0) return false;
+  const slash = (match.index ?? 0) + relative;
+  const leftFrom = source.lastIndexOf("/", slash - 1) + 1;
+  const rightTo = source.indexOf("/", slash + 1);
+  const left = source.slice(leftFrom, slash);
+  const right = source.slice(slash + 1, rightTo < 0 ? source.length : rightTo);
+  if (!seasonOrIndexSegment(left)) return false;
+  return startsWithIndex(right, Number(match[2]));
+}
+
+/** The part token in one name, using the same rules as the library pill. */
+function partHit(source: string): PartHit | null {
+  const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const tight = of ? null : source.match(/(?:^|[^a-z0-9])0*(\d{1,2})of0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const counted = of ?? tight;
+  if (counted) {
+    const hit = hitFrom(counted, Number(counted[1]), Number(counted[2]));
+    if (hit) return hit;
+  }
+  const slashPattern = /(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/g;
+  for (const slash of source.matchAll(slashPattern)) {
+    if (slashIsEpisodePath(source, slash)) continue;
+    const hit = hitFrom(slash, Number(slash[1]), Number(slash[2]));
+    if (hit) return hit;
+  }
+  const disc = source.match(/(?:^|[^a-z0-9])(?:cd|disc|disk|dvd)\s*[._-]?\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const split = source.match(/(?:^|[^a-z0-9])(?:part|pt)0*(\d{1,2})(?:[^a-z0-9]|$)/i);
+  const loose = disc ?? split;
+  if (!loose) return null;
+  return hitFrom(loose, Number(loose[1]), null);
+}
+
+function stemAround(base: string, hit: PartHit): string {
+  const left = base.slice(0, hit.start).replace(/[\s._-]+$/g, "");
+  const right = base.slice(hit.end).replace(/^[\s._-]+/g, "");
+  return [left, right].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+export type SplitIdentity = {
+  index: number;
+  total: number | null;
+  /** Folder the joined file belongs in. For `Movie/CD1/file.avi` this is `Movie`. */
+  directory: string;
+  /** File name with the part token removed, for the joined MKV. */
+  stem: string;
+  /** Directory plus stem, so CD1 and CD2 of the same movie share one copy. */
+  key: string;
+};
+
+function groupKey(directory: string, stem: string): string {
+  return `${directory.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase()}\0${stem.toLowerCase()}`;
+}
+
+/**
+ * A labeled split file, such as "CD1" or "1 of 2". A sequel title like "Part II" is not a split.
+ * The token is read from the file name, or from the folder when the file itself has none.
+ */
+export function splitIdentity(filePath: string | null | undefined): SplitIdentity | null {
+  if (!filePath?.trim()) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+  const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const dot = file.lastIndexOf(".");
+  const base = dot > 0 ? file.slice(0, dot) : file;
+  const named = partHit(base);
+  if (named) {
+    const stem = stemAround(base, named);
+    if (!stem) return null;
+    return { index: named.index, total: named.total, directory, stem, key: groupKey(directory, stem) };
+  }
+  const parentSlash = directory.lastIndexOf("/");
+  const parent = parentSlash >= 0 ? directory.slice(parentSlash + 1) : directory;
+  const folder = parent ? partHit(parent) : null;
+  if (!folder || !base.trim()) return null;
+  const grand = parentSlash >= 0 ? directory.slice(0, parentSlash) : "";
+  return { index: folder.index, total: folder.total, directory: grand, stem: base, key: groupKey(grand, base) };
+}
+
+/**
+ * One logical copy. Split parts share a key, and a file named like the joined movie
+ * (the stem with the part token removed) belongs to that same copy.
+ */
+export function copyGroupId(filePath: string | null | undefined, peers: Array<string | null | undefined> = []): string {
+  const split = splitIdentity(filePath);
+  if (split) return split.key;
+  if (filePath?.trim()) {
+    const normalized = filePath.replace(/\\/g, "/");
+    const slash = normalized.lastIndexOf("/");
+    const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+    const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    const dot = file.lastIndexOf(".");
+    const stem = (dot > 0 ? file.slice(0, dot) : file).trim();
+    if (stem) {
+      const plain = groupKey(directory, stem);
+      if (peers.some((peer) => peer !== filePath && splitIdentity(peer)?.key === plain)) return plain;
+    }
+  }
+  return `file:${(filePath ?? "").replace(/\\/g, "/").toLowerCase()}`;
+}
+
 /** A split file, such as "1 of 2" or "CD1". A sequel title like "Part II" or "Part 2" is left alone. */
 export function multiPartLabel(...sources: Array<string | null | undefined>): string | null {
-  let stacked: string | null = null;
+  let stacked: PartHit | null = null;
   for (const source of sources) {
     if (!source?.trim()) continue;
-    const of = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*of\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const tight = of ? null : source.match(/(?:^|[^a-z0-9])0*(\d{1,2})of0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const counted = of ?? tight;
-    if (counted) {
-      const label = partPair(Number(counted[1]), Number(counted[2]));
-      if (label) return label;
-    }
-    const slash = source.match(/(?:^|[^a-z0-9])0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\s*\/\s*\d)(?:[^a-z0-9]|$)/);
-    if (slash) {
-      const label = partPair(Number(slash[1]), Number(slash[2]));
-      if (label) return label;
-    }
-    if (stacked) continue;
-    const disc = source.match(/(?:^|[^a-z0-9])(?:cd|disc|disk|dvd)\s*[._-]?\s*0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const split = source.match(/(?:^|[^a-z0-9])(?:part|pt)0*(\d{1,2})(?:[^a-z0-9]|$)/i);
-    const index = disc ?? split;
-    if (index) stacked = partIndex(Number(index[1]));
+    const hit = partHit(source);
+    if (!hit) continue;
+    if (hit.total != null) return partPair(hit.index, hit.total);
+    if (!stacked) stacked = hit;
   }
-  return stacked;
+  return stacked ? partIndex(stacked.index) : null;
 }
 
 export function editionLabel(filePath: string | null | undefined): string | null {
   if (!filePath?.trim()) return null;
   for (const [pattern, label] of EDITION_LABELS) {
     if (pattern.test(filePath)) return label;
+  }
+  return null;
+}
+
+export type VersionFlag = "sample" | "short" | "extra" | "outtake" | "comic-relief" | "trailer";
+
+export const BONUS_VERSION_FLAGS = ["extra", "outtake", "comic-relief", "trailer"] as const satisfies readonly VersionFlag[];
+
+export const VERSION_FLAG_LABEL: Record<VersionFlag, string> = {
+  sample: "Sample",
+  short: "Short",
+  extra: "Extra",
+  outtake: "Outtake",
+  "comic-relief": "Comic Relief",
+  trailer: "Trailer",
+};
+
+const VERSION_FLAG_SET = new Set<string>(Object.keys(VERSION_FLAG_LABEL));
+
+/** Bonus content beside a title, often under Extras / Featurettes / Outtakes. */
+const BONUS_FLAGS: Array<[RegExp, VersionFlag]> = [
+  [/comic[\s._-]*relief/i, "comic-relief"],
+  [/(?:^|[^a-z0-9])(?:outtakes?|bloopers?)(?:[^a-z0-9]|$)/i, "outtake"],
+  [/(?:^|[^a-z0-9])(?:trailers?|tv[\s._-]*spots?)(?:[^a-z0-9]|$)/i, "trailer"],
+  [
+    /(?:^|[^a-z0-9])(?:extras?|featurettes?|special[\s._-]*features?|bonus(?:es)?|behind[\s._-]*the[\s._-]*scenes|deleted[\s._-]*scenes?|interviews?)(?:[^a-z0-9]|$)/i,
+    "extra",
+  ],
+  // Plex-style folder names that would otherwise look like ordinary words in a title.
+  [/(?:^|\/)(?:features?|shorts?|scenes?|other)(?:\/|$)/i, "extra"],
+];
+
+export function isVersionFlag(value: string): value is VersionFlag {
+  return VERSION_FLAG_SET.has(value);
+}
+
+export function isBonusFlag(flags: string[] | null | undefined): boolean {
+  return Boolean(flags?.some((flag) => (BONUS_VERSION_FLAGS as readonly string[]).includes(flag)));
+}
+
+/** Flag for bonus material from the file or folder name. Featurettes and Features count as Extra. */
+export function bonusFlag(filePath: string | null | undefined): VersionFlag | null {
+  if (!filePath?.trim()) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  for (const [pattern, flag] of BONUS_FLAGS) {
+    if (pattern.test(normalized)) return flag;
   }
   return null;
 }
@@ -1141,6 +1323,8 @@ function isShortCopy(file: MediaFile, peers: MediaFile[]): boolean {
 
 export function versionFlags(file: MediaFile, peers: MediaFile[]): string[] {
   const flags: string[] = [];
+  const bonus = bonusFlag(file.path);
+  if (bonus) flags.push(bonus);
   if (isSamplePath(file.path)) flags.push("sample");
   if (isShortCopy(file, peers)) flags.push("short");
   return flags;
@@ -1157,6 +1341,9 @@ function missingMetadata(file: MediaFile): string[] {
 export function versionsFrom(files: MediaFile[]): MediaVersion[] {
   return [...files]
     .sort((left, right) => {
+      const leftBonus = bonusFlag(left.path) ? 1 : 0;
+      const rightBonus = bonusFlag(right.path) ? 1 : 0;
+      if (leftBonus !== rightBonus) return leftBonus - rightBonus;
       const resolution = resolutionRank(resolvedResolution(right)) - resolutionRank(resolvedResolution(left));
       if (resolution !== 0) return resolution;
       return hdrRank(right.hdr) - hdrRank(left.hdr);

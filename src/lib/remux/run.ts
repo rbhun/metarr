@@ -5,9 +5,95 @@ import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
-import { longestTitle, parseDiscTitles, progressPercent } from "@/lib/remux/robot";
+import { formatBytes } from "@/lib/format";
+import { mainTitle, parseDiscTitles, progressPercent, type DiscTitle } from "@/lib/remux/robot";
 
 const RIP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+const PROGRESS = /^PRG[VCT]:/;
+/** A remux keeps every byte of the chosen streams; far less than MakeMKV announced means the wrong or a broken title. */
+const MIN_SIZE_SHARE = 0.25;
+
+function titleName(title: DiscTitle): string {
+  return `title ${title.index}${title.sourceFile ? ` (${title.sourceFile})` : ""}`;
+}
+
+function childNamed(directory: string, name: string): string | null {
+  try {
+    const entry = fs.readdirSync(directory).find((item) => item.toLowerCase() === name);
+    return entry ? path.join(directory, entry) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type StreamFile = { name: string; bytes: number };
+
+/** The .m2ts files under BDMV/STREAM of a Blu-ray folder source, largest first, or why there are none. */
+export function streamFiles(source: string): { files: StreamFile[]; problem: string | null } {
+  if (!source.startsWith("file:")) return { files: [], problem: "not a Blu-ray folder (an ISO or a DVD)" };
+  const root = source.slice(5);
+  const bdmv = childNamed(root, "bdmv");
+  if (!bdmv) return { files: [], problem: `no BDMV folder in ${root}` };
+  const stream = childNamed(bdmv, "stream");
+  if (!stream) return { files: [], problem: `no STREAM folder in ${bdmv}` };
+  let names: string[];
+  try {
+    names = fs.readdirSync(stream);
+  } catch (caught) {
+    return { files: [], problem: `cannot list ${stream}: ${caught instanceof Error ? caught.message : "unknown error"}` };
+  }
+  const files: StreamFile[] = [];
+  let unreadable = 0;
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith(".m2ts")) continue;
+    try {
+      files.push({ name, bytes: fs.statSync(path.join(stream, name)).size });
+    } catch {
+      unreadable += 1;
+    }
+  }
+  files.sort((a, b) => b.bytes - a.bytes);
+  const problem = files.length ? (unreadable ? `${unreadable} .m2ts files could not be read` : null) : `no readable .m2ts files in ${stream}`;
+  return { files, problem };
+}
+
+export function largestStreamFile(source: string): StreamFile | null {
+  return streamFiles(source).files[0] ?? null;
+}
+
+/** Plain-text overview for Tasks → MakeMKV log: what is on the disc next to what MakeMKV offered. */
+export function discSummary(source: string, titles: DiscTitle[], chosen: DiscTitle | null, stream: { files: StreamFile[]; problem: string | null }): string {
+  const lines = [`Source: ${source}`, `MakeMKV titles: ${titles.length}`];
+  if (chosen) lines.push(`Chosen: ${titleName(chosen)}, ${clock(chosen.seconds)}, ${formatBytes(chosen.bytes)}`);
+  lines.push("", "Largest MakeMKV titles:");
+  for (const title of [...titles].sort((a, b) => b.bytes - a.bytes || b.seconds - a.seconds).slice(0, 15)) {
+    lines.push(`  ${titleName(title)}  ${clock(title.seconds)}  ${formatBytes(title.bytes)}  clips ${title.segments ?? "?"}`);
+  }
+  lines.push("", "Largest stream files on the disc:");
+  for (const file of stream.files.slice(0, 10)) lines.push(`  ${file.name}  ${formatBytes(file.bytes)}`);
+  if (stream.problem) lines.push(`  (${stream.problem})`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** Null when MakeMKV's chosen title could hold the disc's largest stream file. */
+export function missingFeatureMessage(title: DiscTitle, largest: { name: string; bytes: number } | null): string | null {
+  if (!largest || largest.bytes < 1024 ** 3 || !title.bytes || largest.bytes <= title.bytes * 2) return null;
+  return (
+    `MakeMKV did not offer the main film: its largest title is ${titleName(title)}, ${formatBytes(title.bytes)}, ` +
+    `but ${largest.name} on the disc is ${formatBytes(largest.bytes)}. Nothing was ripped. ` +
+    `Open the MakeMKV log in Tasks (info-output) to see what MakeMKV said about ${largest.name}.`
+  );
+}
+
+/** Null when the saved MKV is plausibly the whole title. */
+export function undersizedMessage(title: DiscTitle, savedBytes: number): string | null {
+  if (!title.bytes || savedBytes >= title.bytes * MIN_SIZE_SHARE) return null;
+  return (
+    `MakeMKV saved only ${formatBytes(savedBytes)} of the ${formatBytes(title.bytes)} ${titleName(title)}, ` +
+    `so nothing was saved next to the disc. Open the MakeMKV log in Tasks for its reason.`
+  );
+}
 
 function listMkv(directory: string): Array<{ path: string; bytes: number }> {
   if (!fs.existsSync(directory)) return [];
@@ -109,7 +195,16 @@ function runMakeMkv(
       env: { ...process.env, HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let output = "";
+    // Every line except progress counters: a disc with a hundred titles prints megabytes of TINFO/SINFO,
+    // and the title list must stay whole for parsing.
+    const kept: string[] = [];
+    let keptBytes = 0;
+    const keep = (text: string) => {
+      if (keptBytes > MAX_OUTPUT_BYTES) return;
+      kept.push(text);
+      keptBytes += text.length;
+    };
+    const collected = () => kept.join("");
     let settled = false;
     const fail = (error: Error) => {
       if (settled) return;
@@ -123,12 +218,12 @@ function runMakeMkv(
     }, RIP_TIMEOUT_MS);
     const stdout = readline.createInterface({ input: child.stdout });
     stdout.on("line", (line) => {
-      output = `${output}${line}\n`.slice(-200_000);
+      if (!PROGRESS.test(line)) keep(`${line}\n`);
       onLine(line);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      output = `${output}${text}`.slice(-200_000);
+      keep(text);
       for (const line of text.split(/\r?\n/)) {
         if (line.trim()) onLine(line);
       }
@@ -144,6 +239,7 @@ function runMakeMkv(
       );
     });
     child.on("close", (code, signal) => {
+      const output = collected();
       saveOutput(logDir, home, step, output, code, signal);
       if (settled) return;
       settled = true;
@@ -172,12 +268,22 @@ export async function ripDisc(options: {
   onProgress(0, "Reading the disc");
   const info = await runMakeMkv(binary, ["info", source], home, () => undefined, logDir);
   const titles = parseDiscTitles(info);
-  const main = longestTitle(titles);
+  const main = mainTitle(titles);
   if (!main) throw new Error("MakeMKV did not find a title on this disc.");
+  const stream = streamFiles(source);
+  if (logDir) {
+    try {
+      fs.writeFileSync(path.join(logDir, "disc.txt"), discSummary(source, titles, main, stream));
+    } catch {
+      // The summary is only for diagnosis.
+    }
+  }
+  const missing = missingFeatureMessage(main, stream.files[0] ?? null);
+  if (missing) throw new Error(missing);
   if (options.dryRun) {
     const target = path.join(outputDir, `${safeBaseName(label)}.mkv`);
     const others = extras && titles.length > 1 ? ` and ${titles.length - 1} other titles as -other files` : "";
-    return `Dry run: would remux title ${main.index} (${clock(main.seconds)})${others} into ${target}, keeping every audio and subtitle track. Nothing was written.`;
+    return `Dry run: would remux ${titleName(main)}, ${clock(main.seconds)}, ${formatBytes(main.bytes)}${others} into ${target}, keeping every audio and subtitle track. Nothing was written.`;
   }
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(workDir, { recursive: true });
@@ -195,12 +301,16 @@ export async function ripDisc(options: {
     onProgress(100, "Saving files");
     const produced = listMkv(workDir);
     const plan = planRemuxFiles(outputDir, label, produced, extras, (file) => fs.existsSync(file));
+    const saved = produced.find((file) => file.path === plan.main.from)?.bytes ?? 0;
+    const short = undersizedMessage(main, saved);
+    if (short) throw new Error(short);
     deliverFile(plan.main.from, plan.main.to);
     for (const extra of plan.extras) deliverFile(extra.from, extra.to);
     const movie = path.basename(plan.main.to);
-    if (!extras || plan.extras.length === 0) return `Saved ${movie}. The disc was left in place.`;
+    const from = `from ${titleName(main)}, ${clock(main.seconds)}, ${formatBytes(saved)}`;
+    if (!extras || plan.extras.length === 0) return `Saved ${movie} ${from}. The disc was left in place.`;
     const count = plan.extras.length === 1 ? "1 extra" : `${plan.extras.length} extras`;
-    return `Saved ${movie} and ${count}. The disc was left in place.`;
+    return `Saved ${movie} ${from}, and ${count}. The disc was left in place.`;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

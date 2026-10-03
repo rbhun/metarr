@@ -18,6 +18,8 @@ type DeployRun = {
 type DeployState = {
   version: string;
   available: boolean;
+  remoteVersion: string | null;
+  updateAvailable: boolean;
   requestedAt: string | null;
   stuck: boolean;
   run: DeployRun | null;
@@ -41,9 +43,13 @@ function statusText(state: DeployState | null, offline: boolean): string {
   }
   if (state.requestedAt) return "Update requested. Waiting for the host to start it…";
   const run = state.run;
-  if (!run) return `Version ${state.version}. No update has been run from here yet.`;
+  if (!run) {
+    if (state.updateAvailable && state.remoteVersion) return `Version ${state.version}. An update is available (${state.remoteVersion}).`;
+    return `Version ${state.version}. No update has been run from here yet.`;
+  }
   if (run.state === "running") return `Updating since ${when(run.startedAt)}…`;
   if (run.state === "failed") return `The last update failed ${when(run.finishedAt)} (exit code ${run.exitCode ?? "unknown"}). The log is below.`;
+  if (state.updateAvailable && state.remoteVersion) return `Version ${state.version}. An update is available (${state.remoteVersion}).`;
   const changed = run.after && run.after !== run.before ? `${run.before} → ${run.after}` : "already up to date";
   return `Version ${state.version}. Last update ${when(run.finishedAt)}: ${changed}.`;
 }
@@ -110,6 +116,11 @@ export function UpdateCard() {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm leading-6">{statusText(state, offline)}</p>
+        {state?.updateAvailable && state.remoteVersion ? (
+          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
+            An update is available: {state.remoteVersion}. This copy is {state.version}.
+          </div>
+        ) : null}
         {newer ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
             <span>

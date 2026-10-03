@@ -6,9 +6,11 @@ export function detectionKey(path: string, kind: "audio" | "subtitle", ordinal: 
 }
 
 export function overlayAudio(path: string | null, tracks: AudioTrack[], detections: Map<string, StoredDetection>): AudioTrack[] {
-  if (!path) return tracks;
   return tracks.map((track, index) => {
-    const found = detections.get(detectionKey(path, "audio", track.streamIndex ?? index));
+    const mediaPath = track.file ?? path;
+    if (!mediaPath) return track;
+    const ordinal = track.file ? 0 : (track.streamIndex ?? index);
+    const found = detections.get(detectionKey(mediaPath, "audio", ordinal));
     if (!found) return track;
     const role = found.role === "commentary" || found.role === "short" ? found.role : null;
     return {

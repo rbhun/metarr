@@ -1,5 +1,6 @@
 "use client";
 
+import { CpuReadout } from "@/components/cpu-readout";
 import { TaskCount } from "@/components/detect-tasks";
 import { RemuxCount } from "@/components/remux-tasks";
 import { VERSION } from "@/lib/version";
@@ -8,6 +9,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -19,11 +21,13 @@ import { Disc3, GitMerge, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 type ShellContextValue = {
   status: SyncStatus | null;
   epoch: number;
   startSync: (id?: ConnectorId) => Promise<void>;
+  cancelSync: () => Promise<void>;
   bump: () => void;
 };
 
@@ -143,8 +147,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [refresh, status?.running]);
 
+  const cancelSync = useCallback(async () => {
+    if (!status?.running) return;
+    const response = await fetch("/api/sync", { method: "DELETE" });
+    if (!response.ok) {
+      toast.error("Could not cancel the sync.");
+      return;
+    }
+    toast.success("Stopping sync…");
+    await refresh();
+  }, [refresh, status?.running]);
+
   return (
-    <ShellContext.Provider value={{ status, epoch, startSync, bump }}>
+    <ShellContext.Provider value={{ status, epoch, startSync, cancelSync, bump }}>
       <div className="flex h-dvh bg-background text-foreground">
         <aside
           className={cn(
@@ -153,22 +168,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         >
           <div className={cn("flex items-start gap-2 py-4", collapsed ? "justify-center px-2" : "px-4")}>
-            {collapsed ? null : (
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold tracking-tight">Metarr</p>
-                <p className="text-xs text-muted-foreground">{VERSION}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-2">
+                <CpuReadout compact />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Expand sidebar"
+                  aria-expanded={false}
+                  onClick={toggleCollapsed}
+                >
+                  <PanelLeftOpen />
+                </Button>
               </div>
+            ) : (
+              <>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold tracking-tight">Metarr</p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">{VERSION}</p>
+                    <CpuReadout />
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">Metadata for Plex, Radarr, Sonarr, and Bazarr.</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Collapse sidebar"
+                  aria-expanded={true}
+                  onClick={toggleCollapsed}
+                >
+                  <PanelLeftClose />
+                </Button>
+              </>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!collapsed}
-              onClick={toggleCollapsed}
-            >
-              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-            </Button>
           </div>
           <div className={cn(collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
@@ -185,7 +218,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <SheetContent side="left" className="bg-sidebar">
                 <SheetHeader>
                   <SheetTitle>Metarr</SheetTitle>
-                  <p className="text-xs text-muted-foreground">{VERSION}</p>
+                  <div className="flex items-baseline justify-between gap-2 pr-8">
+                    <p className="text-xs text-muted-foreground">{VERSION}</p>
+                    <CpuReadout />
+                  </div>
                 </SheetHeader>
                 <div className="px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
@@ -233,6 +269,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </div>
+          <DialogFooter>
+            {status?.running ? (
+              <Button variant="outline" onClick={() => void cancelSync()}>
+                Cancel sync
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setSyncOpen(false)}>
+                Close
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </ShellContext.Provider>

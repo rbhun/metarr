@@ -2,7 +2,7 @@
 
 import { UnknownLabel } from "@/components/marked-text";
 import { SourceHover } from "@/components/source-hover";
-import { presenceTooltip } from "@/lib/media";
+import { isVersionFlag, presenceTooltip, VERSION_FLAG_LABEL, type VersionFlag } from "@/lib/media";
 import type { FileSources } from "@/lib/types";
 
 function pillClass(kind: "container" | "resolution" | "rate", value: string): string {
@@ -21,14 +21,27 @@ function pillClass(kind: "container" | "resolution" | "rate", value: string): st
   return "bg-slate-500/15 text-slate-800 dark:text-slate-100";
 }
 
-export function FlagPill({ kind }: { kind: "short" | "sample" }) {
-  const sample = kind === "sample";
+const FLAG_TITLE: Record<VersionFlag, string> = {
+  sample: "Named as a sample",
+  short: "Only a moment long",
+  extra: "Bonus extra or featurette",
+  outtake: "Outtake or blooper",
+  "comic-relief": "Comic relief",
+  trailer: "Trailer or TV spot",
+};
+
+export function FlagPill({ kind }: { kind: VersionFlag }) {
+  const caution = kind === "sample" || kind === "short";
   return (
     <span
-      title={sample ? "Named as a sample" : "Only a moment long"}
-      className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-950 dark:text-amber-100"
+      title={FLAG_TITLE[kind]}
+      className={
+        caution
+          ? "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-950 dark:text-amber-100"
+          : "rounded-full bg-stone-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-900 dark:text-stone-100"
+      }
     >
-      {sample ? "Sample" : "Short"}
+      {VERSION_FLAG_LABEL[kind]}
     </span>
   );
 }
@@ -39,6 +52,7 @@ export function MediaPills({
   frameRate,
   threeD,
   part,
+  edition,
   flags,
   sources,
 }: {
@@ -47,6 +61,7 @@ export function MediaPills({
   frameRate?: string | null;
   threeD?: boolean;
   part?: string | null;
+  edition?: string | null;
   flags?: string[];
   sources?: FileSources;
 }) {
@@ -55,7 +70,7 @@ export function MediaPills({
     resolution ? { kind: "resolution" as const, value: resolution } : null,
     frameRate ? { kind: "rate" as const, value: frameRate } : null,
   ].filter((pill): pill is { kind: "container" | "resolution" | "rate"; value: string } => Boolean(pill));
-  if (!pills.length && !part && resolution !== null && !threeD && !flags?.length) return null;
+  if (!pills.length && !part && !edition && resolution !== null && !threeD && !flags?.length) return null;
   const sourceText = presenceTooltip(sources);
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
@@ -79,6 +94,14 @@ export function MediaPills({
           3D
         </span>
       ) : null}
+      {edition ? (
+        <span
+          title="Special release"
+          className="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-rose-950 dark:text-rose-100"
+        >
+          {edition}
+        </span>
+      ) : null}
       {part ? (
         <span
           title="Multi-part movie"
@@ -87,8 +110,9 @@ export function MediaPills({
           {part}
         </span>
       ) : null}
-      {flags?.includes("sample") ? <FlagPill kind="sample" /> : null}
-      {flags?.includes("short") ? <FlagPill kind="short" /> : null}
+      {(flags ?? []).filter(isVersionFlag).map((flag) => (
+        <FlagPill key={flag} kind={flag} />
+      ))}
     </span>
   );
 }

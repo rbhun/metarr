@@ -1,6 +1,17 @@
 import { fetchJson } from "@/lib/connectors/http";
-import { listConnectors } from "@/lib/db";
+import { getMeta, listConnectors, setMeta } from "@/lib/db";
 import type Database from "better-sqlite3";
+
+const SKIP_PLEX_WAIT_KEY = "skip_plex_wait";
+
+/** When on, language checks, disc remux, and rewrap run while Plex is scanning or playing. */
+export function skipPlexWait(db: Database.Database): boolean {
+  return getMeta(db, SKIP_PLEX_WAIT_KEY) === "1";
+}
+
+export function setSkipPlexWait(db: Database.Database, skip: boolean) {
+  setMeta(db, SKIP_PLEX_WAIT_KEY, skip ? "1" : "0");
+}
 
 function container(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
@@ -41,6 +52,7 @@ export function plexSessionBusy(value: unknown): boolean {
 }
 
 export async function plexIsBusy(db: Database.Database): Promise<boolean> {
+  if (skipPlexWait(db)) return false;
   const plex = listConnectors(db).find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
   if (!plex) return false;
   const headers = { Accept: "application/json", "X-Plex-Token": plex.apiKey };
@@ -57,6 +69,7 @@ export async function plexIsBusy(db: Database.Database): Promise<boolean> {
 
 /** Scanning, or anyone watching. A failed request does not count as busy. */
 export async function plexLibraryBusy(db: Database.Database): Promise<boolean> {
+  if (skipPlexWait(db)) return false;
   const plex = listConnectors(db).find((connector) => connector.id === "plex" && connector.enabled && connector.baseUrl && connector.apiKey);
   if (!plex) return false;
   const headers = { Accept: "application/json", "X-Plex-Token": plex.apiKey };

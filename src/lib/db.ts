@@ -3,11 +3,11 @@ import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { assignSidecars, readSidecarNames } from "@/lib/detect/sidecars";
+import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
-import { ensureListedSource } from "@/lib/media";
-import { displayLocalTitle, enrichmentKey } from "@/lib/online";
+import { ensureListedSource, normalizeTitle } from "@/lib/media";
+import { displayEpisodeTitle, displayLocalTitle, enrichmentKey, recognizeEpisode, type RecognizedEpisode } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
 import type {
@@ -310,12 +310,15 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_resolutions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_hdrs", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_editions", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "catalog_titles", "version_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "detect_results", "source", "TEXT");
   ensureColumn(db, "detect_results", "tag_checked_at", "TEXT");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, "enrichment", "episode_titles", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_match ON catalog_titles(match_key)`);
 
   const now = new Date().toISOString();
@@ -407,10 +410,10 @@ export function saveEnrichment(
 ) {
   db.prepare(
     `INSERT INTO enrichment (
-      match_key, kind, status, sources, overview, poster_url, original_title, local_titles, runtime_minutes,
+      match_key, kind, status, sources, overview, poster_url, original_title, local_titles, episode_titles, runtime_minutes,
       rating, content_rating, genres, imdb_id, tmdb_id, tvdb_id, message, fetched_at
     ) VALUES (
-      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @localTitles, @runtimeMinutes,
+      @matchKey, @kind, @status, @sources, @overview, @posterUrl, @originalTitle, @localTitles, @episodeTitles, @runtimeMinutes,
       @rating, @contentRating, @genres, @imdbId, @tmdbId, @tvdbId, @message, @fetchedAt
     )
     ON CONFLICT(match_key) DO UPDATE SET
@@ -421,6 +424,7 @@ export function saveEnrichment(
       poster_url = excluded.poster_url,
       original_title = excluded.original_title,
       local_titles = excluded.local_titles,
+      episode_titles = excluded.episode_titles,
       runtime_minutes = excluded.runtime_minutes,
       rating = excluded.rating,
       content_rating = excluded.content_rating,
@@ -439,6 +443,7 @@ export function saveEnrichment(
     posterUrl: meta.posterUrl,
     originalTitle: meta.originalTitle,
     localTitles: JSON.stringify(meta.localTitles ?? {}),
+    episodeTitles: JSON.stringify(meta.episodeTitles ?? {}),
     runtimeMinutes: meta.runtimeMinutes,
     rating: meta.rating,
     contentRating: meta.contentRating,
@@ -463,6 +468,7 @@ type EnrichmentRow = {
   poster_url: string | null;
   original_title: string | null;
   local_titles: string | null;
+  episode_titles: string | null;
   runtime_minutes: number | null;
   rating: number | null;
   content_rating: string | null;
@@ -473,6 +479,26 @@ type EnrichmentRow = {
   message: string | null;
   fetched_at: string;
 };
+
+function parseEpisodeTitles(raw: string | null | undefined): Record<string, Record<string, string>> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const titles: Record<string, Record<string, string>> = {};
+    for (const [code, names] of Object.entries(value)) {
+      if (!names || typeof names !== "object" || Array.isArray(names)) continue;
+      const episodeNames: Record<string, string> = {};
+      for (const [key, name] of Object.entries(names)) {
+        if (typeof name === "string" && name.trim() && /^\d+:\d+$/.test(key)) episodeNames[key] = name.trim();
+      }
+      if (Object.keys(episodeNames).length) titles[code] = episodeNames;
+    }
+    return titles;
+  } catch {
+    return {};
+  }
+}
 
 function parseLocalTitles(raw: string | null | undefined): Record<string, string> {
   if (!raw) return {};
@@ -498,6 +524,7 @@ function mapEnrichment(row: EnrichmentRow): OnlineMeta {
     posterUrl: row.poster_url,
     originalTitle: row.original_title,
     localTitles: parseLocalTitles(row.local_titles),
+    episodeTitles: parseEpisodeTitles(row.episode_titles),
     runtimeMinutes: row.runtime_minutes,
     rating: row.rating,
     contentRating: row.content_rating,
@@ -521,14 +548,18 @@ function loadEnrichment(keys: string[], db: Database.Database): Map<string, Onli
 }
 
 export function titlesForLookup(
-  input: { ids?: number[]; gaps: boolean; limit: number },
+  input: { ids?: number[]; gaps: boolean; afterId?: number; limit: number },
   db = getDb(),
 ): Array<{ id: number; kind: TitleKind; title: string; year: number | null; imdbId: string | null; tmdbId: string | null; tvdbId: string | null; matchKey: string }> {
   const params: Array<string | number> = [];
   let where = "";
+  const walkAll = input.afterId != null && !(input.ids && input.ids.length);
   if (input.ids && input.ids.length) {
     where = `WHERE id IN (${input.ids.map(() => "?").join(", ")})`;
     params.push(...input.ids);
+  } else if (walkAll) {
+    where = "WHERE id > ?";
+    params.push(input.afterId ?? 0);
   } else if (input.gaps) {
     where = `WHERE match_key IS NULL OR NOT EXISTS (
       SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key
@@ -536,11 +567,12 @@ export function titlesForLookup(
       SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND e.status = 'error'
     )`;
   }
+  const order = walkAll ? "id" : "sort_title COLLATE NOCASE";
   const rows = db
     .prepare(
       `SELECT id, kind, title, year, imdb_id, tmdb_id, tvdb_id, match_key
        FROM catalog_titles ${where}
-       ORDER BY sort_title COLLATE NOCASE
+       ORDER BY ${order}
        LIMIT ?`,
     )
     .all(...params, input.limit) as Array<{
@@ -565,6 +597,11 @@ export function titlesForLookup(
     };
     return { id: row.id, ...identity, matchKey: row.match_key || enrichmentKey(identity) };
   });
+}
+
+export function countTitlesAfter(afterId: number, db = getDb()): number {
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM catalog_titles WHERE id > ?`).get(afterId) as { count: number };
+  return row.count;
 }
 
 export function countLookupRemaining(db = getDb()): number {
@@ -752,7 +789,17 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         audioTracks: parseAudioTracks(version.audioTracks),
         subtitleTracks: parseSubtitleTracks(version.subtitleTracks),
         missing: Array.isArray(version.missing) ? version.missing.filter((gap): gap is string => typeof gap === "string") : [],
-        flags: Array.isArray(version.flags) ? version.flags.filter((flag): flag is string => flag === "sample" || flag === "short") : [],
+        flags: Array.isArray(version.flags)
+          ? version.flags.filter(
+              (flag): flag is string =>
+                flag === "sample" ||
+                flag === "short" ||
+                flag === "extra" ||
+                flag === "outtake" ||
+                flag === "comic-relief" ||
+                flag === "trailer",
+            )
+          : [],
         fileBytes: typeof version.fileBytes === "number" ? version.fileBytes : null,
         durationMinutes: typeof version.durationMinutes === "number" ? version.durationMinutes : null,
         ...(parseFileSources(version.presence) ? { presence: parseFileSources(version.presence) } : {}),
@@ -796,7 +843,8 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
     const language = typeof track.language === "string" ? track.language : null;
     const layout = typeof track.layout === "string" ? track.layout : null;
     const codec = typeof track.codec === "string" ? track.codec : null;
-    if (!language && !layout && !codec) return [];
+    const file = typeof track.file === "string" ? track.file : null;
+    if (!language && !layout && !codec && !file) return [];
     const streamIndex = optionalIndex(track.streamIndex);
     const label = typeof track.label === "string" ? track.label : null;
     return [{
@@ -805,6 +853,8 @@ export function parseAudioTracks(value: unknown): AudioTrack[] {
       codec,
       ...(streamIndex != null ? { streamIndex } : {}),
       ...(label ? { label } : {}),
+      ...(file ? { file } : {}),
+      ...(track.folderOnly === true ? { folderOnly: true } : {}),
       ...(track.omittedByPlex === true ? { omittedByPlex: true } : {}),
       ...(track.fromFile === true ? { fromFile: true } : {}),
       ...(typeof track.conflict === "string" && track.conflict ? { conflict: track.conflict } : {}),
@@ -1146,6 +1196,10 @@ function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections
   return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
 }
 
+function audio(videoPath: string | null, tracks: AudioTrack[], detections: Map<string, StoredDetection>): AudioTrack[] {
+  return overlayAudio(videoPath, withAudioSidecars(videoPath, tracks), detections);
+}
+
 function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr" | "sonarr" | null {
   if (kind === "series") return inSonarr ? "sonarr" : null;
   return inRadarr ? "radarr" : null;
@@ -1156,7 +1210,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
   const app = listedApp(row.kind, row.in_radarr === 1, row.in_sonarr === 1);
   const versions = parseVersions(row.versions_json).map((version) => ({
     ...version,
-    audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+    audioTracks: ensureListedSource(audio(version.path, version.audioTracks, detections), app),
     subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
   }));
   return {
@@ -1183,7 +1237,7 @@ function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, de
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: ensureListedSource(overlayAudio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    audioTracks: ensureListedSource(audio(path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
     subtitleTracks: ensureListedSource(subtitles(path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     posterPath: row.poster_path,
     runtimeMinutes: row.runtime_minutes,
@@ -1234,9 +1288,9 @@ function filterClause(query: LibraryQuery, language: string): { where: string; p
     const pattern = likePattern(search);
     if (language) {
       where.push(
-        "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND json_extract(e.local_titles, ?) LIKE ? ESCAPE '\\'))",
+        "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM enrichment e WHERE e.match_key = catalog_titles.match_key AND (json_extract(e.local_titles, ?) LIKE ? ESCAPE '\\' OR e.episode_titles LIKE ? ESCAPE '\\')))",
       );
-      params.push(pattern, `$.${language}`, pattern);
+      params.push(pattern, `$.${language}`, pattern, pattern);
     } else {
       where.push("title LIKE ? ESCAPE '\\'");
       params.push(pattern);
@@ -1349,13 +1403,13 @@ function libraryTitles(
     const files = versions.length
       ? versions.map((version) => ({
           path: version.path,
-          audioTracks: overlayAudio(version.path, version.audioTracks, detections),
+          audioTracks: audio(version.path, version.audioTracks, detections),
           subtitleTracks: subtitles(version.path, version.subtitleTracks, detections),
         }))
       : [
           {
             path: episode.path,
-            audioTracks: overlayAudio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections),
+            audioTracks: audio(episode.path, parseAudioTracks(parseJson(episode.audio_tracks)), detections),
             subtitleTracks: subtitles(episode.path, parseSubtitleTracks(parseJson(episode.subtitle_tracks)), detections),
           },
         ];
@@ -1408,6 +1462,22 @@ type EpisodeRow = {
 
 export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[] {
   const detections = detectionMap(db);
+  const language = titleLanguage(getMeta(db, "title_language"));
+  const series = db.prepare(`SELECT match_key, kind, title, year, imdb_id, tmdb_id, tvdb_id FROM catalog_titles WHERE id = ?`).get(catalogId) as
+    | { match_key: string | null; kind: string; title: string; year: number | null; imdb_id: string | null; tmdb_id: string | null; tvdb_id: string | null }
+    | undefined;
+  const matchKey = series
+    ? series.match_key ||
+      enrichmentKey({
+        kind: series.kind === "series" ? "series" : "movie",
+        title: series.title,
+        year: series.year,
+        imdbId: series.imdb_id,
+        tmdbId: series.tmdb_id,
+        tvdbId: series.tvdb_id,
+      })
+    : "";
+  const episodeTitles = matchKey ? loadEnrichment([matchKey], db).get(matchKey)?.episodeTitles : undefined;
   const rows = db
     .prepare(
       `SELECT * FROM catalog_episodes
@@ -1415,13 +1485,29 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
        ORDER BY COALESCE(season, 9999), COALESCE(episode, 9999), title`,
     )
     .all(catalogId) as EpisodeRow[];
+  const identities: RecognizedEpisode[] = rows.map((row) => ({ season: row.season, episode: row.episode, title: row.title }));
   return rows.map((row) => {
     const app = row.in_sonarr === 1 ? "sonarr" : null;
+    const versions = parseVersions(row.versions_json);
+    const sources = [row.path, row.title, ...versions.flatMap((version) => [version.path, version.name])].filter(
+      (value): value is string => Boolean(value),
+    );
+    let recognized: RecognizedEpisode | null = null;
+    for (const source of sources) {
+      const match = recognizeEpisode(source, episodeTitles, language, identities);
+      if (!match) continue;
+      const sameEpisode = match.season === row.season && match.episode === row.episode && normalizeTitle(match.title) === normalizeTitle(row.title);
+      if (sameEpisode) continue;
+      recognized = match;
+      break;
+    }
     return {
     id: row.id,
     season: row.season,
     episode: row.episode,
     title: row.title,
+    localTitle: displayEpisodeTitle(row.title, episodeTitles, language, row.season, row.episode),
+    recognized,
     hasFile: row.has_file === 1,
     wanted: row.wanted === 1,
     container: row.container,
@@ -1434,13 +1520,13 @@ export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[]
     audioLanguages: parseStringArray(row.audio_languages),
     subtitleLanguages: parseStringArray(row.subtitle_languages),
     subtitleWanted: parseStringArray(row.subtitle_wanted),
-    audioTracks: ensureListedSource(overlayAudio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
+    audioTracks: ensureListedSource(audio(row.path, parseAudioTracks(parseJson(row.audio_tracks)), detections), app),
     subtitleTracks: ensureListedSource(subtitles(row.path, parseSubtitleTracks(parseJson(row.subtitle_tracks)), detections), app),
     runtimeMinutes: row.runtime_minutes,
     detail: parseDetail(row.detail_json),
-    versions: parseVersions(row.versions_json).map((version) => ({
+    versions: versions.map((version) => ({
       ...version,
-      audioTracks: ensureListedSource(overlayAudio(version.path, version.audioTracks, detections), app),
+      audioTracks: ensureListedSource(audio(version.path, version.audioTracks, detections), app),
       subtitleTracks: ensureListedSource(subtitles(version.path, version.subtitleTracks, detections), app),
     })),
     inPlex: row.in_plex === 1,

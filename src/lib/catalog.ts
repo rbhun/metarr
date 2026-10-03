@@ -17,6 +17,8 @@ import {
   reconcileAudio,
   reconcileSubtitles,
   tagFileOrigin,
+  copyGroupId,
+  splitIdentity,
   resolutionRank,
   buildDetail,
   summarizeFiles,
@@ -314,6 +316,11 @@ function withTitleFlag(title: string, flags: string): string {
 
 function versionColumns(files: MediaFile[]) {
   const versions = versionsFrom(files);
+  const featureVersions = versions.filter((version) => !version.flags.some((flag) => flag === "extra" || flag === "outtake" || flag === "comic-relief" || flag === "trailer"));
+  const featurePaths = featureVersions.map((version) => version.path ?? version.name);
+  const split = featureVersions.some((version) => splitIdentity(version.path ?? version.name));
+  const flags = [...new Set(versions.flatMap((version) => version.flags))];
+  if (split) flags.push("split");
   return {
     versions,
     versionsJson: JSON.stringify(versions),
@@ -322,7 +329,10 @@ function versionColumns(files: MediaFile[]) {
       .filter((resolution): resolution is string => Boolean(resolution))
       .join(","),
     versionHdrs: versions.map((version) => version.hdr).join(","),
-    versionFlags: [...new Set(versions.flatMap((version) => version.flags))].join(","),
+    versionFlags: flags.join(","),
+    versionEditions: [...new Set(featureVersions.map((version) => version.edition).filter((edition): edition is string => Boolean(edition)))].join(","),
+    // Bonus files do not count toward Duplicate / None. Split parts are one copy, not two.
+    versionCount: new Set(featurePaths.map((filePath) => copyGroupId(filePath, featurePaths))).size,
   };
 }
 
@@ -337,15 +347,18 @@ function bestResolution(values: Array<string | null>): string | null {
 const HOVER_KEY = "source_hover";
 let hoverReady = false;
 
-/** Rebuild stored titles once so language and file tooltips exist without another sync. */
+const VERSION_FILTER_KEY = "version_filter_v3";
+
+/** Rebuild stored titles once so language tooltips and version filter columns exist without another sync. */
 export function ensureHoverSources(db: Database.Database) {
-  if (hoverReady) return;
-  if (getMeta(db, HOVER_KEY) === "1") {
+  if (hoverReady && getMeta(db, VERSION_FILTER_KEY) === "1") return;
+  if (getMeta(db, HOVER_KEY) === "1" && getMeta(db, VERSION_FILTER_KEY) === "1") {
     hoverReady = true;
     return;
   }
   rebuildCatalog(db);
   setMeta(db, HOVER_KEY, "1");
+  setMeta(db, VERSION_FILTER_KEY, "1");
   hoverReady = true;
 }
 
@@ -389,14 +402,14 @@ export function rebuildCatalog(db: Database.Database) {
       kind, title, sort_title, year, imdb_id, tmdb_id, tvdb_id,
       in_plex, in_radarr, in_sonarr, in_bazarr, has_file, container, path,
       playable_label, playable_note, quality_name, resolution, hdr, is_3d,
-      audio_languages, subtitle_languages, subtitle_wanted, audio_tracks, subtitle_tracks, poster_path, runtime_minutes, detail_json, versions_json, version_resolutions, version_hdrs, version_flags,
+      audio_languages, subtitle_languages, subtitle_wanted, audio_tracks, subtitle_tracks, poster_path, runtime_minutes, detail_json, versions_json, version_resolutions, version_hdrs, version_flags, version_editions, version_count,
       rating, content_rating, bitrate_kbps, genres,
       missing_reason, episode_count, episode_file_count, missing_episode_count, match_key
     ) VALUES (
       @kind, @title, @sortTitle, @year, @imdbId, @tmdbId, @tvdbId,
       @inPlex, @inRadarr, @inSonarr, @inBazarr, @hasFile, @container, @path,
       @playableLabel, @playableNote, @qualityName, @resolution, @hdr, @is3d,
-      @audioLanguages, @subtitleLanguages, @subtitleWanted, @audioTracks, @subtitleTracks, @posterPath, @runtimeMinutes, @detailJson, @versionsJson, @versionResolutions, @versionHdrs, @versionFlags,
+      @audioLanguages, @subtitleLanguages, @subtitleWanted, @audioTracks, @subtitleTracks, @posterPath, @runtimeMinutes, @detailJson, @versionsJson, @versionResolutions, @versionHdrs, @versionFlags, @versionEditions, @versionCount,
       @rating, @contentRating, @bitrateKbps, @genres,
       @missingReason, @episodeCount, @episodeFileCount, @missingEpisodeCount, @matchKey
     )
@@ -473,6 +486,8 @@ export function rebuildCatalog(db: Database.Database) {
         versionResolutions: versions.versionResolutions,
         versionHdrs: versions.versionHdrs,
         versionFlags: withTitleFlag(title, versions.versionFlags),
+        versionEditions: versions.versionEditions,
+        versionCount: versions.versionCount,
         rating: firstRating(group),
         contentRating: firstContentRating(group),
         bitrateKbps: summary.bitrateKbps,
@@ -572,6 +587,8 @@ export function rebuildCatalog(db: Database.Database) {
           title,
           [...new Set(episodes.flatMap((episode) => episode.versions.flatMap((version) => version.flags)))].join(","),
         ),
+        versionEditions: "",
+        versionCount: 0,
         runtimeMinutes:
           typicalMinutes(group.records.map((record) => record.runtimeMinutes)) ??
           typicalMinutes(episodes.map((episode) => episode.runtimeMinutes)),

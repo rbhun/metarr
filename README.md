@@ -1,8 +1,35 @@
 # Metarr
 
-Local metadata overview for Plex, Radarr, Sonarr, and Bazarr. Metarr downloads library records only — titles, files, quality, languages, ratings, and what is missing — and stores them in SQLite on this machine. Sync does not copy video or subtitle files. The disc remux queue is separate: it writes new MKV files beside a disc and leaves the disc in place.
+Metarr is a local library for Plex, Radarr, Sonarr, and Bazarr. It downloads titles, files, quality, languages, ratings, and what is missing, and stores them in SQLite on this machine. Sync does not copy video or subtitle files. There is no login. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
 
-There is no login on Metarr itself. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
+New MKV files are written only by disc remux and by rewrap, beside the source. An existing file is never overwritten, and a disc is left in place.
+
+## Sources
+
+- **Plex.** Download the Plex metadata, and push back scan requests
+- **Radarr, Sonarr, Bazarr.** Download metadata from your *arr stack, and push back scan requests
+- **File scan.** Scan your NAS folders and files, and compare them to the other sources
+- **IMDb, TMDb, OMDb.** Get extra data from online sources
+
+## Features
+
+- **Unified library.** Movies and series are matched across the connected apps by IMDb, TMDB, TVDB, and GUID, then by title and year. A movie Radarr wants and a series Sonarr has not finished stay in the list when Plex does not have them. It helps to see which service has mismatched or missing files. Music and photo libraries are skipped.
+- **Library view.** Each title shows where it lives, rating, genres, video, audio languages, and subtitles, including Bazarr’s missing list. The detail panel adds container, resolution, quality, 3D, HDR, runtime, poster, and overview. A secondary title in another language can sit under the Plex title after a lookup.
+- **Editions, extras, samples.** The file or folder name labels a cut (Director's Cut, Extended, Theatrical, Restored, etc). A split file shows as a part, such as 1 of 2. Also allows to find duplicates, samples, etc.
+- **Sidecar files.** Subtitle files beside a video are compared with what Plex lists. A file Plex does not list is its own row, marked not in Plex, with the language from the name when it is tagged. A Plex subtitle with no file on disk is marked Plex only, and the note says why. A separate audio file such as `.ac3` is listed even though Plex ignores it.
+- **Filters.** Narrow the list by movie or series, title, any language, audio, subtitles, genre, content rating, score, bitrate, year, length in minutes, resolution, HDR, file type, edition or duplicate versions, missing file, not in Plex, disc, 3D, and sample or short clips.
+- **Selected rows.** Copy titles and paths, push those folders to Plex for a rescan, look the titles up, detect languages now or queue them, and queue a disc remux. Marks stay in this browser only.
+- **Rescan one title.** The detail panel can re-read that title’s files on disk and from Plex or the *arr apps, including new files in the same folder, without walking the whole library.
+- **Language detection.** Unknown audio is sampled with Whisper, near the start and in the middle. Unknown subtitles are read as text, or as pictures when they are PGS, VobSub, or a binary `.sub`. A recognized language is written into MKV and WebM, copied onto MP4 and MOV, or renamed onto a sidecar such as `Film.hun.srt`. A commentary track gets the commentary flag. Plex, Radarr, Sonarr, and Bazarr are then asked to re-read the file. AVI, loose M2TS, and TS cannot store the tag, so the language is kept until a rewrap.
+- **Disc remux.** ISO, `VIDEO_TS`, and `BDMV` discs are remuxed with MakeMKV into an MKV in the disc’s folder. Every audio language, commentary, and subtitle is kept, in disc order, without re-encoding. The 3D video layer is left out. Optional extras save the other titles in that same folder.
+- **Rewrap to MKV.** An AVI, or a loose M2TS or TS file, is copied to an MKV beside it with the languages Metarr recognized. PGS subtitles are kept. Blu-ray PCM audio is stored as FLAC, because Matroska cannot hold it as it is.
+- **Merge multi-part files.** Auto recognize multi-part movies in a title and rewrap into a single one.
+- **Queues.** Language checks, disc remux, and rewrap each have their own hours. One job runs at a time, at idle priority, and the next waits while Plex is scanning or someone is playing. Tasks shows progress, the waiting reason, and failures. Redo retries a failed job.
+- **Online metadata.** TMDB and OMDb can fill a poster, overview, runtime, and any rating or genres that are still blank. Lookups stay in the local database and are not written back.
+- **Folders and a demo.** A File Browser address can open the folder that contains a file. Load demo library fills the table with sample titles and does not contact a server. A later successful sync replaces the sample.
+- **Update from the browser.** After the first deploy, Settings → Update Metarr asks the host to pull and rebuild. The container never gets Docker access or root.
+
+
 
 ## Version
 
@@ -33,19 +60,21 @@ The app listens on port **4317**. SQLite is stored in the `metarr-data` volume. 
 
 Settings live in `/opt/metarr/.env`; the first deploy copies it from `metarr.env.example`:
 
-| Setting | Default | Why |
-| --- | --- | --- |
-| `METARR_UID` | `1500` | Dedicated media user. Not 1000, which maps to a restricted account on the NFS server. |
-| `METARR_GID` | `1002` | Group `media`, which gives write access to `/mnt/media`. |
-| `UMASK` | `002` | New files stay group-writable, so Radarr and Sonarr can manage them. |
-| `METARR_DRY_RUN` | `0` | `1` makes remux and file tagging report what they would change without writing to media. |
+
+| Setting          | Default                   | Why                                                                                                                            |
+| ---------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `METARR_UID`     | `1500`                    | Dedicated media user. Not 1000, which maps to a restricted account on the NFS server.                                          |
+| `METARR_GID`     | `1002`                    | Group `media`, which gives write access to `/mnt/media`.                                                                       |
+| `UMASK`          | `002`                     | New files stay group-writable, so Radarr and Sonarr can manage them.                                                           |
+| `METARR_DRY_RUN` | `0`                       | `1` makes remux and file tagging report what they would change without writing to media.                                       |
 | `METARR_SCRATCH` | `/mnt/media/.metarr-work` | Work folder for remux and MP4 retagging, on the NAS and outside every library folder. A Blu-ray remux needs up to about 50 GB. |
+
 
 These apply to the whole app. The language detection tagger (mkvpropedit, MP4 retag, subtitle renames) writes as the same user, group and umask as remux, and follows the same dry-run switch.
 
 How Metarr treats the library:
 
-- **Scratch is on the NAS, outside the libraries.** MakeMKV and MP4 retagging write into `METARR_SCRATCH`. Metarr only removes its own `remux-work/job-N` and `retag-work/job-*` folders there.
+- **Scratch is on the NAS, outside the libraries.** MakeMKV and MP4 retagging write into `METARR_SCRATCH`. Metarr only removes its own `remux-work/job-N` and `retag-work/job-`* folders there.
 - **Files are delivered in two steps.** A finished file is moved to `<target>.partial` in the destination folder (a rename on the same share, a copy otherwise), flushed, then renamed to its final name, so Plex and the *arr apps never see half-written files. An existing file is never overwritten, and the disc it came from is left in place.
 - **Plex keeps priority.** Tools run under `ionice -c3` and `nice -n 19`, the container has a low CPU weight, and jobs run one at a time.
 - **Every track is kept.** Remux keeps every audio and subtitle track in disc order, including Hungarian, with their language tags. The only thing dropped is the 3D video layer.
@@ -65,12 +94,14 @@ After that first run, **Settings → Update Metarr** does the same from the brow
 
 Open **Settings** from the sidebar (or go to `/settings`).
 
-| App | Auth |
-| --- | --- |
-| Plex | Base URL + `X-Plex-Token` |
+
+| App    | Auth                                 |
+| ------ | ------------------------------------ |
+| Plex   | Base URL + `X-Plex-Token`            |
 | Radarr | Base URL + API key (`X-Api-Key`, v3) |
 | Sonarr | Base URL + API key (`X-Api-Key`, v3) |
-| Bazarr | Base URL + API key (`X-Api-Key`) |
+| Bazarr | Base URL + API key (`X-Api-Key`)     |
+
 
 Turn on **Include in sync** for each server you want to read, then use **Sync now** under **Schedule**. That block can also resync the library on an interval, and it holds the hours for language detection and disc remux. Progress and per-app errors show in the sync dialog. If one app fails, its previous successful rows stay. Music and photo libraries in Plex are skipped.
 
@@ -78,9 +109,9 @@ Turn on **Include in sync** for each server you want to read, then use **Sync no
 
 ## What the table shows
 
-One row per movie or series. Match across apps uses IMDb, TMDB, TVDB, and GUID first, then title + year. Columns cover container, Plex, each connected \*arr app, playable state (video file, disc image, or missing file), resolution, Radarr/Sonarr quality, 3D, HDR, audio languages, subtitles (including Bazarr’s missing list), rating, and genres. Ratings and genres come from the apps when they already stored them. TMDB and OMDb can fill a poster, overview, runtime, and any rating or genres that are still blank. Those lookups stay in the local database and are not written back. Disc images (`iso`, `img`, or a path containing `VIDEO_TS` / `BDMV`) are marked not playable. Missing Radarr movies and incomplete Sonarr series stay in the list even when Plex does not have them.
+One row per movie or series. Match across apps uses IMDb, TMDB, TVDB, and GUID first, then title + year. Columns cover container, Plex, each connected arr app, playable state (video file, disc image, or missing file), resolution, Radarr/Sonarr quality, 3D, HDR, audio languages, subtitles (including Bazarr’s missing list), rating, and genres. Ratings and genres come from the apps when they already stored them. TMDB and OMDb can fill a poster, overview, runtime, and any rating or genres that are still blank. Those lookups stay in the local database and are not written back. Disc images (`iso`, `img`, or a path containing `VIDEO_TS` / `BDMV`) are marked not playable. Missing Radarr movies and incomplete Sonarr series stay in the list even when Plex does not have them.
 
-Filters: movies, series, missing, not in Plex, disc / not playable, missing English subtitles, 3D only, Hungarian, and title search.
+Filters are listed under Features. Presets cover missing, not in Plex, disc / not playable, no English subtitles, 3D only, duplicate versions, Hungarian, and sample or short.
 
 Missing English subtitles matches a movie file whose subtitle list does not include English, a series episode file in the same state, or any row where Bazarr wants English. Titles with no file stay out of that filter unless Bazarr lists English as wanted. Hungarian matches audio, existing subtitles, or a Bazarr wanted language on the title or an episode. 3D only uses the 3D flag already stored from media info or the title.
 

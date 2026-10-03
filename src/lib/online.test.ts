@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
-import { insertSourceRecords, migrate, queryLibrary, saveEnrichment, setMeta } from "@/lib/db";
+import { countTitlesAfter, insertSourceRecords, migrate, queryEpisodes, queryLibrary, saveEnrichment, setMeta, titlesForLookup } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import { lookupOnline } from "@/lib/online-lookup";
-import { displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, mergeHits, type SourceHit } from "@/lib/online";
+import { displayEpisodeTitle, displayGenres, displayLocalTitle, displayRating, enrichmentKey, localTitlesFromTranslations, matchLocalEpisode, mergeHits, recognizeEpisode, type SourceHit } from "@/lib/online";
 
 const godfather = {
   kind: "movie" as const,
@@ -22,6 +22,7 @@ function hit(partial: Partial<SourceHit> & Pick<SourceHit, "source">): SourceHit
     posterUrl: null,
     originalTitle: null,
     localTitles: {},
+    episodeTitles: {},
     runtimeMinutes: null,
     rating: null,
     contentRating: null,
@@ -77,6 +78,13 @@ test("a selected language keeps a different local title", () => {
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "hu"), "A keresztapa");
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, "en"), null);
   assert.equal(displayLocalTitle("The Godfather", { ...online, fetchedAt: "" }, ""), null);
+  const alreadyLocal = mergeHits([
+    hit({ source: "tmdb", originalTitle: "TaleSpin", localTitles: { hu: "Balu kapitány kalandjai" }, overview: "A bear flies." }),
+  ]);
+  assert.equal(
+    displayLocalTitle("Balu kapitány kalandjai", { ...alreadyLocal, fetchedAt: "" }, "hu"),
+    "TaleSpin",
+  );
 });
 
 test("display helpers fill only blank library fields", () => {
@@ -144,6 +152,7 @@ test("library rows attach saved online metadata", () => {
       posterUrl: "https://image.tmdb.org/poster.jpg",
       originalTitle: "The Godfather",
       localTitles: { hu: "A keresztapa" },
+      episodeTitles: {},
       runtimeMinutes: 175,
       rating: 8.7,
       contentRating: null,
@@ -175,4 +184,192 @@ test("library rows attach saved online metadata", () => {
   assert.equal(row?.online?.runtimeMinutes, 175);
   const partTwo = library.titles.find((title) => title.title === "The Godfather Part II");
   assert.equal(partTwo?.online, null);
+});
+
+test("a blank translation name is filled from the language-specific title", async () => {
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("language=hu")) {
+      return Response.json({ id: 2720, name: "Balu kapitány kalandjai", original_name: "TaleSpin" });
+    }
+    if (url.includes("/tv/2720")) {
+      return Response.json({
+        id: 2720,
+        name: "TaleSpin",
+        original_name: "TaleSpin",
+        translations: { translations: [{ iso_639_1: "hu", data: { name: "" } }] },
+        seasons: [],
+      });
+    }
+    return Response.json({ results: [] });
+  };
+  const result = await lookupOnline(
+    { kind: "series", title: "TaleSpin", year: 1990, imdbId: null, tmdbId: "2720", tvdbId: null },
+    { tmdb: "tmdb-key" },
+    fetchImpl,
+    "hu",
+  );
+  assert.equal(result.localTitles.hu, "Balu kapitány kalandjai");
+});
+
+test("a series lookup keeps episode titles in the chosen language", async () => {
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/tv/1396/season/1") && url.includes("language=hu")) {
+      return Response.json({
+        episodes: [
+          { season_number: 1, episode_number: 1, name: "A célpont" },
+          { season_number: 1, episode_number: 2, name: "The Detail" },
+        ],
+      });
+    }
+    if (url.includes("/tv/1396")) {
+      return Response.json({
+        id: 1396,
+        name: "The Wire",
+        original_name: "The Wire",
+        overview: "A Baltimore crime series.",
+        seasons: [{ season_number: 1, episode_count: 13 }],
+        translations: { translations: [{ iso_639_1: "hu", data: { name: "A drót" } }] },
+      });
+    }
+    return Response.json({ results: [] });
+  };
+  const result = await lookupOnline(
+    { kind: "series", title: "The Wire", year: 2002, imdbId: null, tmdbId: "1396", tvdbId: null },
+    { tmdb: "tmdb-key" },
+    fetchImpl,
+    "hu",
+  );
+  assert.equal(result.localTitles.hu, "A drót");
+  assert.equal(result.episodeTitles.hu?.["1:1"], "A célpont");
+  assert.equal(displayEpisodeTitle("The Target", result.episodeTitles, "hu", 1, 1), "A célpont");
+  assert.equal(displayEpisodeTitle("The Detail", result.episodeTitles, "hu", 1, 2), null);
+});
+
+test("episode rows show the saved local title", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const key = enrichmentKey({
+    kind: "series",
+    title: "The Wire",
+    year: 2002,
+    imdbId: "tt0306414",
+    tmdbId: null,
+    tvdbId: null,
+  });
+  saveEnrichment(
+    key,
+    "series",
+    {
+      status: "found",
+      sources: ["tmdb"],
+      overview: null,
+      posterUrl: null,
+      originalTitle: "The Wire",
+      localTitles: { hu: "A drót" },
+      episodeTitles: { hu: { "1:1": "A célpont" } },
+      runtimeMinutes: null,
+      rating: null,
+      contentRating: null,
+      genres: [],
+      imdbId: "tt0306414",
+      tmdbId: "1396",
+      tvdbId: null,
+      message: null,
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+    },
+    db,
+  );
+  setMeta(db, "title_language", "hu");
+  const series = queryLibrary({ kind: "series", rules: [], q: "Wire", offset: 0, limit: 5 }, db).titles[0];
+  assert.ok(series);
+  const episodes = queryEpisodes(series.id, db);
+  assert.equal(episodes.find((episode) => episode.episode === 1)?.localTitle, "A célpont");
+  const found = queryLibrary({ kind: "all", rules: [], q: "célpont", offset: 0, limit: 5 }, db);
+  assert.equal(found.titles.some((title) => title.title === "The Wire"), true);
+});
+
+test("a full lookup walks every title, including ones already stored", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const first = titlesForLookup({ gaps: false, afterId: 0, limit: 1 }, db)[0];
+  assert.ok(first);
+  saveEnrichment(
+    first.matchKey,
+    first.kind,
+    {
+      status: "found",
+      sources: ["tmdb"],
+      overview: null,
+      posterUrl: null,
+      originalTitle: first.title,
+      localTitles: {},
+      episodeTitles: {},
+      runtimeMinutes: null,
+      rating: null,
+      contentRating: null,
+      genres: [],
+      imdbId: first.imdbId,
+      tmdbId: first.tmdbId,
+      tvdbId: first.tvdbId,
+      message: null,
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+    },
+    db,
+  );
+  const gaps = titlesForLookup({ gaps: true, limit: 50 }, db);
+  assert.equal(gaps.some((title) => title.id === first.id), false);
+  const seen: number[] = [];
+  let after = 0;
+  for (let step = 0; step < 20; step += 1) {
+    const batch = titlesForLookup({ gaps: false, afterId: after, limit: 2 }, db);
+    if (batch.length === 0) break;
+    for (const title of batch) seen.push(title.id);
+    after = batch[batch.length - 1].id;
+    assert.equal(countTitlesAfter(after, db), titlesForLookup({ gaps: false, afterId: after, limit: 50 }, db).length);
+  }
+  assert.equal(seen.includes(first.id), true);
+  assert.equal(new Set(seen).size, seen.length);
+  assert.equal(titlesForLookup({ gaps: false, afterId: after, limit: 10 }, db).length, 0);
+});
+
+test("a file named in the local language matches the Sonarr episode", () => {
+  const titles = {
+    hu: {
+      "1:1": "A villámkő titka (1)",
+      "1:4": "A villámkő titka (4)",
+      "1:7": "Amit ma megtehetsz",
+    },
+    en: {
+      "1:4": "Plunder & Lightning (4)",
+      "1:7": "Time Waits for No Bear",
+    },
+  };
+  const episodes = [
+    { season: 1, episode: 4, title: "Plunder & Lightning (4)" },
+    { season: 1, episode: 14, title: "Time Waits for No Bear" },
+  ];
+  assert.equal(matchLocalEpisode("/tv/TaleSpin/4.-a villámkő titka 4.avi", titles.hu), "1:4");
+  assert.equal(matchLocalEpisode("/tv/TaleSpin/TaleSpin - S01E07.avi", titles.hu), null);
+  assert.deepEqual(recognizeEpisode("4.-a villámkő titka 4.avi", titles, "hu", episodes), {
+    season: 1,
+    episode: 4,
+    title: "Plunder & Lightning (4)",
+  });
+  assert.deepEqual(recognizeEpisode("/dvd/12 - Amit ma megtehetsz.avi", titles, "hu", episodes), {
+    season: 1,
+    episode: 14,
+    title: "Time Waits for No Bear",
+  });
+  assert.deepEqual(
+    recognizeEpisode("Amit ma megtehetsz.avi", { hu: titles.hu }, "hu", [
+      { season: 1, episode: 7, title: "Time Waits for No Bear" },
+    ]),
+    { season: 1, episode: 7, title: "Time Waits for No Bear" },
+  );
 });
