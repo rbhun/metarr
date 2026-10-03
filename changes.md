@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.154
+
+- Show how many titles match the current library filter next to the totals.
+
 ## 0.0.153
 
 - Read MakeMKV's whole title list. Metarr kept only the last 200 KB of MakeMKV's output, so on discs with a hundred titles the first titles, usually the film's playlists, were cut off before parsing; Fight Club showed 20 of 107 titles and ripped a clip. The MakeMKV log page now shows up to 8 MB per section.
