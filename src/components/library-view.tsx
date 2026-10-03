@@ -8,6 +8,7 @@ import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { toastRemux } from "@/components/remux-tasks";
 import { RemuxStatus } from "@/components/remux-status";
+import { rewrapNow } from "@/components/rewrap-actions";
 import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
 import { useShell } from "@/components/app-shell";
@@ -542,6 +543,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   }
 
   async function detectSelected(mode: "now" | "queue") {
+    const { titles, episodes } = selectedCatalog();
+    try {
+      toastDetection(await enqueueDetection(mode, titles, episodes));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
+    }
+  }
+
+  function selectedCatalog() {
     const titles: number[] = [];
     const episodes: number[] = [];
     for (const row of selected.values()) {
@@ -550,26 +560,24 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       if (title) titles.push(Number(title[1]));
       if (episode) episodes.push(Number(episode[1]));
     }
-    try {
-      toastDetection(await enqueueDetection(mode, titles, episodes));
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
-    }
+    return { titles, episodes };
   }
 
   async function remuxSelected() {
-    const titles: number[] = [];
-    const episodeIds: number[] = [];
-    for (const row of selected.values()) {
-      const title = row.key.match(/^title:(\d+)$/);
-      const episode = row.key.match(/^episode:(\d+)$/);
-      if (title) titles.push(Number(title[1]));
-      if (episode) episodeIds.push(Number(episode[1]));
-    }
+    const { titles, episodes } = selectedCatalog();
     try {
-      toastRemux(await enqueueRemux(titles, episodeIds, remuxExtras));
+      toastRemux(await enqueueRemux(titles, episodes, remuxExtras));
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue the disc remux.");
+    }
+  }
+
+  async function rewrapSelected() {
+    const { titles, episodes } = selectedCatalog();
+    try {
+      toastRemux(await rewrapNow(titles, episodes), "rewrap");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
     }
   }
 
@@ -714,6 +722,14 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             </label>
             <Button size="sm" variant="outline" onClick={() => void remuxSelected()}>
               Queue disc remux
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void rewrapSelected()}
+              title="Copy selected AVI and M2TS files into an MKV beside them now, without re-encoding"
+            >
+              Rewrap to MKV
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear

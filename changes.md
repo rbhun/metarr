@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.160
+
+- Add Rewrap to MKV on the library selection bar so several AVI or M2TS titles can be copied into MKVs without opening each one.
+
 ## 0.0.159
 
 - Beta version merge: find titles with two similar-length copies that carry different audio, compare frames, and manually combine them into one MKV that keeps the better video plus every audio and subtitle track. The demo library includes Blade Runner 2049 as a sample pair.

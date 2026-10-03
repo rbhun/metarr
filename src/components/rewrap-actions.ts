@@ -31,7 +31,11 @@ export async function enqueueRewrapPaths(paths: Array<{ path: string; label?: st
   return describe(await postRewrap({ paths, immediate }), immediate);
 }
 
+export async function enqueueRewrap(titles: number[], episodes: number[], immediate = false): Promise<string> {
+  return describe(await postRewrap({ titles, episodes, immediate }), immediate);
+}
+
 /** Starts now instead of waiting for the MKV rewrap hours. */
 export async function rewrapNow(titles: number[], episodes: number[]): Promise<string> {
-  return describe(await postRewrap({ titles, episodes, immediate: true }), true);
+  return enqueueRewrap(titles, episodes, true);
 }

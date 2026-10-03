@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { migrate } from "@/lib/db";
-import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
+import { rebuildCatalog } from "@/lib/catalog";
+import { insertSourceRecords, migrate } from "@/lib/db";
+import { demoRecords } from "@/lib/demo";
+import { avisFromFile, bundleRewraps, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
 import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, type Probe } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
@@ -110,6 +112,25 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.deepEqual([...finishedRewrapPaths(db)], ["/m/Film.avi"]);
   assert.equal(retryFailedRewrap(db, old!.id), "retried");
   assert.equal(rewrapTotals(db).pending, 1);
+  db.close();
+});
+
+test("a library selection queues every AVI on those titles and skips titles that already have an MKV", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const rows = db.prepare(`SELECT id, title FROM catalog_titles WHERE title IN ('Lawrence of Arabia', 'The Godfather')`).all() as Array<{
+    id: number;
+    title: string;
+  }>;
+  const lawrence = rows.find((row) => row.title === "Lawrence of Arabia");
+  const godfather = rows.find((row) => row.title === "The Godfather");
+  assert.ok(lawrence);
+  assert.ok(godfather);
+  const items = rewrapItemsForSelection(db, [lawrence.id, godfather.id], []);
+  assert.equal(items.length, 1);
+  assert.match(items[0]?.path ?? "", /Lawrence of Arabia.*CD1\.avi$/);
   db.close();
 });
 
