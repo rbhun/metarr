@@ -60,6 +60,7 @@ export function TitleDetail({
   const [arrBusy, setArrBusy] = useState<"open" | "search" | "plex" | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
   const [rescanBusy, setRescanBusy] = useState(false);
+  const [renameBusy, setRenameBusy] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const router = useRouter();
   async function detectNow() {
@@ -90,6 +91,26 @@ export function TitleDetail({
       toast.error(caught instanceof Error ? caught.message : "The rescan failed.");
     } finally {
       setRescanBusy(false);
+    }
+  }
+  async function renameForSonarr() {
+    if (!title) return;
+    if (!window.confirm("Rename files whose secondary-language title matches an episode to Show - S01E07 - English title, then ask Sonarr to rescan and search for episodes that are still missing?")) return;
+    setRenameBusy(true);
+    try {
+      const response = await fetch(`/api/library/${title.id}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
+      });
+      const body = (await response.json()) as { message?: string; error?: string; catalogId?: number | null };
+      if (!response.ok) throw new Error(body.error || "The rename failed.");
+      toast.success(body.message || "Files renamed.");
+      onRescanned?.(body.catalogId ?? title.id);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "The rename failed.");
+    } finally {
+      setRenameBusy(false);
     }
   }
   const rating = title ? displayRating(title.rating, title.online) : { value: null, source: null };
@@ -235,6 +256,18 @@ export function TitleDetail({
                 >
                   {rescanBusy ? "Scanning…" : "Rescan files"}
                 </Button>
+                {title.kind === "series" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    disabled={renameBusy}
+                    onClick={() => void renameForSonarr()}
+                    title="Rename a file that contains a secondary-language episode title to Show - S01E07 - English title, then ask Sonarr to rescan"
+                  >
+                    {renameBusy ? "Renaming…" : "Rename for Sonarr"}
+                  </Button>
+                ) : null}
                 {canConvert ? (
                   <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void convertDisc()} title="Remux the disc to MKV now, without waiting for the overnight window">
                     {convertBusy ? "Starting…" : "Convert"}
