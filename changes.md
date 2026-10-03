@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.162
+
+- Do not invent movie titles from series Features or Extras folders, so Top Gear featurettes and Two and a Half Men extras stay off the library as separate titles.
+
 ## 0.0.161
 
 - Add Remove on waiting and failed Tasks rows so one queued or failed job can be dropped without clearing the whole list.

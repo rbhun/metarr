@@ -138,6 +138,11 @@ test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("/tv/TaleSpin/Season 2/2/S01E14 Stormy Weather.avi"), null);
   assert.equal(multiPartLabel("/tv/TaleSpin/Season 1/13/The Idol Rich.avi"), null);
   assert.equal(multiPartLabel("/movies/Foo/Movie (1/2).mkv"), "1 of 2");
+  assert.equal(
+    multiPartLabel("/mnt/media/TV/Two and a Half Men/Extras/Two and a Half Men Extra 02 - Jake's A Regular Kid.mp4"),
+    null,
+  );
+  assert.equal(splitIdentity("/mnt/media/TV/Two and a Half Men/Extras/Two and a Half Men Extra 02 - Jake's A Regular Kid.mp4"), null);
 
   const cd1 = "/movies/Foo/Foo CD1.avi";
   const cd2 = "/movies/Foo/Foo CD2.avi";
@@ -185,6 +190,8 @@ test("extras, featurettes, outtakes, and comic relief are labeled from the path"
   assert.equal(bonusFlag("/movies/Film/Extras/Interview.mkv"), "extra");
   assert.equal(bonusFlag("/movies/Film/Features/Bonus Clip.mkv"), "extra");
   assert.equal(bonusFlag("/movies/Film/Special Features/Gallery.mkv"), "extra");
+  assert.equal(bonusFlag("/mnt/media/TV/Top Gear/720p/Features/Apocalypse [2010].mkv"), "extra");
+  assert.equal(bonusFlag("/mnt/media/TV/Two and a Half Men/Extras/Two and a Half Men Extra 02 - Jake's A Regular Kid.mp4"), "extra");
   assert.equal(bonusFlag("/movies/Film/Outtakes/Bloopers.mkv"), "outtake");
   assert.equal(bonusFlag("/movies/Film/Film-comic-relief.mkv"), "comic-relief");
   assert.equal(bonusFlag("/movies/Film/Trailers/Teaser.mkv"), "trailer");

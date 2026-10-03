@@ -9,7 +9,7 @@ import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
-import { fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
+import { bonusFlag, fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
@@ -231,7 +231,10 @@ export function filesRepresentingFolders(files: string[], known: SourceDraft[]):
   return keep;
 }
 
-export function folderDraft(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }, match: SourceDraft | null): SourceDraft {
+export function folderDraft(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }, match: SourceDraft | null): SourceDraft | null {
+  // Movie extras stay when they match that movie. Series Features/Extras folders
+  // must not invent their own movie titles (often named Features or Extras).
+  if (!match && bonusFlag(filePath)) return null;
   const base = path.basename(filePath);
   const named = match?.kind === "episode" ? null : titleFromAncestors(filePath);
   const loose = match ? null : episodeInName(base);
@@ -334,7 +337,8 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);
-    drafts.push(folderDraft(file, withSidecarFiles(file, probed), pickMatch(indexed, file)));
+    const draft = folderDraft(file, withSidecarFiles(file, probed), pickMatch(indexed, file));
+    if (draft) drafts.push(draft);
   }
   onProgress({
     message: missing.length ? `Scanned ${drafts.length} files. Missing folder: ${missing[0]}` : `Scanned ${drafts.length} files.`,
@@ -537,6 +541,12 @@ function seriesGuess(name: string): string | null {
   return text.length >= 2 ? text : null;
 }
 
+/** Folder names that hold bonus clips, not the movie or series title. */
+function isBonusFolderName(name: string): boolean {
+  const key = name.toLowerCase().replace(/[._-]+/g, " ").trim();
+  return /^(?:features?|featurettes?|extras?|outtakes?|bloopers?|trailers?|shorts?|scenes?|other|special features|behind the scenes|deleted scenes|interviews?)$/.test(key);
+}
+
 function titleFromAncestors(filePath: string): { title: string; year: number | null; directory: string } | null {
   const found: Array<{ title: string; year: number | null; yearly: boolean; directory: string }> = [];
   let dir = path.dirname(filePath);
@@ -545,7 +555,7 @@ function titleFromAncestors(filePath: string): { title: string; year: number | n
     const parent = path.dirname(dir);
     if (!base || base === dir || base === "." || base === "/") break;
     const yearly = /[\(\[](?:19|20)\d{2}[\)\]]$/.test(base.trim());
-    if (!STRUCTURAL.has(base.toLowerCase()) && !/^\d+$/.test(base)) {
+    if (!STRUCTURAL.has(base.toLowerCase()) && !isBonusFolderName(base) && !/^\d+$/.test(base)) {
       const title = base
         .replace(/\s*[\(\[](?:19|20)\d{2}[\)\]]\s*$/, "")
         .replace(/[._]+/g, " ")
