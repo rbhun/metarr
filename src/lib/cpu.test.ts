@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cpuPercent, dockerPercent, timesFromCpus, timesFromProcStat, usageFromCpuStat, usageFromCpuacct } from "@/lib/cpu";
+import {
+  cgroupJoin,
+  cgroupRelPath,
+  cgroupStatPaths,
+  cpuPercent,
+  dockerPercent,
+  timesFromCpus,
+  timesFromProcStat,
+  usageFromCpuStat,
+  usageFromCpuacct,
+} from "@/lib/cpu";
 
 test("proc stat idle and iowait count as idle time", () => {
   const times = timesFromProcStat("cpu  10 0 10 70 10 0 0 0 0 0\ncpu0 5 0 5 35 5 0 0 0 0 0\n");
@@ -32,4 +42,36 @@ test("docker percent is this container's share of every core", () => {
   assert.equal(dockerPercent(previous, next, 4), 25);
   assert.equal(dockerPercent(previous, next, 1), 100);
   assert.equal(dockerPercent(previous, { usageUs: 1_000_000, atMs: 1000 }, 4), null);
+});
+
+test("cgroup rel path prefers unified v2 over a v1 cpu line", () => {
+  assert.equal(
+    cgroupRelPath("0::/system.slice/pod-x/cursor-agent/workload\n"),
+    "/system.slice/pod-x/cursor-agent/workload",
+  );
+  assert.equal(cgroupRelPath("0::/\n"), "/");
+  assert.equal(cgroupRelPath("0::\n"), "/");
+  assert.equal(
+    cgroupRelPath("12:cpu,cpuacct:/docker/abc\n0::/docker/abc\n"),
+    "/docker/abc",
+  );
+  assert.equal(
+    cgroupRelPath("11:memory:/docker/abc\n12:cpu,cpuacct:/docker/abc\n"),
+    "/docker/abc",
+  );
+  assert.equal(cgroupRelPath("11:memory:/\n"), null);
+});
+
+test("cgroup join uses this process path, not the host root, when nested", () => {
+  assert.equal(cgroupJoin("/", "cpu.stat"), "/sys/fs/cgroup/cpu.stat");
+  assert.equal(
+    cgroupJoin("/system.slice/pod-x/workload", "cpu.stat"),
+    "/sys/fs/cgroup/system.slice/pod-x/workload/cpu.stat",
+  );
+  assert.equal(
+    cgroupJoin("/docker/abc", "cpuacct.usage", "/sys/fs/cgroup/cpuacct"),
+    "/sys/fs/cgroup/cpuacct/docker/abc/cpuacct.usage",
+  );
+  assert.equal(cgroupStatPaths("/")[0], "/sys/fs/cgroup/cpu.stat");
+  assert.notEqual(cgroupStatPaths("/system.slice/pod-x/workload")[0], "/sys/fs/cgroup/cpu.stat");
 });

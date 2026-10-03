@@ -49,8 +49,8 @@ export function CpuReadout({ compact = false, className }: { compact?: boolean; 
   if (compact) {
     return (
       <p className={cn("text-center text-[11px] leading-tight tabular-nums text-muted-foreground", className)} aria-label={label} title={title}>
-        {host}
-        <span className="block">{docker}</span>
+        VM {host}
+        <span className="block">Ctr {docker}</span>
       </p>
     );
   }
@@ -59,7 +59,7 @@ export function CpuReadout({ compact = false, className }: { compact?: boolean; 
     <p className={cn("text-xs tabular-nums text-muted-foreground", className)} aria-label={label} title={title}>
       VM {host}
       <span className="mx-1 text-muted-foreground/60">·</span>
-      D {docker}
+      Ctr {docker}
     </p>
   );
 }

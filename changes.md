@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.154
+
+- Read this process's cgroup for container CPU so the figure is this container, not the whole machine.
+
 ## 0.0.153
 
 - Show this container's CPU next to the whole-machine figure, so a rip's load is distinct from Plex or the rest of the VM.

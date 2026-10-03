@@ -56,6 +56,44 @@ export function usageFromCpuacct(text: string): number | null {
 }
 
 /**
+ * Relative path from /proc/self/cgroup. Unified v2 (`0::/…`) wins over a v1
+ * cpu/cpuacct line. Empty means this process's cgroup is the mount root.
+ */
+export function cgroupRelPath(text: string): string | null {
+  let fromCpu: string | null = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const first = line.indexOf(":");
+    const second = line.indexOf(":", first + 1);
+    if (first < 0 || second < 0) continue;
+    const id = line.slice(0, first);
+    const controllers = line.slice(first + 1, second);
+    const path = line.slice(second + 1) || "/";
+    if (id === "0" && controllers === "") return path;
+    const names = controllers.split(",");
+    if (names.includes("cpu") || names.includes("cpuacct")) fromCpu = path;
+  }
+  return fromCpu;
+}
+
+/** Join a cgroup relative path onto a controller mount. `/` is the mount root. */
+export function cgroupJoin(rel: string, file: string, mount = "/sys/fs/cgroup"): string {
+  const trimmed = rel.replace(/\/+$/, "");
+  const nested = trimmed ? (trimmed.startsWith("/") ? trimmed : `/${trimmed}`) : "";
+  return `${mount}${nested}/${file}`;
+}
+
+export function cgroupStatPaths(rel: string): string[] {
+  return [
+    cgroupJoin(rel, "cpu.stat"),
+    cgroupJoin(rel, "cpuacct.usage", "/sys/fs/cgroup/cpuacct"),
+    cgroupJoin(rel, "cpuacct.usage", "/sys/fs/cgroup/cpu,cpuacct"),
+    cgroupJoin(rel, "cpuacct.usage", "/sys/fs/cgroup/cpu"),
+  ];
+}
+
+/**
  * This container's share of the whole machine, 0–100. 25 on a 4-core box is one
  * core busy inside the container.
  */
@@ -76,9 +114,6 @@ function sampleTimes(): CpuTimes | null {
   return timesFromCpus(os.cpus());
 }
 
-const CGROUP_STAT = ["/sys/fs/cgroup/cpu.stat"];
-const CGROUP_ACCT = ["/sys/fs/cgroup/cpuacct.usage", "/sys/fs/cgroup/cpu,cpuacct/cpuacct.usage", "/sys/fs/cgroup/cpuacct/cpuacct.usage"];
-
 function readFile(path: string): string | null {
   try {
     return fs.readFileSync(path, "utf8");
@@ -87,15 +122,18 @@ function readFile(path: string): string | null {
   }
 }
 
+function thisCgroupRel(): string | null {
+  const text = readFile("/proc/self/cgroup");
+  return text ? cgroupRelPath(text) : null;
+}
+
 function sampleCgroup(atMs = Date.now()): CgroupSample | null {
-  for (const path of CGROUP_STAT) {
+  const rel = thisCgroupRel();
+  if (!rel) return null;
+  for (const path of cgroupStatPaths(rel)) {
     const text = readFile(path);
-    const usageUs = text ? usageFromCpuStat(text) : null;
-    if (usageUs != null) return { usageUs, atMs };
-  }
-  for (const path of CGROUP_ACCT) {
-    const text = readFile(path);
-    const usageUs = text ? usageFromCpuacct(text) : null;
+    if (!text) continue;
+    const usageUs = path.endsWith("cpu.stat") ? usageFromCpuStat(text) : usageFromCpuacct(text);
     if (usageUs != null) return { usageUs, atMs };
   }
   return null;
@@ -122,7 +160,7 @@ function dockerFrom(previous: CgroupSample | undefined, next: CgroupSample | nul
   return { docker, stored: next };
 }
 
-/** Host is the whole VM. Docker is this container's share of the same machine. */
+/** Host is the whole VM. Docker is this process's cgroup share of the same machine. */
 export async function readCpu(): Promise<CpuReading> {
   let hostPrev = globalForCpu.__metarrCpu;
   let dockerPrev = globalForCpu.__metarrCgroup;
