@@ -2,14 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { announceFolder } from "@/lib/announce";
 import { getDb } from "@/lib/db";
-import { resolveMediaPath } from "@/lib/detect/paths";
+import { pathOnPlex, resolveMediaPath } from "@/lib/detect/paths";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
 import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
-import { pathOnPlex } from "@/lib/detect/paths";
+import { mergeIsRunning } from "@/lib/merge/store";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
 import { canRewrap, joinedTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
@@ -123,6 +123,10 @@ async function step() {
     }
     if (remuxIsRunning(db)) {
       writeRewrapPause(db, "remux");
+      return;
+    }
+    if (mergeIsRunning(db)) {
+      writeRewrapPause(db, "merge");
       return;
     }
     if (await plexLibraryBusy(db)) {

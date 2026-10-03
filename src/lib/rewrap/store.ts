@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { clampHour } from "@/lib/detect/schedule";
 import { languageCode } from "@/lib/media";
 
-export type RewrapPause = "window" | "plex" | "detect" | "remux" | "off";
+export type RewrapPause = "window" | "plex" | "detect" | "remux" | "merge" | "off";
 
 export type RewrapSettings = {
   enabled: boolean;
@@ -102,7 +102,7 @@ export function writeRewrapSettings(
 
 export function readRewrapPause(db: Database.Database): RewrapPause | null {
   const value = meta(db, "rewrap_pause");
-  if (value === "window" || value === "plex" || value === "detect" || value === "remux" || value === "off") return value;
+  if (value === "window" || value === "plex" || value === "detect" || value === "remux" || value === "merge" || value === "off") return value;
   return null;
 }
 

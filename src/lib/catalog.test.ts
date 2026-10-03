@@ -145,10 +145,10 @@ test("demo library keeps missing movies, disc images, and incomplete series", ()
 
   assert.deepEqual(names([{ id: "subs", field: "subtitles", op: "missing", value: "English" }]), ["Heat"]);
   assert.deepEqual(names([{ id: "3d", field: "stereo", op: "eq", value: "yes" }]), ["Gravity"]);
-  assert.deepEqual(names([{ id: "hu", field: "language", op: "includes", value: "Hungarian" }]).sort(), ["Dune", "The Godfather", "The Wire"]);
+  assert.deepEqual(names([{ id: "hu", field: "language", op: "includes", value: "Hungarian" }]).sort(), ["Blade Runner 2049", "Dune", "The Godfather", "The Wire"]);
   assert.deepEqual(names([{ id: "pg", field: "contentRating", op: "eq", value: "PG" }]), ["The Godfather Part II"]);
   assert.deepEqual(names([{ id: "genre", field: "genre", op: "empty", value: "" }]), ["The Godfather Part II"]);
-  assert.deepEqual(names([{ id: "br", field: "bitrate", op: "gt", value: "10" }]).sort(), ["Kingdom of Heaven", "The Godfather"]);
+  assert.deepEqual(names([{ id: "br", field: "bitrate", op: "gt", value: "10" }]).sort(), ["Blade Runner 2049", "Kingdom of Heaven", "The Godfather"]);
   assert.ok(names([{ id: "en", field: "audio", op: "excludes", value: "English" }]).includes("Parasite"));
   assert.ok(names([{ id: "mkv", field: "container", op: "eq", value: "mkv" }]).includes("The Godfather"));
   assert.ok(names([{ id: "sdr", field: "hdr", op: "eq", value: "sdr" }]).includes("The Godfather"));

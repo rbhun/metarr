@@ -29,6 +29,7 @@ import {
 import { targetsFromFiles } from "@/lib/detect/targets";
 import { remuxIsRunning } from "@/lib/remux/store";
 import { rewrapIsRunning } from "@/lib/rewrap/store";
+import { mergeIsRunning } from "@/lib/merge/store";
 import { getDb } from "@/lib/db";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
@@ -92,6 +93,9 @@ async function step() {
       return;
     } else if (remuxIsRunning(db) || rewrapIsRunning(db)) {
       writeDetectPause(db, "remux");
+      return;
+    } else if (mergeIsRunning(db)) {
+      writeDetectPause(db, "merge");
       return;
     } else if (!detectReady) {
       if (await runFollowUps(db, settings.pathMaps)) {

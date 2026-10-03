@@ -1,11 +1,12 @@
 import type Database from "better-sqlite3";
 import { jobTotals as detectTotals, listJobs as listDetectJobs, readDetectPause, type DetectJobStatus, type DetectPause } from "@/lib/detect/store";
+import { listMergeJobs, mergeTotals, readMergePause, type MergeJobStatus, type MergePause } from "@/lib/merge/store";
 import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
 import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
 import { titleIdForPath } from "@/lib/title-link";
 
-export type TaskQueue = "language" | "remux" | "rewrap";
+export type TaskQueue = "language" | "remux" | "rewrap" | "merge";
 export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type TaskStatusFilter = TaskStatus | "all";
 
@@ -28,11 +29,13 @@ export type TaskJob = {
   waiting?: string | null;
 };
 
-const WAITING: Record<RemuxPause | RewrapPause | DetectPause, string> = {
+const WAITING: Record<RemuxPause | RewrapPause | DetectPause | MergePause, string> = {
   window: "Waiting for the window",
   plex: "Waiting: Plex is busy",
   detect: "Waiting: language detection is running",
   remux: "Waiting: a disc remux is running",
+  rewrap: "Waiting: an MKV rewrap is running",
+  merge: "Waiting: a version merge is running",
   off: "Waiting: switched off in Settings",
   write: "Waiting: writing a language into a file",
 };
@@ -59,6 +62,7 @@ export function taskTotalsFor(db: Database.Database, queue: TaskQueue | "all"): 
   const language = detectTotals(db);
   const remux = remuxTotals(db);
   const rewrap = rewrapTotals(db);
+  const merge = mergeTotals(db);
   if (queue === "language") {
     return { pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped };
   }
@@ -68,13 +72,10 @@ export function taskTotalsFor(db: Database.Database, queue: TaskQueue | "all"): 
   if (queue === "rewrap") {
     return { pending: rewrap.pending, running: rewrap.running, done: rewrap.done, failed: rewrap.failed, skipped: 0 };
   }
-  return addTotals(
-    addTotals(
-      { pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped },
-      remux,
-    ),
-    rewrap,
-  );
+  if (queue === "merge") {
+    return { pending: merge.pending, running: merge.running, done: merge.done, failed: merge.failed, skipped: 0 };
+  }
+  return addTotals(addTotals(addTotals({ pending: language.pending, running: language.running, done: language.done, failed: language.failed, skipped: language.skipped }, remux), rewrap), merge);
 }
 
 export function taskTotalsSum(totals: TaskTotals): number {
@@ -167,6 +168,30 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
   };
 }
 
+function mapMerge(status: MergeJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
+  const list = listMergeJobs(db, { status, page, pageSize });
+  const pause = readMergePause(db);
+  return {
+    total: list.total,
+    jobs: list.jobs.map((job) => ({
+      key: `merge:${job.id}`,
+      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
+      queue: "merge" as const,
+      id: job.id,
+      path: job.videoPath,
+      label: job.label,
+      status: job.status,
+      message: job.status === "failed" && !job.message ? "Version merge failed with no further detail from ffmpeg." : job.message,
+      priority: "immediate" as const,
+      detail: "Version merge · video from higher quality, all audio and subtitles",
+      progress: job.progress,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+    })),
+  };
+}
+
 function mergeJobs(lists: TaskJob[][], status: TaskStatusFilter): TaskJob[] {
   const merged = lists.flat();
   if (status === "pending") return merged.sort((a, b) => a.id - b.id || a.key.localeCompare(b.key));
@@ -188,7 +213,7 @@ function withTitles(db: Database.Database, list: { jobs: TaskJob[]; total: numbe
   return { jobs, total: list.total };
 }
 
-/** List language and remux jobs for the Tasks page, each linked to its library title when one owns the file. */
+/** List language, remux, rewrap, and merge jobs for the Tasks page. */
 export function listTaskJobs(
   db: Database.Database,
   query: { queue: TaskQueue | "all"; status: TaskStatusFilter; page: number; pageSize: number },
@@ -221,6 +246,11 @@ function pageOfTaskJobs(
     return mapRewrap(status, page, pageSize, db);
   }
 
+  if (query.queue === "merge") {
+    if (status === "skipped") return { jobs: [], total: 0 };
+    return mapMerge(status, page, pageSize, db);
+  }
+
   if (status === "skipped") return mapDetect("skipped", page, pageSize, db);
 
   // Pull enough from each side to page correctly after a merged sort.
@@ -228,8 +258,9 @@ function pageOfTaskJobs(
   const language = mapDetect(status, 1, need, db);
   const remux = mapRemux(status, 1, need, db);
   const rewrap = mapRewrap(status, 1, need, db);
-  const merged = mergeJobs([language.jobs, remux.jobs, rewrap.jobs], query.status);
-  const total = language.total + remux.total + rewrap.total;
+  const merge = mapMerge(status, 1, need, db);
+  const merged = mergeJobs([language.jobs, remux.jobs, rewrap.jobs, merge.jobs], query.status);
+  const total = language.total + remux.total + rewrap.total + merge.total;
   const start = (page - 1) * pageSize;
   return { jobs: merged.slice(start, start + pageSize), total };
 }

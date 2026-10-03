@@ -3,6 +3,7 @@
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
 import { FolderScanCard } from "@/components/folder-scan-settings";
+import { MergeSettingsCard } from "@/components/merge-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
 import { RewrapSettingsCard } from "@/components/rewrap-settings";
 import { ScheduleSettings } from "@/components/schedule-settings";
@@ -685,6 +686,7 @@ export function SettingsView() {
           <DetectSettingsCard />
           <RemuxSettingsCard />
           <RewrapSettingsCard />
+          <MergeSettingsCard />
         </div>
 
         <div>

@@ -6,7 +6,7 @@ import type { DetectTarget } from "@/lib/detect/targets";
 
 export type DetectPriority = "immediate" | "window";
 export type DetectJobStatus = "pending" | "running" | "done" | "failed" | "skipped";
-export type DetectPause = "window" | "plex" | "remux" | "off" | "write";
+export type DetectPause = "window" | "plex" | "remux" | "merge" | "off" | "write";
 
 export type DetectJob = {
   id: number;
@@ -82,7 +82,7 @@ export function writeDetectSettings(db: Database.Database, settings: DetectSetti
 
 export function readDetectPause(db: Database.Database): DetectPause | null {
   const value = meta(db, "detect_pause");
-  if (value === "window" || value === "plex" || value === "remux" || value === "off" || value === "write") return value;
+  if (value === "window" || value === "plex" || value === "remux" || value === "merge" || value === "off" || value === "write") return value;
   return null;
 }
 
