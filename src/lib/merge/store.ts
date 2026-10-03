@@ -239,6 +239,11 @@ export function clearMergeJobs(db: Database.Database, status: MergeJobStatus): n
   return db.prepare(`DELETE FROM merge_jobs WHERE status = ?`).run(status).changes;
 }
 
+/** Drop one waiting or failed version merge. Running and finished jobs stay. */
+export function removeMergeJob(db: Database.Database, id: number): boolean {
+  return db.prepare(`DELETE FROM merge_jobs WHERE id = ? AND status IN ('pending', 'failed')`).run(id).changes === 1;
+}
+
 export function activeMerge(db: Database.Database): { label: string; progress: number | null; message: string | null } | null {
   const row = db.prepare(`SELECT label, progress, message FROM merge_jobs WHERE status = 'running' ORDER BY id LIMIT 1`).get() as
     | { label: string; progress: number | null; message: string | null }

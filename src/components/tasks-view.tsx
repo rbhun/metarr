@@ -158,6 +158,7 @@ export function TasksView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [redoing, setRedoing] = useState<string | null>(null);
   const [redoingAll, setRedoingAll] = useState(false);
 
@@ -268,6 +269,22 @@ export function TasksView() {
     }
   }
 
+  async function removeJob(job: TaskJob) {
+    if ((job.status !== "pending" && job.status !== "failed") || removing || redoing || redoingAll) return;
+    setRemoving(job.key);
+    try {
+      const response = await fetch(`/api/tasks?queue=${job.queue}&id=${job.id}`, { method: "DELETE" });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error || "That job could not be removed.");
+      toast.success(job.status === "pending" ? "Removed from the waiting list." : "Failed job removed.");
+      await load();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "That job could not be removed.");
+    } finally {
+      setRemoving(null);
+    }
+  }
+
   async function clearFiltered() {
     const count = tabCount(totals, status);
     if (count < 1 || clearing || status === "running" || status === "all") return;
@@ -372,8 +389,19 @@ export function TasksView() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {job.status === "failed" ? (
-                      <Button size="sm" variant="outline" disabled={redoing === job.key} onClick={() => void redoJob(job)}>
+                      <Button size="sm" variant="outline" disabled={redoing === job.key || removing === job.key} onClick={() => void redoJob(job)}>
                         {redoing === job.key ? "Queuing…" : "Redo"}
+                      </Button>
+                    ) : null}
+                    {job.status === "pending" || job.status === "failed" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={removing === job.key || redoing === job.key}
+                        onClick={() => void removeJob(job)}
+                        title={job.status === "pending" ? "Remove this job from the waiting list" : "Remove this failed job from the list"}
+                      >
+                        {removing === job.key ? "Removing…" : "Remove"}
                       </Button>
                     ) : null}
                     <span className={cn("text-xs", stateTone(job.status))}>{taskState(job)}</span>

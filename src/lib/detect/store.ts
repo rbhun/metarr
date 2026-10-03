@@ -301,6 +301,11 @@ export function clearJobs(db: Database.Database, status: DetectJobStatus): numbe
   return db.prepare(`DELETE FROM detect_jobs WHERE status = ?`).run(status).changes;
 }
 
+/** Drop one waiting or failed language check. Running and finished jobs stay. */
+export function removeJob(db: Database.Database, id: number): boolean {
+  return db.prepare(`DELETE FROM detect_jobs WHERE id = ? AND status IN ('pending', 'failed')`).run(id).changes === 1;
+}
+
 export function clearPendingJobs(db: Database.Database): number {
   return clearJobs(db, "pending");
 }

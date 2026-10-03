@@ -26,6 +26,7 @@ import {
   finishRemux,
   hasImmediateRemux,
   KEEP_ALL_SELECTION,
+  removeRemuxJob,
   retryAllFailedRemux,
   retryFailedRemux,
   listRemuxJobs,
@@ -264,6 +265,24 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(retryFailedRemux(db, claimed.id), "retried");
   assert.equal(listRemuxJobs(db, { status: "failed", page: 1, pageSize: 10 }).total, 0);
   assert.ok(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 10 }).jobs.some((row) => row.label === "Fail (1999)"));
+  db.close();
+});
+
+test("removing one waiting or failed remux leaves the others", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  assert.equal(enqueuePaths(db, [{ path: "/movies/Wait.iso", label: "Wait" }], false).added, 1);
+  assert.equal(enqueuePaths(db, [{ path: "/movies/Fail.iso", label: "Fail" }], false).added, 1);
+  const first = claimNextRemux(db);
+  assert.ok(first);
+  finishRemux(db, first.id, "failed", "No.");
+  const waiting = listRemuxJobs(db, { status: "pending", page: 1, pageSize: 10 }).jobs[0];
+  assert.ok(waiting);
+  assert.equal(removeRemuxJob(db, waiting.id), true);
+  assert.equal(listRemuxJobs(db, { status: "pending", page: 1, pageSize: 10 }).total, 0);
+  assert.equal(removeRemuxJob(db, first.id), true);
+  assert.equal(listRemuxJobs(db, { status: "failed", page: 1, pageSize: 10 }).total, 0);
+  assert.equal(removeRemuxJob(db, first.id), false);
   db.close();
 });
 

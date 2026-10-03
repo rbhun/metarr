@@ -1,9 +1,9 @@
-import { clearJobs, detectCounts, jobTotals as languageTotals, retryAllFailedJobs, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
-import { clearMergeJobs, mergeTotals, retryAllFailedMerge, retryFailedMerge, type MergeJobStatus } from "@/lib/merge/store";
+import { clearJobs, detectCounts, jobTotals as languageTotals, removeJob, retryAllFailedJobs, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
+import { clearMergeJobs, mergeTotals, removeMergeJob, retryAllFailedMerge, retryFailedMerge, type MergeJobStatus } from "@/lib/merge/store";
 import { kickMergeWorker, startMergeWorker } from "@/lib/merge/worker";
-import { clearRemuxJobs, remuxCounts, remuxTotals, retryAllFailedRemux, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
+import { clearRemuxJobs, remuxCounts, remuxTotals, removeRemuxJob, retryAllFailedRemux, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
-import { clearRewrapJobs, retryAllFailedRewrap, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
+import { clearRewrapJobs, removeRewrapJob, retryAllFailedRewrap, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
 import { kickRewrapWorker, startRewrapWorker } from "@/lib/rewrap/worker";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
@@ -110,6 +110,26 @@ export async function DELETE(request: Request) {
   const url = new URL(request.url);
   const rawQueue = url.searchParams.get("queue") ?? "all";
   const queue = QUEUES.has(rawQueue as TaskQueue | "all") ? (rawQueue as TaskQueue | "all") : "all";
+  const idRaw = url.searchParams.get("id");
+  const id = idRaw != null && idRaw !== "" ? Math.trunc(Number(idRaw)) : null;
+  if (id != null && Number.isInteger(id) && id > 0) {
+    if (queue === "all") {
+      return NextResponse.json({ error: "Choose which queue that job belongs to." }, { status: 400 });
+    }
+    const db = getDb();
+    const removed =
+      queue === "language"
+        ? removeJob(db, id)
+        : queue === "rewrap"
+          ? removeRewrapJob(db, id)
+          : queue === "merge"
+            ? removeMergeJob(db, id)
+            : removeRemuxJob(db, id);
+    if (!removed) {
+      return NextResponse.json({ error: "That waiting or failed job is no longer there." }, { status: 404 });
+    }
+    return NextResponse.json({ removed: 1, totals: taskTotalsFor(db, queue) });
+  }
   const status = parseStatus(url.searchParams.get("status"));
   if (status === "all" || status === "running") {
     return NextResponse.json({ error: "Choose one finished or waiting filter to clear." }, { status: 400 });

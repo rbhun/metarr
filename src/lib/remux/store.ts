@@ -273,6 +273,11 @@ export function clearRemuxJobs(db: Database.Database, status: RemuxJobStatus): n
   return db.prepare(`DELETE FROM remux_jobs WHERE status = ?`).run(status).changes;
 }
 
+/** Drop one waiting or failed disc remux. Running and finished jobs stay. */
+export function removeRemuxJob(db: Database.Database, id: number): boolean {
+  return db.prepare(`DELETE FROM remux_jobs WHERE id = ? AND status IN ('pending', 'failed')`).run(id).changes === 1;
+}
+
 export function clearPendingRemux(db: Database.Database): number {
   return clearRemuxJobs(db, "pending");
 }

@@ -284,6 +284,11 @@ export function clearRewrapJobs(db: Database.Database, status: RewrapJobStatus):
   return db.prepare(`DELETE FROM rewrap_jobs WHERE status = ?`).run(status).changes;
 }
 
+/** Drop one waiting or failed MKV rewrap. Running and finished jobs stay. */
+export function removeRewrapJob(db: Database.Database, id: number): boolean {
+  return db.prepare(`DELETE FROM rewrap_jobs WHERE id = ? AND status IN ('pending', 'failed')`).run(id).changes === 1;
+}
+
 export function finishedRewrapPaths(db: Database.Database): Set<string> {
   const rows = db
     .prepare(`SELECT path FROM rewrap_jobs WHERE status = 'done' AND (message IS NULL OR message NOT LIKE 'Dry run:%')`)
