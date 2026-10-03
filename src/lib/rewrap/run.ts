@@ -9,6 +9,12 @@ import { joinedTarget, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
+/**
+ * How long ffmpeg may hold packets so the streams line up, in microseconds.
+ * 0 turns the cap off. A Blu-ray subtitle that only appears every few minutes then
+ * keeps the whole movie in memory, and a 50 GB file is killed. 10 seconds is ffmpeg's own default.
+ */
+const INTERLEAVE_US = 10_000_000;
 /** Subtitle formats Matroska can hold as they are. */
 const MKV_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "dvd_subtitle", "text", "hdmv_pgs_subtitle", "dvb_subtitle"]);
 /** Blu-ray PCM has no Matroska mapping; FLAC keeps it lossless. */
@@ -58,7 +64,7 @@ export function rewrapArgs(
   for (const stream of video) args.push("-map", `0:${stream.index}`);
   for (const item of ordered) args.push("-map", `0:${item.stream.index}`);
   for (const item of subtitles) args.push("-map", `0:${item.stream.index}`);
-  args.push("-c", "copy", "-map_metadata", "0", "-max_interleave_delta", "0");
+  args.push("-c", "copy", "-map_metadata", "0", "-max_interleave_delta", String(INTERLEAVE_US));
   video.forEach((stream, position) => {
     // Xvid/DivX "packed B-frames" stutter in Matroska unless they are unpacked.
     if (stream.codecName === "mpeg4") args.push(`-bsf:v:${position}`, "mpeg4_unpack_bframes");
@@ -78,6 +84,14 @@ export function rewrapArgs(
   });
   args.push("-progress", "pipe:1", "-nostats", "-f", "matroska", output);
   return { args, video: video.length, audio: ordered.length, subtitles: subtitles.length, firstMoved, converted };
+}
+
+/** What to say when ffmpeg or ffprobe does not exit 0. A signal kill has no exit code. */
+export function rewrapStop(command: string, code: number | null, signal: NodeJS.Signals | null): string {
+  if (code != null) return `${command} exited with code ${code}.`;
+  if (signal === "SIGKILL") return `${command} was killed (SIGKILL), usually because the machine ran out of memory.`;
+  if (signal) return `${command} was stopped by ${signal}.`;
+  return `${command} stopped without an exit code.`;
 }
 
 function runTool(
@@ -113,7 +127,7 @@ function runTool(
       const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
       fail(new Error(missing ? `${command} is not installed where Metarr runs. Rebuild the Docker image, which includes ffmpeg.` : error.message));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -125,11 +139,18 @@ function runTool(
         reject(new Error(`${command} was not found where Metarr runs. Rebuild the Docker image, which includes ffmpeg.`));
         return;
       }
-      const lines = stderr
+      const said = stderr
         .split(/\r?\n/)
         .map((line) => line.trim())
-        .filter(Boolean);
-      reject(new Error(lines.slice(-3).join(" ") || `${command} exited with code ${code}.`));
+        .filter(Boolean)
+        .slice(-3)
+        .join(" ");
+      const exit = rewrapStop(command, code, signal);
+      if (said && code != null) {
+        reject(new Error(said));
+        return;
+      }
+      reject(new Error(said ? `${said} (${exit})` : exit));
     });
   });
 }

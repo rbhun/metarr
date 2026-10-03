@@ -7,7 +7,7 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
-import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, type Probe } from "@/lib/rewrap/run";
+import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, type Probe } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
@@ -64,6 +64,12 @@ test("the rewrap copies every stream, unpacks Xvid B-frames, and puts the chosen
   const h264 = rewrapArgs("in.avi", "out.mkv", { duration: 10, streams: [{ index: 0, codecType: "video", codecName: "h264" }] }, { languages: [], firstLanguage: "Hungarian" });
   assert.doesNotMatch(h264.args.join(" "), /bsf/);
   assert.throws(() => rewrapArgs("in.avi", "out.mkv", { duration: 1, streams: [] }, { languages: [], firstLanguage: "" }), /no video/);
+});
+
+test("a killed ffmpeg says it ran out of memory instead of an empty exit code", () => {
+  assert.match(rewrapStop("ffmpeg", null, "SIGKILL"), /ran out of memory/);
+  assert.match(rewrapStop("ffmpeg", null, "SIGTERM"), /SIGTERM/);
+  assert.equal(rewrapStop("ffmpeg", 1, null), "ffmpeg exited with code 1.");
 });
 
 test("probe output, progress lines, and the result check", () => {
@@ -176,6 +182,7 @@ test("a loose M2TS is rewrapped with its audio and subtitle languages, but a Blu
   );
   const args = plan.args.join(" ");
   assert.match(args, /-map 0:0 -map 0:1 -map 0:2 -map 0:3 -c copy/);
+  assert.match(args, /-max_interleave_delta 10000000/, "a zero cap holds a sparse subtitle's movie in memory until ffmpeg is killed");
   assert.match(args, /-c:a:0 flac/);
   assert.match(args, /-metadata:s:s:0 language=spa/);
   assert.match(args, /-metadata:s:s:1 language=fre|-metadata:s:s:1 language=fra/);

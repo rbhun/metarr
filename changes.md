@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.160
+
+- Cap how long ffmpeg holds a rewrap in memory. With no cap, a sparse Blu-ray subtitle kept a 50 GB M2TS in RAM until the process was killed, which showed up as "ffmpeg exited with code null."
+
 ## 0.0.159
 
 - Beta version merge: find titles with two similar-length copies that carry different audio, compare frames, and manually combine them into one MKV that keeps the better video plus every audio and subtitle track. The demo library includes Blade Runner 2049 as a sample pair.
