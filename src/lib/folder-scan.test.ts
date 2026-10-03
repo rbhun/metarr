@@ -44,6 +44,7 @@ test("a scanned file takes the Radarr identity for the same path", () => {
     audio: [{ language: "Portuguese", layout: null, codec: null, streamIndex: 0, fromFile: true }],
     subtitles: [],
   }, match);
+  assert.ok(draft);
   assert.equal(draft.connector, "files");
   assert.equal(draft.imdbId, "tt1385826");
   assert.equal(draft.title, "The Adjustment Bureau");
@@ -65,6 +66,7 @@ test("another stream in the same movie folder keeps that movie", () => {
   const match = chooseMatch([radarr], file, ["/mnt/media/Movies"]);
   assert.equal(match?.title, "Fight Club");
   const draft = folderDraft(file, { audio: [], subtitles: [] }, match);
+  assert.ok(draft);
   assert.equal(draft.kind, "movie");
   assert.equal(draft.imdbId, "tt0137523");
   assert.equal(draft.title, "Fight Club");
@@ -83,9 +85,11 @@ test("a movie folder name matches the title when the stored path is empty", () =
   const match = chooseMatch([radarr], file, ["/mnt/media/Movies"]);
   assert.equal(match?.imdbId, "tt0105112");
   const draft = folderDraft(file, { audio: [], subtitles: [] }, match);
+  assert.ok(draft);
   assert.equal(draft.title, "Patriot Games");
   assert.equal(draft.year, 1992);
   const unnamed = folderDraft(file, { audio: [], subtitles: [] }, null);
+  assert.ok(unnamed);
   assert.equal(unnamed.title, "Patriot Games");
   assert.equal(unnamed.year, 1992);
 });
@@ -124,6 +128,7 @@ test("a differently named episode stays on its series", () => {
   const byFolder = chooseMatch([sibling, elsewhere], "/mnt/media/TV/Hetedik mennyorszag S01-S11/Hetedik Mennyorszag S02/show.S02E04.avi", ["/mnt/media/TV"]);
   assert.equal(byFolder?.title, "Who Knew?");
   const draft = folderDraft(named, { audio: [], subtitles: [] }, byName);
+  assert.ok(draft);
   assert.equal(draft.kind, "episode");
   assert.equal(draft.seriesTitle, "7th Heaven");
   assert.equal(draft.episode, 4);
@@ -150,6 +155,7 @@ test("numbered disc streams follow the movie folder they are in", () => {
   assert.deepEqual(kept.filter((file) => file.includes("Jaws")), [`${jaws}00294.m2ts`]);
   assert.ok(kept.includes("/mnt/media/Movies/Heat (1995)/Heat.mkv"));
   const draft = folderDraft(`${jaws}00000.m2ts`, { audio: [], subtitles: [] }, null);
+  assert.ok(draft);
   assert.equal(draft.title, "Jaws");
   assert.equal(draft.year, 1975);
 });
@@ -166,6 +172,70 @@ test("a file in a different movie folder is not claimed", () => {
   });
   const match = chooseMatch([radarr], "/mnt/media/Movies/Heat (1995)/Heat.mkv", ["/mnt/media/Movies"]);
   assert.equal(match, null);
+});
+
+test("series Features and Extras folders do not invent movie titles", () => {
+  const topGear = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "88",
+    title: "Top Gear",
+    year: 2002,
+    tvdbId: "74608",
+    path: "/mnt/media/TV/Top Gear",
+  });
+  const episode = sourceDraft({
+    connector: "sonarr",
+    kind: "episode",
+    externalKey: "8801",
+    title: "Series 1, Episode 1",
+    seriesTitle: "Top Gear",
+    year: 2002,
+    season: 1,
+    episode: 1,
+    tvdbId: "74608",
+    parentKey: "sonarr-series:88",
+    path: "/mnt/media/TV/Top Gear/Season 01/Top Gear - S01E01.mkv",
+  });
+  const men = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "99",
+    title: "Two and a Half Men",
+    year: 2003,
+    tvdbId: "75760",
+    path: "/mnt/media/TV/Two and a Half Men",
+  });
+  const roots = ["/mnt/media/TV"];
+  const apocalypse = "/mnt/media/TV/Top Gear/720p/Features/Apocalypse [2010].mkv";
+  const italian = "/mnt/media/TV/Top Gear/480p/Features/ItalianJob[2010].mkv";
+  const extra = "/mnt/media/TV/Two and a Half Men/Extras/Two and a Half Men Extra 02 - Jake's A Regular Kid.mp4";
+  assert.equal(chooseMatch([topGear, episode], apocalypse, roots), null);
+  assert.equal(chooseMatch([topGear, episode], italian, roots), null);
+  assert.equal(chooseMatch([men], extra, roots), null);
+  assert.equal(folderDraft(apocalypse, { audio: [], subtitles: [] }, null), null);
+  assert.equal(folderDraft(italian, { audio: [], subtitles: [] }, null), null);
+  assert.equal(folderDraft(extra, { audio: [], subtitles: [] }, null), null);
+});
+
+test("a movie Featurettes file still keeps that movie when the folder matches", () => {
+  const radarr = sourceDraft({
+    connector: "radarr",
+    kind: "movie",
+    externalKey: "1",
+    title: "The Godfather",
+    year: 1972,
+    imdbId: "tt0068646",
+    path: "/mnt/media/Movies/The Godfather (1972)/The Godfather (1972).mkv",
+  });
+  const file = "/mnt/media/Movies/The Godfather (1972)/Featurettes/The Godfather - A Look Back.mkv";
+  const match = chooseMatch([radarr], file, ["/mnt/media/Movies"]);
+  assert.equal(match?.title, "The Godfather");
+  const draft = folderDraft(file, { audio: [], subtitles: [] }, match);
+  assert.ok(draft);
+  assert.equal(draft.kind, "movie");
+  assert.equal(draft.title, "The Godfather");
+  assert.equal(draft.imdbId, "tt0068646");
 });
 
 test("a probed format is sent back to an app that does not have it", () => {
