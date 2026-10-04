@@ -23,6 +23,7 @@ function titles(db: Database.Database) {
     missing_episode_count: number;
     episode_count: number;
     rating: number | null;
+    poster_path: string | null;
     subtitle_wanted: string;
     quality_name: string | null;
     version_count: number;

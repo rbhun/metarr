@@ -354,7 +354,7 @@ function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subti
 export async function scanOneFile(
   filePath: string,
   match: SourceDraft | null,
-  options: { underSeries?: boolean } = {},
+  options: { underSeries?: boolean; roots?: string[] } = {},
 ): Promise<SourceDraft | null> {
   const probed = tracksFromProbe(await probeFile(filePath));
   if (!probed) return null;
