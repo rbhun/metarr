@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -36,6 +37,25 @@ type Candidate = {
   reason: string;
 };
 
+type InspectPair = {
+  key: string;
+  left: VersionView;
+  right: VersionView;
+  videoFrom: "left" | "right";
+  durationDeltaMinutes: number | null;
+  eligible: boolean;
+  reason: string;
+  candidate: Candidate | null;
+};
+
+type TitleInspect = {
+  titleId: number;
+  label: string;
+  versions: VersionView[];
+  pairs: InspectPair[];
+  eligibleCount: number;
+};
+
 type FrameResult = {
   ok: boolean;
   matched: number;
@@ -46,7 +66,7 @@ type FrameResult = {
 type Totals = { pending: number; running: number; done: number; failed: number };
 
 type MergeBody = {
-  settings: { enabled: boolean };
+  settings: { enabled: boolean; maxDurationDeltaMinutes: number };
   totals: Totals;
   pause: "plex" | "detect" | "remux" | "rewrap" | "off" | null;
   active: { label: string; progress: number | null; message: string | null } | null;
@@ -73,7 +93,7 @@ function versionLine(version: VersionView): string {
     .join(" · ");
 }
 
-function audioLine(candidate: Candidate): string {
+function audioLine(candidate: Pick<Candidate, "videoFrom" | "audioOnlyLeft" | "audioOnlyRight">): string {
   const donor = candidate.videoFrom === "left" ? candidate.audioOnlyRight : candidate.audioOnlyLeft;
   const side = candidate.videoFrom === "left" ? "B" : "A";
   if (!donor.length) return "No new audio from the other file";
@@ -100,6 +120,91 @@ function summary(body: MergeBody | null): string {
   return base;
 }
 
+function PairCard({
+  title,
+  titleId,
+  left,
+  right,
+  videoFrom,
+  reason,
+  editionConflict,
+  audioOnlyLeft,
+  audioOnlyRight,
+  eligible,
+  frames,
+  comparing,
+  sending,
+  onCompare,
+  onMerge,
+}: {
+  title: string;
+  titleId: number | null;
+  left: VersionView;
+  right: VersionView;
+  videoFrom: "left" | "right";
+  reason: string;
+  editionConflict?: boolean;
+  audioOnlyLeft?: string[];
+  audioOnlyRight?: string[];
+  eligible: boolean;
+  frames?: FrameResult;
+  comparing: boolean;
+  sending: boolean;
+  onCompare?: () => void;
+  onMerge?: () => void;
+}) {
+  const video = videoFrom === "left" ? left : right;
+  return (
+    <div className="rounded-lg border px-3 py-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            {titleId ? (
+              <Link href={`/?title=${titleId}`} className="font-medium underline-offset-2 hover:underline">
+                {title}
+              </Link>
+            ) : (
+              <p className="font-medium">{title}</p>
+            )}
+            {eligible ? null : (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">Not eligible</span>
+            )}
+            {editionConflict ? (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-200">Edition labels differ</span>
+            ) : null}
+          </div>
+          <p className={`text-xs ${eligible ? "text-muted-foreground" : "text-amber-800 dark:text-amber-200"}`}>{reason}</p>
+          {eligible ? (
+            <p className="text-xs">
+              <span className="text-muted-foreground">Video from </span>
+              {video.name}
+              <span className="text-muted-foreground"> · all audio and subtitles from both files</span>
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">A · {versionLine(left)} · {left.audioLanguages.join(", ") || "no audio languages"}</p>
+          <p className="text-xs text-muted-foreground">B · {versionLine(right)} · {right.audioLanguages.join(", ") || "no audio languages"}</p>
+          {eligible && audioOnlyLeft && audioOnlyRight ? (
+            <p className="text-xs">{audioLine({ videoFrom, audioOnlyLeft, audioOnlyRight })}</p>
+          ) : null}
+          {frames ? (
+            <p className={`text-xs ${frames.ok ? "text-emerald-700 dark:text-emerald-300" : "text-amber-800 dark:text-amber-200"}`}>{frames.message}</p>
+          ) : null}
+        </div>
+        {eligible ? (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={comparing || !onCompare} onClick={onCompare}>
+              {comparing ? "Comparing…" : "Check frames"}
+            </Button>
+            <Button type="button" size="sm" disabled={sending || !onMerge} onClick={onMerge}>
+              {sending ? "Queuing…" : "Merge now"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function MergeView() {
   const [body, setBody] = useState<MergeBody | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +215,11 @@ export function MergeView() {
   const [frameNotes, setFrameNotes] = useState<Record<string, FrameResult>>({});
   const [skipFrame, setSkipFrame] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [deltaText, setDeltaText] = useState("1");
+  const [savingDelta, setSavingDelta] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
+  const [inspecting, setInspecting] = useState(false);
+  const [inspect, setInspect] = useState<TitleInspect | null>(null);
 
   const load = useCallback(async (needle: string) => {
     try {
@@ -119,6 +229,7 @@ export function MergeView() {
       const next = (await response.json().catch(() => null)) as MergeBody | null;
       if (!response.ok || !next) throw new Error(next?.error || "Merge candidates could not be loaded.");
       setBody(next);
+      setDeltaText(String(next.settings.maxDurationDeltaMinutes));
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Merge candidates could not be loaded.");
@@ -140,6 +251,64 @@ export function MergeView() {
   }, [search]);
 
   const candidates = useMemo(() => body?.candidates ?? [], [body]);
+
+  async function saveDelta() {
+    if (savingDelta) return;
+    const value = Number(deltaText);
+    if (!Number.isFinite(value)) {
+      toast.error("Use a runtime difference between 0 and 120 minutes.");
+      return;
+    }
+    setSavingDelta(true);
+    try {
+      const response = await fetch("/api/merge", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxDurationDeltaMinutes: value }),
+      });
+      const next = (await response.json().catch(() => null)) as { error?: string; settings?: MergeBody["settings"] } | null;
+      if (!response.ok) throw new Error(next?.error || "Could not save the runtime difference.");
+      if (next?.settings) setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      toast.success(`Runtime difference set to ${next?.settings?.maxDurationDeltaMinutes ?? value} min.`);
+      await load(query);
+      if (inspect) await checkTitle(inspect.label);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not save the runtime difference.");
+    } finally {
+      setSavingDelta(false);
+    }
+  }
+
+  async function checkTitle(raw = titleInput) {
+    if (inspecting) return;
+    const text = raw.trim();
+    if (!text) {
+      toast.error("Enter a title name or library id.");
+      return;
+    }
+    setInspecting(true);
+    try {
+      const response = await fetch("/api/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "inspect", title: text }),
+      });
+      const next = (await response.json().catch(() => null)) as { error?: string; inspect?: TitleInspect } | null;
+      if (!response.ok || !next?.inspect) throw new Error(next?.error || "That title could not be checked.");
+      setInspect(next.inspect);
+      setTitleInput(next.inspect.label);
+      toast.success(
+        next.inspect.eligibleCount
+          ? `${next.inspect.label}: ${next.inspect.eligibleCount} eligible pair${next.inspect.eligibleCount === 1 ? "" : "s"}.`
+          : `${next.inspect.label}: no eligible pairs with the current rules.`,
+      );
+    } catch (caught) {
+      setInspect(null);
+      toast.error(caught instanceof Error ? caught.message : "That title could not be checked.");
+    } finally {
+      setInspecting(false);
+    }
+  }
 
   async function compare(candidate: Candidate) {
     if (comparing) return;
@@ -250,13 +419,100 @@ export function MergeView() {
         <p className="text-xs text-muted-foreground">{summary(body)}</p>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div className="space-y-1.5">
+            <Label htmlFor="merge-duration-delta">Max runtime difference (minutes)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="merge-duration-delta"
+                type="number"
+                min={0}
+                max={120}
+                step={0.5}
+                value={deltaText}
+                disabled={savingDelta}
+                className="w-28"
+                onChange={(event) => setDeltaText(event.target.value)}
+              />
+              <Button type="button" size="sm" disabled={savingDelta} onClick={() => void saveDelta()}>
+                {savingDelta ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Label htmlFor="merge-title-check">Check a title</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="merge-title-check"
+                value={titleInput}
+                onChange={(event) => setTitleInput(event.target.value)}
+                placeholder="Title name or library id"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void checkTitle();
+                  }
+                }}
+              />
+              <Button type="button" size="sm" disabled={inspecting} onClick={() => void checkTitle()}>
+                {inspecting ? "Checking…" : "Check title"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Runtime difference filters the automatic list. Check title shows every version pair on one library title and why each is or is not eligible.
+        </p>
+      </div>
+
+      {inspect ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium">
+              Manual check · {inspect.label}
+              <span className="ml-2 font-normal text-muted-foreground">
+                {inspect.versions.length} version{inspect.versions.length === 1 ? "" : "s"} · {inspect.eligibleCount} eligible
+              </span>
+            </h2>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setInspect(null)}>
+              Clear check
+            </Button>
+          </div>
+          {inspect.pairs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">This title does not have two mergeable video files.</p>
+          ) : (
+            inspect.pairs.map((pair) => (
+              <PairCard
+                key={pair.key}
+                title={inspect.label}
+                titleId={inspect.titleId}
+                left={pair.left}
+                right={pair.right}
+                videoFrom={pair.videoFrom}
+                reason={pair.reason}
+                editionConflict={pair.candidate?.editionConflict}
+                audioOnlyLeft={pair.candidate?.audioOnlyLeft}
+                audioOnlyRight={pair.candidate?.audioOnlyRight}
+                eligible={pair.eligible}
+                frames={frameNotes[pair.key]}
+                comparing={comparing === pair.key}
+                sending={sending === pair.key}
+                onCompare={pair.candidate ? () => void compare(pair.candidate!) : undefined}
+                onMerge={pair.candidate ? () => void merge(pair.candidate!) : undefined}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search titles"
+          placeholder="Filter automatic candidates"
           className="sm:max-w-sm"
-          aria-label="Search merge candidates"
+          aria-label="Filter merge candidates"
         />
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <Checkbox checked={skipFrame} onCheckedChange={(value) => setSkipFrame(value === true)} />
@@ -274,6 +530,8 @@ export function MergeView() {
 
       {!body ? <p className="text-sm text-muted-foreground">Looking for candidates…</p> : null}
 
+      <h2 className="text-sm font-medium">Automatic candidates</h2>
+
       {body && candidates.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {query.trim() ? "No matching titles with complementary audio and similar runtime." : "No titles with two similar-length versions and different audio yet."}
@@ -281,50 +539,26 @@ export function MergeView() {
       ) : null}
 
       <div className="flex flex-col gap-3">
-        {candidates.map((candidate) => {
-          const video = candidate.videoFrom === "left" ? candidate.left : candidate.right;
-          const frames = frameNotes[candidate.key];
-          return (
-            <div key={candidate.key} className="rounded-lg border px-3 py-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {candidate.titleId ? (
-                      <Link href={`/?title=${candidate.titleId}`} className="font-medium underline-offset-2 hover:underline">
-                        {candidate.label}
-                      </Link>
-                    ) : (
-                      <p className="font-medium">{candidate.label}</p>
-                    )}
-                    {candidate.editionConflict ? (
-                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-200">Edition labels differ</span>
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">{candidate.reason}</p>
-                  <p className="text-xs">
-                    <span className="text-muted-foreground">Video from </span>
-                    {video.name}
-                    <span className="text-muted-foreground"> · all audio and subtitles from both files</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">A · {versionLine(candidate.left)} · {candidate.left.audioLanguages.join(", ") || "no audio languages"}</p>
-                  <p className="text-xs text-muted-foreground">B · {versionLine(candidate.right)} · {candidate.right.audioLanguages.join(", ") || "no audio languages"}</p>
-                  <p className="text-xs">{audioLine(candidate)}</p>
-                  {frames ? (
-                    <p className={`text-xs ${frames.ok ? "text-emerald-700 dark:text-emerald-300" : "text-amber-800 dark:text-amber-200"}`}>{frames.message}</p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="outline" disabled={comparing === candidate.key} onClick={() => void compare(candidate)}>
-                    {comparing === candidate.key ? "Comparing…" : "Check frames"}
-                  </Button>
-                  <Button type="button" size="sm" disabled={sending === candidate.key} onClick={() => void merge(candidate)}>
-                    {sending === candidate.key ? "Queuing…" : "Merge now"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {candidates.map((candidate) => (
+          <PairCard
+            key={candidate.key}
+            title={candidate.label}
+            titleId={candidate.titleId}
+            left={candidate.left}
+            right={candidate.right}
+            videoFrom={candidate.videoFrom}
+            reason={candidate.reason}
+            editionConflict={candidate.editionConflict}
+            audioOnlyLeft={candidate.audioOnlyLeft}
+            audioOnlyRight={candidate.audioOnlyRight}
+            eligible
+            frames={frameNotes[candidate.key]}
+            comparing={comparing === candidate.key}
+            sending={sending === candidate.key}
+            onCompare={() => void compare(candidate)}
+            onMerge={() => void merge(candidate)}
+          />
+        ))}
       </div>
     </div>
   );

@@ -11,6 +11,9 @@ const REQUIRED_MATCHES = 10;
 const PROBE_TIMEOUT_MS = 60_000;
 const FRAME_TIMEOUT_MS = 120_000;
 
+/** Default catalog tolerance when Settings has not overridden it. */
+export const DEFAULT_MAX_DURATION_DELTA_MINUTES = 1;
+
 export type DurationCheck = {
   ok: boolean;
   leftSeconds: number | null;
@@ -35,18 +38,30 @@ export type FrameCheck = {
   message: string;
 };
 
-/** Catalog duration is in whole minutes, so allow one minute of drift unless the runtimes are tiny. */
-export function durationToleranceMinutes(left: number, right: number): number {
+/**
+ * Catalog duration is in whole minutes.
+ * When `maxDeltaMinutes` is set (Settings), that absolute allowance is used.
+ * Otherwise: half a minute for tiny runtimes, else at least one minute or 1%.
+ */
+export function durationToleranceMinutes(left: number, right: number, maxDeltaMinutes?: number | null): number {
+  if (maxDeltaMinutes != null && Number.isFinite(maxDeltaMinutes) && maxDeltaMinutes >= 0) {
+    return maxDeltaMinutes;
+  }
   const longer = Math.max(left, right);
   if (longer < 5) return 0.5;
-  return Math.max(1, longer * 0.01);
+  return Math.max(DEFAULT_MAX_DURATION_DELTA_MINUTES, longer * 0.01);
 }
 
-export function durationsCloseMinutes(left: number | null, right: number | null): DurationCheck {
+export function durationsCloseMinutes(
+  left: number | null,
+  right: number | null,
+  maxDeltaMinutes?: number | null,
+): DurationCheck {
   if (left == null || right == null || left <= 0 || right <= 0) {
-    return { ok: false, leftSeconds: left == null ? null : left * 60, rightSeconds: right == null ? null : right * 60, deltaSeconds: null, toleranceSeconds: 60 };
+    const fallback = maxDeltaMinutes != null && Number.isFinite(maxDeltaMinutes) ? maxDeltaMinutes * 60 : 60;
+    return { ok: false, leftSeconds: left == null ? null : left * 60, rightSeconds: right == null ? null : right * 60, deltaSeconds: null, toleranceSeconds: fallback };
   }
-  const tolerance = durationToleranceMinutes(left, right);
+  const tolerance = durationToleranceMinutes(left, right, maxDeltaMinutes);
   const delta = Math.abs(left - right);
   return {
     ok: delta <= tolerance,

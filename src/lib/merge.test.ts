@@ -8,12 +8,16 @@ import {
   bothHaveKnownAudio,
   candidateFromVersions,
   donorAudioLanguages,
+  evaluatePair,
+  inspectTitleMerge,
   languagesOnlyIn,
   listMergeCandidates,
   pairCandidates,
+  resolveTitleIdForMerge,
   type MergeVersionView,
 } from "@/lib/merge/candidates";
 import {
+  DEFAULT_MAX_DURATION_DELTA_MINUTES,
   durationsCloseMinutes,
   durationsCloseSeconds,
   framesMatch,
@@ -28,6 +32,7 @@ import {
   enqueueMerges,
   finishMerge,
   mergeTotals,
+  parseMaxDurationDeltaMinutes,
   readMergeSettings,
   removeMergeJob,
   retryFailedMerge,
@@ -101,6 +106,13 @@ test("duration closeness rejects extended cuts and allows restored copies", () =
   assert.equal(durationsCloseMinutes(120, 145).ok, false);
   assert.equal(durationsCloseSeconds(7200, 7210).ok, true);
   assert.equal(durationsCloseSeconds(7200, 9000).ok, false);
+  assert.equal(durationsCloseMinutes(120, 123, 1).ok, false);
+  assert.equal(durationsCloseMinutes(120, 123, 3).ok, true);
+  assert.equal(durationsCloseMinutes(120, 145, 30).ok, true);
+  assert.equal(DEFAULT_MAX_DURATION_DELTA_MINUTES, 1);
+  assert.equal(parseMaxDurationDeltaMinutes("2.5"), 2.5);
+  assert.equal(parseMaxDurationDeltaMinutes(-1), null);
+  assert.equal(parseMaxDurationDeltaMinutes(121), null);
 });
 
 test("frame samples and grayscale diffs", () => {
@@ -402,10 +414,11 @@ test("the demo library exposes a merge candidate with complementary audio", () =
 test("merge queue is manual and can be turned off", () => {
   const db = new Database(":memory:");
   migrate(db);
-  assert.deepEqual(readMergeSettings(db), { enabled: true });
+  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 1 });
   writeMergeSettings(db, { enabled: false });
   assert.equal(readMergeSettings(db).enabled, false);
-  writeMergeSettings(db, { enabled: true });
+  writeMergeSettings(db, { enabled: true, maxDurationDeltaMinutes: 2.5 });
+  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 2.5 });
 
   assert.deepEqual(
     enqueueMerges(db, [
@@ -420,6 +433,56 @@ test("merge queue is manual and can be turned off", () => {
   finishMerge(db, job!.id, "failed", "nope");
   assert.equal(retryFailedMerge(db, job!.id), "retried");
   assert.deepEqual(mergeTotals(db), { pending: 1, running: 0, done: 0, failed: 0 });
+});
+
+test("evaluatePair explains duration and audio rejections", () => {
+  const file: ScanFile = {
+    titleId: 1,
+    label: "Film (1999)",
+    path: "/m/Film-A.mkv",
+    container: "mkv",
+    playableLabel: "video",
+    audioTracks: [],
+    subtitleTracks: [],
+    versions: [],
+  };
+  const left = version({ path: "/m/Film-A.mkv", name: "Film-A.mkv", resolution: "2160p", audioLanguages: ["English"] });
+  const far = version({
+    path: "/m/Film-B.mkv",
+    name: "Film-B.mkv",
+    resolution: "1080p",
+    audioLanguages: ["Hungarian"],
+    durationMinutes: 125,
+  });
+  const rejected = evaluatePair(file, left, far, { maxDurationDeltaMinutes: 1 });
+  assert.equal(rejected.eligible, false);
+  assert.match(rejected.reason, /Runtimes differ by 5 min \(allowed 1 min\)/);
+  assert.equal(rejected.candidate, null);
+
+  const allowed = evaluatePair(file, left, far, { maxDurationDeltaMinutes: 5 });
+  assert.equal(allowed.eligible, true);
+  assert.ok(allowed.candidate);
+  assert.match(allowed.reason, /±5 min/);
+});
+
+test("manual title check lists eligible and rejected pairs", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, demoRecords());
+  rebuildCatalog(db);
+  const found = resolveTitleIdForMerge(db, "Blade Runner");
+  assert.ok(found);
+  assert.match(found!.label, /Blade Runner 2049/);
+  const byId = resolveTitleIdForMerge(db, String(found!.titleId));
+  assert.equal(byId?.titleId, found!.titleId);
+
+  const inspect = inspectTitleMerge(db, found!.titleId, { maxDurationDeltaMinutes: 1 });
+  assert.ok(inspect);
+  assert.ok(inspect!.versions.length >= 2);
+  assert.ok(inspect!.pairs.length >= 1);
+  assert.ok(inspect!.eligibleCount >= 1);
+  assert.ok(inspect!.pairs.some((pair) => pair.eligible));
+  db.close();
 });
 
 test("removing one waiting or failed merge leaves the others", () => {

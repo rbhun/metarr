@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.169
+
+- Version merge lets you set the max runtime difference and check any library title by name or id, showing why each version pair is or is not eligible.
+
 ## 0.0.168
 
 - Version merge skips pairs where either file has no known audio language, so an English copy is not offered against one with untagged or missing audio.

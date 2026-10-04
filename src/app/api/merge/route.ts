@@ -1,11 +1,17 @@
 import { compareFrames } from "@/lib/merge/compare";
-import { listMergeCandidates, mergeCandidateForPaths } from "@/lib/merge/candidates";
+import {
+  inspectTitleMerge,
+  listMergeCandidates,
+  mergeCandidateForPaths,
+  resolveTitleIdForMerge,
+} from "@/lib/merge/candidates";
 import {
   activeMerge,
   clearMergeJobs,
   enqueueMerges,
   latestMerge,
   mergeTotals,
+  parseMaxDurationDeltaMinutes,
   readMergePause,
   readMergeSettings,
   writeMergeSettings,
@@ -29,13 +35,17 @@ function existsFile(candidate: string): boolean {
   }
 }
 
-function itemFromBody(record: Record<string, unknown>): MergeItem | null {
+function pairOptions(db: ReturnType<typeof getDb>) {
+  return { maxDurationDeltaMinutes: readMergeSettings(db).maxDurationDeltaMinutes };
+}
+
+function itemFromBody(record: Record<string, unknown>, db: ReturnType<typeof getDb>): MergeItem | null {
   const leftPath = typeof record.leftPath === "string" ? record.leftPath.trim() : "";
   const rightPath = typeof record.rightPath === "string" ? record.rightPath.trim() : "";
   if (!leftPath || !rightPath || leftPath === rightPath) return null;
   const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
   const skipFrameCheck = record.skipFrameCheck === true;
-  const known = mergeCandidateForPaths(getDb(), leftPath, rightPath);
+  const known = mergeCandidateForPaths(db, leftPath, rightPath, pairOptions(db));
   if (known) {
     const preferred = known.videoFrom === "left" ? known.left.path : known.right.path;
     const requested = typeof record.videoPath === "string" ? record.videoPath.trim() : "";
@@ -53,13 +63,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const search = url.searchParams.get("q") ?? "";
   const includeCandidates = url.searchParams.get("candidates") === "1";
+  const settings = readMergeSettings(db);
   return NextResponse.json({
-    settings: readMergeSettings(db),
+    settings,
     totals: mergeTotals(db),
     active: activeMerge(db),
     pause: readMergePause(db),
     latest: latestMerge(db),
-    candidates: includeCandidates ? listMergeCandidates(db, search) : undefined,
+    candidates: includeCandidates ? listMergeCandidates(db, search, { maxDurationDeltaMinutes: settings.maxDurationDeltaMinutes }) : undefined,
   });
 }
 
@@ -74,6 +85,21 @@ export async function POST(request: Request) {
   const db = getDb();
   if (!readMergeSettings(db).enabled) {
     return NextResponse.json({ error: "Version merge is turned off in Settings." }, { status: 400 });
+  }
+
+  if (record.action === "inspect") {
+    const settings = readMergeSettings(db);
+    let titleId =
+      typeof record.titleId === "number" && Number.isInteger(record.titleId) && record.titleId > 0 ? record.titleId : null;
+    if (!titleId && typeof record.title === "string") {
+      const found = resolveTitleIdForMerge(db, record.title);
+      if (!found) return NextResponse.json({ error: "No library title matched that name or id." }, { status: 404 });
+      titleId = found.titleId;
+    }
+    if (!titleId) return NextResponse.json({ error: "Choose a library title to check." }, { status: 400 });
+    const inspect = inspectTitleMerge(db, titleId, { maxDurationDeltaMinutes: settings.maxDurationDeltaMinutes });
+    if (!inspect) return NextResponse.json({ error: "That library title was not found." }, { status: 404 });
+    return NextResponse.json({ inspect, settings });
   }
 
   if (record.action === "compare") {
@@ -94,7 +120,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const item = itemFromBody(record);
+  const item = itemFromBody(record, db);
   if (!item) return NextResponse.json({ error: "Choose two versions of the same title to merge." }, { status: 400 });
   const result = enqueueMerges(db, [item]);
   kickMergeWorker();
@@ -110,7 +136,16 @@ export async function PUT(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
-  writeMergeSettings(db, { enabled: typeof record.enabled === "boolean" ? record.enabled : readMergeSettings(db).enabled });
+  const current = readMergeSettings(db);
+  const maxDurationDeltaMinutes =
+    record.maxDurationDeltaMinutes == null ? current.maxDurationDeltaMinutes : parseMaxDurationDeltaMinutes(record.maxDurationDeltaMinutes);
+  if (maxDurationDeltaMinutes == null) {
+    return NextResponse.json({ error: "Use a runtime difference between 0 and 120 minutes." }, { status: 400 });
+  }
+  writeMergeSettings(db, {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : current.enabled,
+    maxDurationDeltaMinutes,
+  });
   kickMergeWorker();
   return NextResponse.json({ settings: readMergeSettings(db) });
 }
