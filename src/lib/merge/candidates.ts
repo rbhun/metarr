@@ -53,6 +53,20 @@ export function languagesOnlyIn(left: string[], right: string[]): string[] {
   return namedLanguages(left).filter((language) => !namedLanguages(right).some((other) => sameSpokenLanguage(language, other)));
 }
 
+/**
+ * Audio on the non-video file that the video source lacks.
+ * Extra languages already on the better file do not make a useful merge.
+ */
+export function donorAudioLanguages(
+  left: Pick<MergeVersionView, "audioLanguages">,
+  right: Pick<MergeVersionView, "audioLanguages">,
+  videoFrom: "left" | "right",
+): string[] {
+  return videoFrom === "left"
+    ? languagesOnlyIn(right.audioLanguages, left.audioLanguages)
+    : languagesOnlyIn(left.audioLanguages, right.audioLanguages);
+}
+
 function editionConflict(left: string | null, right: string | null): boolean {
   if (!left || !right) return false;
   return left.toLowerCase() !== right.toLowerCase();
@@ -99,17 +113,16 @@ export function pairCandidates(file: ScanFile): MergeCandidate[] {
       const right = versions[j]!;
       const duration = durationsCloseMinutes(left.durationMinutes, right.durationMinutes);
       if (!duration.ok) continue;
+      const videoFrom = pickVideoSource(left, right);
+      const donorAudio = donorAudioLanguages(left, right, videoFrom);
+      if (donorAudio.length === 0) continue;
       const audioOnlyLeft = languagesOnlyIn(left.audioLanguages, right.audioLanguages);
       const audioOnlyRight = languagesOnlyIn(right.audioLanguages, left.audioLanguages);
-      if (audioOnlyLeft.length === 0 && audioOnlyRight.length === 0) continue;
       const subtitleOnlyLeft = languagesOnlyIn(left.subtitleLanguages, right.subtitleLanguages);
       const subtitleOnlyRight = languagesOnlyIn(right.subtitleLanguages, left.subtitleLanguages);
-      const videoFrom = pickVideoSource(left, right);
       const conflict = editionConflict(left.edition, right.edition);
-      const audioParts = [
-        audioOnlyLeft.length ? `${audioOnlyLeft.join(", ")} only on ${left.name}` : null,
-        audioOnlyRight.length ? `${audioOnlyRight.join(", ")} only on ${right.name}` : null,
-      ].filter(Boolean);
+      const donor = videoFrom === "left" ? right : left;
+      const audioParts = `${donorAudio.join(", ")} from ${donor.name}`;
       pairs.push({
         key: `${left.path}\0${right.path}`,
         titleId: file.titleId ?? null,
@@ -124,8 +137,8 @@ export function pairCandidates(file: ScanFile): MergeCandidate[] {
         subtitleOnlyRight,
         editionConflict: conflict,
         reason: conflict
-          ? `Same length, but labels say ${left.edition} and ${right.edition}. ${audioParts.join("; ")}.`
-          : `Same length (±${Math.round(duration.toleranceSeconds / 60)} min). ${audioParts.join("; ")}.`,
+          ? `Same length, but labels say ${left.edition} and ${right.edition}. Adds ${audioParts}.`
+          : `Same length (±${Math.round(duration.toleranceSeconds / 60)} min). Adds ${audioParts}.`,
       });
     }
   }
@@ -181,11 +194,13 @@ export function candidateFromVersions(
 ): MergeCandidate | null {
   const duration = durationsCloseMinutes(left.durationMinutes, right.durationMinutes);
   if (!duration.ok) return null;
+  const videoFrom = pickVideoSource(left, right);
+  const donorAudio = donorAudioLanguages(left, right, videoFrom);
+  if (donorAudio.length === 0) return null;
   const audioOnlyLeft = languagesOnlyIn(left.audioLanguages, right.audioLanguages);
   const audioOnlyRight = languagesOnlyIn(right.audioLanguages, left.audioLanguages);
-  if (audioOnlyLeft.length === 0 && audioOnlyRight.length === 0) return null;
-  const videoFrom = pickVideoSource(left, right);
   const conflict = editionConflict(left.edition, right.edition);
+  const donor = videoFrom === "left" ? right : left;
   return {
     key: `${left.path}\0${right.path}`,
     titleId,
@@ -200,7 +215,7 @@ export function candidateFromVersions(
     subtitleOnlyRight: languagesOnlyIn(right.subtitleLanguages, left.subtitleLanguages),
     editionConflict: conflict,
     reason: conflict
-      ? `Same length, but labels say ${left.edition} and ${right.edition}.`
-      : "Same length with complementary audio.",
+      ? `Same length, but labels say ${left.edition} and ${right.edition}. Adds ${donorAudio.join(", ")} from ${donor.name}.`
+      : `Same length. Adds ${donorAudio.join(", ")} from ${donor.name}.`,
   };
 }

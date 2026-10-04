@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.167
+
+- Version merge only lists a pair when the worse file has audio the better video source lacks, so a 2160p Russian+English copy is not offered against a 480p English-only copy.
+
 ## 0.0.166
 
 - Fix TypeScript build errors from the ghost-title merge tests (`poster_path` typing and `scanOneFile` roots option).
