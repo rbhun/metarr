@@ -15,6 +15,7 @@ export type MergeVersionView = {
   name: string;
   resolution: string | null;
   bitrateKbps: number | null;
+  frameRate: string | null;
   fileBytes: number | null;
   hdr: HdrLabel;
   edition: string | null;
@@ -143,6 +144,7 @@ function toView(version: MediaVersion, detections?: Map<string, StoredDetection>
     name: version.name,
     resolution: version.resolution,
     bitrateKbps: version.bitrateKbps,
+    frameRate: version.frameRate ?? null,
     fileBytes: version.fileBytes,
     hdr: version.hdr,
     edition: version.edition,

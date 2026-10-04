@@ -5,14 +5,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { formatVersionFps, markBitrate, markClass, markFrameRate, markIfDifferent, markResolution, type FieldMark } from "@/lib/merge/marks";
 
 type VersionView = {
   path: string;
   name: string;
   resolution: string | null;
   bitrateKbps: number | null;
+  frameRate: string | null;
   fileBytes: number | null;
   hdr: string;
   edition: string | null;
@@ -83,16 +85,41 @@ function formatBitrate(kbps: number | null): string | null {
   return `${Math.round(kbps)} kbps`;
 }
 
-function versionLine(version: VersionView): string {
-  return [
-    version.resolution,
-    version.hdr !== "none" ? version.hdr : null,
-    formatBitrate(version.bitrateKbps),
-    version.edition,
-    version.durationMinutes != null ? `${version.durationMinutes} min` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+function Stat({ text, mark }: { text: string | null; mark: FieldMark }) {
+  if (!text) return null;
+  const color = markClass(mark);
+  return <span className={color || undefined}>{text}</span>;
+}
+
+function joinStats(parts: Array<ReactNode>) {
+  const shown = parts.filter(Boolean);
+  const nodes: ReactNode[] = [];
+  shown.forEach((part, index) => {
+    if (index) nodes.push(<span key={`dot-${index}`}> · </span>);
+    nodes.push(part);
+  });
+  return nodes;
+}
+
+function versionStats(version: VersionView, other: VersionView) {
+  const hdr = version.hdr !== "none" ? version.hdr : null;
+  const otherHdr = other.hdr !== "none" ? other.hdr : null;
+  return joinStats([
+    <Stat key="res" text={version.resolution} mark={markResolution(version.resolution, other.resolution)} />,
+    <Stat key="fps" text={formatVersionFps(version.frameRate)} mark={markFrameRate(version.frameRate, other.frameRate)} />,
+    <Stat key="hdr" text={hdr} mark={markIfDifferent(hdr, otherHdr)} />,
+    <Stat key="rate" text={formatBitrate(version.bitrateKbps)} mark={markBitrate(version.bitrateKbps, other.bitrateKbps)} />,
+    <Stat key="edition" text={version.edition} mark={markIfDifferent(version.edition, other.edition)} />,
+    <Stat
+      key="dur"
+      text={version.durationMinutes != null ? `${version.durationMinutes} min` : null}
+      mark={
+        version.durationMinutes != null && other.durationMinutes != null && version.durationMinutes !== other.durationMinutes
+          ? "differ"
+          : null
+      }
+    />,
+  ]);
 }
 
 function audioLine(candidate: Pick<Candidate, "videoFrom" | "audioOnlyLeft" | "audioOnlyRight">): string {
@@ -183,8 +210,12 @@ function PairCard({
               <span className="text-muted-foreground"> · all audio and subtitles from both files</span>
             </p>
           ) : null}
-          <p className="text-xs text-muted-foreground">A · {versionLine(left)} · {left.audioLanguages.join(", ") || "no audio languages"}</p>
-          <p className="text-xs text-muted-foreground">B · {versionLine(right)} · {right.audioLanguages.join(", ") || "no audio languages"}</p>
+          <p className="text-xs text-muted-foreground">
+            A · {versionStats(left, right)} · {left.audioLanguages.join(", ") || "no audio languages"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            B · {versionStats(right, left)} · {right.audioLanguages.join(", ") || "no audio languages"}
+          </p>
           {eligible && audioOnlyLeft && audioOnlyRight ? (
             <p className="text-xs">{audioLine({ videoFrom, audioOnlyLeft, audioOnlyRight })}</p>
           ) : null}

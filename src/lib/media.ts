@@ -1402,6 +1402,7 @@ export function versionsFrom(files: MediaFile[]): MediaVersion[] {
       is3d: file.is3d,
       qualityName: file.qualityName,
       bitrateKbps: file.bitrateKbps ?? null,
+      frameRate: file.frameRate ?? null,
       playableLabel: playableFrom(true, file.container, file.path),
       edition: editionLabel(file.path),
       audioLanguages: uniqueLanguages(file.audioLanguages),

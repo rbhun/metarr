@@ -81,6 +81,7 @@ test("a 1080p SDR file stays listed beside a 2160p HDR file", () => {
       audioLanguages: ["Hungarian", "English"],
       subtitleLanguages: ["English"],
       bitrateKbps: 43000,
+      frameRate: "23.976 fps",
     },
     {
       container: "mkv",
@@ -102,6 +103,7 @@ test("a 1080p SDR file stays listed beside a 2160p HDR file", () => {
   assert.equal(versions[1]?.edition, "IMAX");
   assert.deepEqual(versions[1]?.missing, ["subtitles"]);
   assert.deepEqual(versions[0]?.missing, []);
+  assert.equal(versions[0]?.frameRate, "23.976 fps");
   assert.equal(resolvedResolution({ resolution: null, height: 336, path: "/movies/Fantasia.avi" }), "336p");
 });
 

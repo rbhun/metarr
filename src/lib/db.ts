@@ -778,6 +778,7 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         is3d: version.is3d === true,
         qualityName: typeof version.qualityName === "string" ? version.qualityName : null,
         bitrateKbps: typeof version.bitrateKbps === "number" ? version.bitrateKbps : null,
+        frameRate: typeof version.frameRate === "string" ? version.frameRate : null,
         playableLabel: asPlayable(typeof version.playableLabel === "string" ? version.playableLabel : null),
         edition: typeof version.edition === "string" ? version.edition : null,
         audioLanguages: Array.isArray(version.audioLanguages)
