@@ -10,6 +10,8 @@ export type Matchable = {
   tvdbId: string | null;
   guid: string | null;
   extraKeys?: string[];
+  /** Normalized file paths. Same path means the same movie across apps. */
+  pathKeys?: string[];
 };
 
 export function fallbackKey(kind: TitleKind, title: string, year: number | null): string | null {
@@ -19,7 +21,8 @@ export function fallbackKey(kind: TitleKind, title: string, year: number | null)
   return `${kind}|${normalized}|${year}`;
 }
 
-export function externalKeys(item: Matchable): string[] {
+/** Cross-app ids that identify the same title in Plex, Radarr, Sonarr, and Bazarr. */
+export function sharedIdKeys(item: Matchable): string[] {
   const keys: string[] = [];
   const imdb = normalizeImdb(item.imdbId);
   if (imdb) keys.push(`imdb:${item.kind}:${imdb}`);
@@ -27,6 +30,11 @@ export function externalKeys(item: Matchable): string[] {
   if (tmdb) keys.push(`tmdb:${item.kind}:${tmdb}`);
   const tvdb = normalizeNumericId(item.tvdbId);
   if (tvdb) keys.push(`tvdb:${item.kind}:${tvdb}`);
+  return keys;
+}
+
+export function externalKeys(item: Matchable): string[] {
+  const keys = sharedIdKeys(item);
   if (item.guid?.trim()) keys.push(`guid:${item.kind}:${item.guid.trim()}`);
   for (const extra of item.extraKeys ?? []) {
     if (extra.trim()) keys.push(extra.trim());
@@ -35,9 +43,10 @@ export function externalKeys(item: Matchable): string[] {
 }
 
 /**
- * Group records that share an external id. Title + year is only used when it is unambiguous:
- * id-less rows join a single id-backed group, or each other when nobody has an id.
- * Two groups that already disagree on ids stay apart.
+ * Group records that share an external id or the same file path. Title + year is only used
+ * when it is unambiguous: rows without a shared imdb/tmdb/tvdb id join a single id-backed
+ * group, or each other when nobody has one. A Plex-only guid does not block that join.
+ * Two groups that already disagree on shared ids stay apart unless a file path links them.
  */
 export function clusterMatches<T extends Matchable>(items: T[]): T[][] {
   const parent = items.map((_, index) => index);
@@ -65,6 +74,13 @@ export function clusterMatches<T extends Matchable>(items: T[]): T[][] {
       if (previous === undefined) buckets.set(key, index);
       else union(previous, index);
     }
+    for (const pathKey of item.pathKeys ?? []) {
+      const key = pathKey.trim().toLowerCase();
+      if (!key) continue;
+      const previous = buckets.get(`path:${item.kind}:${key}`);
+      if (previous === undefined) buckets.set(`path:${item.kind}:${key}`, index);
+      else union(previous, index);
+    }
   });
 
   const byFallback = new Map<string, number[]>();
@@ -87,7 +103,7 @@ export function clusterMatches<T extends Matchable>(items: T[]): T[][] {
     if (roots.size <= 1) continue;
     const rooted = [...roots.entries()].map(([root, members]) => ({
       root,
-      hasExternal: members.some((index) => externalKeys(items[index]!).length > 0),
+      hasExternal: members.some((index) => sharedIdKeys(items[index]!).length > 0),
     }));
     const withIds = rooted.filter((entry) => entry.hasExternal);
     const withoutIds = rooted.filter((entry) => !entry.hasExternal);

@@ -234,6 +234,70 @@ test("plex without ids still joins a radarr movie on title and year", () => {
   db.close();
 });
 
+test("plex guid and radarr merge on the same file path", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const file = {
+    container: "mkv",
+    path: "/movies/Oldboy (2003)/Oldboy.mkv",
+    qualityName: null,
+    resolution: "1080p" as const,
+    hdr: "none" as const,
+    is3d: false,
+    audioLanguages: ["Korean"],
+    subtitleLanguages: ["English"],
+  };
+  insertSourceRecords(db, [
+    withMedia(
+      sourceDraft({
+        connector: "plex",
+        kind: "movie",
+        externalKey: "item:oldboy",
+        title: "Oldboy",
+        year: 2003,
+        guid: "plex://movie/5d7768292e80df001ebde1c2",
+        rating: 8.1,
+        posterPath: "/library/metadata/1/thumb",
+      }),
+      [file],
+    ),
+    withMedia(
+      sourceDraft({
+        connector: "radarr",
+        kind: "movie",
+        externalKey: "9",
+        title: "Oldboy",
+        year: 2003,
+        imdbId: "tt0364569",
+        tmdbId: "670",
+        rating: 8.3,
+      }),
+      [file],
+    ),
+    withMedia(
+      sourceDraft({
+        connector: "bazarr",
+        kind: "movie",
+        externalKey: "9",
+        title: "Oldboy",
+        year: 2003,
+        imdbId: "tt0364569",
+        tmdbId: "670",
+      }),
+      [file],
+    ),
+  ]);
+  rebuildCatalog(db);
+  const rows = titles(db);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.in_plex, 1);
+  assert.equal(rows[0]?.in_radarr, 1);
+  assert.equal(rows[0]?.in_bazarr, 1);
+  assert.equal(rows[0]?.rating, 8.1);
+  assert.equal(rows[0]?.poster_path, "/library/metadata/1/thumb");
+  db.close();
+});
+
 test("both resolutions of one movie stay on the title", () => {
   const db = new Database(":memory:");
   migrate(db);

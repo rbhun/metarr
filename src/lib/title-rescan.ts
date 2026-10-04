@@ -160,6 +160,7 @@ export async function rescanTitle(
       const match = chooseMatch(known, videoPath, scan.roots) ?? chooseMatch(known, local, scan.roots);
       const drafted = await scanOneFile(local, match, {
         underSeries: underKnownSeries(known, videoPath, scan.roots) || underKnownSeries(known, local, scan.roots),
+        roots: scan.roots,
       });
       if (!drafted) continue;
       drafts.push({

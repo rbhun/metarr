@@ -31,6 +31,32 @@ test("title and year attach a row that has no external id", () => {
   assert.equal(groups.length, 1);
 });
 
+test("a plex guid alone does not block joining radarr on title and year", () => {
+  const groups = clusterMatches([
+    item({ title: "Oldboy", year: 2003, guid: "plex://movie/oldboy" }),
+    item({ title: "Oldboy", year: 2003, imdbId: "tt0364569", tmdbId: "670" }),
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]?.length, 2);
+});
+
+test("the same file path merges plex and radarr even when ids disagree", () => {
+  const path = "/movies/oldboy (2003)/oldboy.mkv";
+  const groups = clusterMatches([
+    item({ title: "Oldboy", year: 2003, guid: "plex://movie/oldboy", pathKeys: [path] }),
+    item({ title: "Oldboy", year: 2003, imdbId: "tt0364569", pathKeys: [path] }),
+    item({
+      title: "Oldboy",
+      year: 2003,
+      imdbId: "tt0364569",
+      pathKeys: [path],
+      extraKeys: ["bazarr:9"],
+    }),
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]?.length, 3);
+});
+
 test("different imdb ids stay split even when the title matches", () => {
   const groups = clusterMatches([
     item({ title: "The Office", year: 2005, imdbId: "tt0386676" }),
