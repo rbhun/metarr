@@ -5,7 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type VersionView = {
@@ -216,6 +216,7 @@ export function MergeView() {
   const [skipFrame, setSkipFrame] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [deltaText, setDeltaText] = useState("1");
+  const deltaDirtyRef = useRef(false);
   const [savingDelta, setSavingDelta] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const [inspecting, setInspecting] = useState(false);
@@ -229,7 +230,8 @@ export function MergeView() {
       const next = (await response.json().catch(() => null)) as MergeBody | null;
       if (!response.ok || !next) throw new Error(next?.error || "Merge candidates could not be loaded.");
       setBody(next);
-      setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      // Polling must not clobber the field while the user is editing it.
+      if (!deltaDirtyRef.current) setDeltaText(String(next.settings.maxDurationDeltaMinutes));
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Merge candidates could not be loaded.");
@@ -268,7 +270,10 @@ export function MergeView() {
       });
       const next = (await response.json().catch(() => null)) as { error?: string; settings?: MergeBody["settings"] } | null;
       if (!response.ok) throw new Error(next?.error || "Could not save the runtime difference.");
-      if (next?.settings) setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      if (next?.settings) {
+        deltaDirtyRef.current = false;
+        setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      }
       toast.success(`Runtime difference set to ${next?.settings?.maxDurationDeltaMinutes ?? value} min.`);
       await load(query);
       if (inspect) await checkTitle(inspect.label);
@@ -433,7 +438,16 @@ export function MergeView() {
                 value={deltaText}
                 disabled={savingDelta}
                 className="w-28"
-                onChange={(event) => setDeltaText(event.target.value)}
+                onChange={(event) => {
+                  deltaDirtyRef.current = true;
+                  setDeltaText(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void saveDelta();
+                  }
+                }}
               />
               <Button type="button" size="sm" disabled={savingDelta} onClick={() => void saveDelta()}>
                 {savingDelta ? "Saving…" : "Save"}
