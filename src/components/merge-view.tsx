@@ -74,11 +74,10 @@ function versionLine(version: VersionView): string {
 }
 
 function audioLine(candidate: Candidate): string {
-  const parts = [
-    candidate.audioOnlyLeft.length ? `${candidate.audioOnlyLeft.join(", ")} on A` : null,
-    candidate.audioOnlyRight.length ? `${candidate.audioOnlyRight.join(", ")} on B` : null,
-  ].filter(Boolean);
-  return parts.join(" · ") || "Complementary audio";
+  const donor = candidate.videoFrom === "left" ? candidate.audioOnlyRight : candidate.audioOnlyLeft;
+  const side = candidate.videoFrom === "left" ? "B" : "A";
+  if (!donor.length) return "No new audio from the other file";
+  return `Adds ${donor.join(", ")} from ${side}`;
 }
 
 function summary(body: MergeBody | null): string {

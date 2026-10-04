@@ -4,7 +4,14 @@ import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
 import { migrate, insertSourceRecords } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
-import { candidateFromVersions, languagesOnlyIn, listMergeCandidates, pairCandidates, type MergeVersionView } from "@/lib/merge/candidates";
+import {
+  candidateFromVersions,
+  donorAudioLanguages,
+  languagesOnlyIn,
+  listMergeCandidates,
+  pairCandidates,
+  type MergeVersionView,
+} from "@/lib/merge/candidates";
 import {
   durationsCloseMinutes,
   durationsCloseSeconds,
@@ -113,6 +120,7 @@ test("complementary audio languages make a pair", () => {
   assert.equal(pair!.videoFrom, "left");
   assert.deepEqual(pair!.audioOnlyRight, ["Hungarian"]);
   assert.equal(pair!.editionConflict, false);
+  assert.match(pair!.reason, /Adds Hungarian from Film-Hun\.mkv/);
 
   const extended = candidateFromVersions("Film (1999)", 1, left, version({ ...right, durationMinutes: 145, edition: "Extended" }));
   assert.equal(extended, null);
@@ -124,6 +132,79 @@ test("complementary audio languages make a pair", () => {
     version({ ...right, edition: "Remastered" }),
   );
   assert.ok(labeled?.editionConflict);
+});
+
+test("a worse file that adds no new audio is not a merge candidate", () => {
+  const uhd = version({
+    path: "/m/Film-UHD.mkv",
+    name: "Film-UHD.mkv",
+    resolution: "2160p",
+    bitrateKbps: 45_000,
+    audioLanguages: ["Russian", "English"],
+  });
+  const sd = version({
+    path: "/m/Film-SD.mkv",
+    name: "Film-SD.mkv",
+    resolution: "480p",
+    bitrateKbps: 1700,
+    audioLanguages: ["English"],
+  });
+  assert.deepEqual(donorAudioLanguages(uhd, sd, "left"), []);
+  assert.equal(candidateFromVersions("Film (1999)", 1, uhd, sd), null);
+  assert.equal(
+    pairCandidates({
+      titleId: 1,
+      label: "Film (1999)",
+      path: uhd.path,
+      container: "mkv",
+      playableLabel: "video",
+      audioTracks: [],
+      subtitleTracks: [],
+      versions: [
+        {
+          name: uhd.name,
+          path: uhd.path,
+          container: "mkv",
+          resolution: "2160p",
+          hdr: "none",
+          is3d: false,
+          qualityName: null,
+          bitrateKbps: 45_000,
+          playableLabel: "video",
+          edition: null,
+          audioLanguages: ["Russian", "English"],
+          subtitleLanguages: [],
+          audioTracks: [],
+          subtitleTracks: [],
+          missing: [],
+          flags: [],
+          fileBytes: 20_000_000_000,
+          durationMinutes: 62,
+        },
+        {
+          name: sd.name,
+          path: sd.path,
+          container: "mkv",
+          resolution: "480p",
+          hdr: "none",
+          is3d: false,
+          qualityName: null,
+          bitrateKbps: 1700,
+          playableLabel: "video",
+          edition: null,
+          audioLanguages: ["English"],
+          subtitleLanguages: [],
+          audioTracks: [],
+          subtitleTracks: [],
+          missing: [],
+          flags: [],
+          fileBytes: 700_000_000,
+          durationMinutes: 62,
+        },
+      ],
+    }).length,
+    0,
+  );
 });
 
 test("pairCandidates walks every version pair on a title", () => {
