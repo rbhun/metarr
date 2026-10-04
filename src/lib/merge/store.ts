@@ -1,9 +1,13 @@
 import path from "node:path";
 import type Database from "better-sqlite3";
 
+import { DEFAULT_MAX_DURATION_DELTA_MINUTES } from "@/lib/merge/compare";
+
 export type MergeSettings = {
   /** When off, the Merge page stays hidden and new jobs are refused. Manual only — never scheduled. */
   enabled: boolean;
+  /** Max runtime difference in minutes for two versions to count as the same edit. */
+  maxDurationDeltaMinutes: number;
 };
 
 export type MergeItem = {
@@ -67,13 +71,29 @@ function setMetaValue(db: Database.Database, key: string, value: string) {
   db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
 }
 
-export function readMergeSettings(db: Database.Database): MergeSettings {
-  // Beta default: on, so the page is reachable without a trip through Settings first.
-  return { enabled: meta(db, "merge_enabled") !== "0" };
+export function parseMaxDurationDeltaMinutes(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 120) return null;
+  return Math.round(numeric * 10) / 10;
 }
 
-export function writeMergeSettings(db: Database.Database, settings: { enabled?: boolean }) {
+export function readMergeSettings(db: Database.Database): MergeSettings {
+  // Beta default: on, so the page is reachable without a trip through Settings first.
+  const delta = parseMaxDurationDeltaMinutes(meta(db, "merge_max_duration_delta_minutes"));
+  return {
+    enabled: meta(db, "merge_enabled") !== "0",
+    maxDurationDeltaMinutes: delta ?? DEFAULT_MAX_DURATION_DELTA_MINUTES,
+  };
+}
+
+export function writeMergeSettings(
+  db: Database.Database,
+  settings: { enabled?: boolean; maxDurationDeltaMinutes?: number },
+) {
   if (settings.enabled != null) setMetaValue(db, "merge_enabled", settings.enabled ? "1" : "0");
+  if (settings.maxDurationDeltaMinutes != null) {
+    setMetaValue(db, "merge_max_duration_delta_minutes", String(settings.maxDurationDeltaMinutes));
+  }
 }
 
 export function readMergePause(db: Database.Database): MergePause | null {

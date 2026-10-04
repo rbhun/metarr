@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.170
+
+- Version merge uses the same audio languages the library shows (tagged and detected tracks), so pairs like a 2160p English copy and a 1080p English+Italian copy are offered again.
+
+## 0.0.169
+
+- Version merge lets you set the max runtime difference and check any library title by name or id, showing why each version pair is or is not eligible.
+
 ## 0.0.168
 
 - Version merge skips pairs where either file has no known audio language, so an English copy is not offered against one with untagged or missing audio.
