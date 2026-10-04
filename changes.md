@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.182
+
+- Detect all unknown queues remaining audio and subtitle tracks across the library, and Tasks lists failed language checks so Redo and Redo all start them now.
+
 ## 0.0.181
 
 - Check all runs frame compare on every possible pair, including mismatched frame rates and runtimes over the set limit, then sorts the list so the best matches are first.

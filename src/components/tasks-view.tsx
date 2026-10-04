@@ -238,10 +238,10 @@ export function TasksView() {
     const noun = queue === "remux" ? (count === 1 ? "disc" : "discs") : queue === "rewrap" ? (count === 1 ? "file" : "files") : queue === "language" ? (count === 1 ? "track" : "tracks") : count === 1 ? "job" : "jobs";
     const shown = count.toLocaleString("en");
     const when =
-      queue === "language" || queue === "all"
-        ? " Language checks wait for the overnight window."
-        : queue === "remux" || queue === "rewrap"
-          ? " They wait for their schedule window."
+      queue === "remux" || queue === "rewrap"
+        ? " They wait for their schedule window."
+        : queue === "all"
+          ? " Language checks start now. Disc remuxes and rewraps wait for their schedule window."
           : "";
     if (!window.confirm(`Queue ${shown} failed ${noun} again?${when}`)) return;
     setRedoingAll(true);
@@ -257,8 +257,8 @@ export function TasksView() {
       toast.success(
         retried === 0
           ? "Nothing to queue."
-          : queue === "language" || queue === "all"
-            ? `${retried.toLocaleString("en")} queued for the next language window.`
+          : queue === "all"
+            ? `${retried.toLocaleString("en")} queued again. Language checks start now.`
             : `${retried.toLocaleString("en")} queued again.`,
       );
       await load();
@@ -320,7 +320,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Language checks, disc remuxes, and MKV rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
+                Language checks, disc remuxes, and MKV rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open. Failed language checks are under Languages → Failed; Redo starts that track now.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

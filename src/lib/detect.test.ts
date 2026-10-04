@@ -14,6 +14,7 @@ import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
+import { queueDetection } from "@/lib/detect/queue";
 import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
@@ -861,7 +862,10 @@ test("redoing a failure whose track is already queued removes the failure and ru
   enqueueTargets(db, [target], "window");
   const job = claimNextJob(db, true);
   finishJob(db, job!.id, "failed", "No subtitle images could be read.");
-  enqueueTargets(db, [target], "window");
+  db.prepare(
+    `INSERT INTO detect_jobs (path, kind, ordinal, priority, status, label, format, placement, stream_label, created_at)
+     VALUES (?, ?, ?, 'window', 'pending', ?, ?, ?, ?, ?)`,
+  ).run(target.path, target.kind, target.ordinal, target.label, target.format, target.placement, target.streamLabel, new Date().toISOString());
   assert.equal(retryFailedJob(db, job!.id), "already");
   assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
   const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
@@ -890,7 +894,25 @@ test("redo all keeps one retry per track and drops failures that are already que
   db.close();
 });
 
-test("redoing every failed language check puts them on the overnight queue", () => {
+test("queuing a track again reopens its failed job instead of adding a second row", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const target = { path: "/audio.mkv", kind: "audio" as const, ordinal: 0, label: "Audio", format: "AC3", placement: "internal", streamLabel: null };
+  enqueueTargets(db, [target], "window");
+  const job = claimNextJob(db, true);
+  finishJob(db, job!.id, "failed", "The audio sample could not be read in time.");
+  const again = enqueueTargets(db, [target], "immediate");
+  assert.equal(again.added, 1);
+  assert.equal(again.already, 0);
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
+  assert.equal(waiting.total, 1);
+  assert.equal(waiting.jobs[0]?.id, job!.id);
+  assert.equal(waiting.jobs[0]?.priority, "immediate");
+  db.close();
+});
+
+test("redoing every failed language check starts them now", () => {
   const db = new Database(":memory:");
   migrate(db);
   enqueueTargets(db, [
@@ -904,9 +926,38 @@ test("redoing every failed language check puts them on the overnight queue", () 
   assert.equal(retryAllFailedJobs(db), 2);
   const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
   assert.equal(waiting.total, 2);
-  assert.ok(waiting.jobs.every((row) => row.priority === "window"));
+  assert.ok(waiting.jobs.every((row) => row.priority === "immediate"));
   assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
   assert.equal(retryAllFailedJobs(db), 0);
+  db.close();
+});
+
+test("detect all unknown queues remaining library tracks and retries failed audio now", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  db.prepare(
+    `INSERT INTO catalog_titles (
+      kind, title, sort_title, playable_label, path, audio_tracks, subtitle_tracks, versions_json
+    ) VALUES ('movie', 'Dune', 'dune', 'video', '/movies/Dune.mkv', ?, ?, '[]')`,
+  ).run(
+    JSON.stringify([{ language: null, layout: "2.0", codec: "AAC", streamIndex: 0 }]),
+    JSON.stringify([{ language: null, placement: "internal", format: "SRT", forced: false, streamIndex: 0 }]),
+  );
+  enqueueTargets(
+    db,
+    [{ path: "/movies/Dune.mkv", kind: "audio", ordinal: 0, label: "Dune", format: "AAC", placement: null, streamLabel: null }],
+    "window",
+  );
+  const failed = claimNextJob(db, true);
+  finishJob(db, failed!.id, "failed", "The audio sample could not be read in time.");
+  const queued = queueDetection(db, { tracks: [], titles: [], episodes: [], all: true }, "immediate");
+  assert.ok(queued.added >= 2);
+  assert.equal(listJobs(db, { status: "failed", page: 1, pageSize: 50 }).total, 0);
+  const waiting = listJobs(db, { status: "pending", page: 1, pageSize: 50 });
+  assert.equal(waiting.total, 2);
+  assert.ok(waiting.jobs.every((row) => row.priority === "immediate"));
+  assert.ok(waiting.jobs.some((row) => row.kind === "audio"));
+  assert.ok(waiting.jobs.some((row) => row.kind === "subtitle"));
   db.close();
 });
 

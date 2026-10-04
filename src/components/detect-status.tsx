@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState, type ReactNode } from "react";
 
 type DetectStatusBody = {
   counts: { immediate: number; window: number; running: number };
+  totals?: { pending: number; running: number; done: number; failed: number; skipped: number };
   active: { label: string; kind: "audio" | "subtitle" } | null;
 };
 
@@ -27,11 +29,26 @@ export function DetectStatus() {
 
   if (!status) return null;
   const { counts, active } = status;
-  if (counts.running === 0 && counts.immediate === 0 && counts.window === 0 && !active) return null;
-  const parts = [
+  const failed = status.totals?.failed ?? 0;
+  if (counts.running === 0 && counts.immediate === 0 && counts.window === 0 && !active && failed === 0) return null;
+  const parts: ReactNode[] = [
     active ? `${active.kind === "audio" ? "Listening to" : "Reading"} ${active.label}` : null,
     counts.immediate ? `${counts.immediate} waiting to start` : null,
     counts.window ? `${counts.window} waiting for the window` : null,
-  ].filter(Boolean);
-  return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
+    failed ? (
+      <Link href="/tasks?queue=language&status=failed" className="underline underline-offset-2">
+        {failed === 1 ? "1 failed language check" : `${failed.toLocaleString("en")} failed language checks`}
+      </Link>
+    ) : null,
+  ].filter((part) => part != null);
+  return (
+    <p className="text-xs text-muted-foreground">
+      {parts.map((part, index) => (
+        <span key={index}>
+          {index > 0 ? " · " : null}
+          {part}
+        </span>
+      ))}
+    </p>
+  );
 }
