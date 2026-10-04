@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.175
+
+- Leave a movie that only has a short or an extra out of Duplicate versions. Those files stay on the title, and they no longer count as a second copy.
+
 ## 0.0.174
 
 - Fix the Docker TypeScript build: merge tests no longer fail typecheck on extra audio-track fields.

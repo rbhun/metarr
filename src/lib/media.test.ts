@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, featureCopyCount, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -183,6 +183,34 @@ test("a sample name and a tiny extra file are marked, a feature is not", () => {
   assert.deepEqual(versions.find((version) => version.name === "Sample.mkv")?.flags, ["sample", "short"]);
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("sample"));
   assert.ok(versions.find((version) => version.name === "ETRG.mp4")?.flags.includes("short"));
+});
+
+test("a feature plus a short or extra is one copy, two features are duplicates", () => {
+  const feature: MediaFile = {
+    container: "mkv",
+    path: "/movies/Film/Film.mkv",
+    qualityName: null,
+    resolution: "1080p",
+    hdr: "none",
+    is3d: false,
+    audioLanguages: ["English"],
+    subtitleLanguages: ["English"],
+    fileBytes: 8_000_000_000,
+    durationMinutes: 120,
+  };
+  const withBonus = versionsFrom([
+    feature,
+    { ...feature, path: "/movies/Film/Intro.mkv", fileBytes: 80_000_000, durationMinutes: 5 },
+    { ...feature, path: "/movies/Film/Extras/Interview.mkv", resolution: "480p", fileBytes: 400_000_000, durationMinutes: 8 },
+  ]);
+  assert.ok(withBonus.find((version) => version.name === "Intro.mkv")?.flags.includes("short"));
+  assert.ok(withBonus.find((version) => version.name === "Interview.mkv")?.flags.includes("extra"));
+  assert.equal(featureCopyCount(withBonus), 1);
+  const twoCopies = versionsFrom([
+    feature,
+    { ...feature, path: "/movies/Film/Film.720p.mkv", resolution: "720p", fileBytes: 2_000_000_000, durationMinutes: 120 },
+  ]);
+  assert.equal(featureCopyCount(twoCopies), 2);
 });
 
 test("extras, featurettes, outtakes, and comic relief are labeled from the path", () => {

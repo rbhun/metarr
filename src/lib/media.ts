@@ -1289,6 +1289,17 @@ export function isBonusFlag(flags: string[] | null | undefined): boolean {
   return Boolean(flags?.some((flag) => (BONUS_VERSION_FLAGS as readonly string[]).includes(flag)));
 }
 
+/** A short, sample, or bonus file is not another copy of the movie. */
+export function isFeatureCopy(flags: string[] | null | undefined): boolean {
+  if (!flags?.length) return true;
+  return !flags.some((flag) => flag === "sample" || flag === "short" || (BONUS_VERSION_FLAGS as readonly string[]).includes(flag));
+}
+
+export function featureCopyCount(versions: Array<{ path?: string | null; name: string; flags: string[] }>): number {
+  const featurePaths = versions.filter((version) => isFeatureCopy(version.flags)).map((version) => version.path ?? version.name);
+  return new Set(featurePaths.map((filePath) => copyGroupId(filePath, featurePaths))).size;
+}
+
 /** Flag for bonus material from the file or folder name. Featurettes and Features count as Extra. */
 export function bonusFlag(filePath: string | null | undefined): VersionFlag | null {
   if (!filePath?.trim()) return null;

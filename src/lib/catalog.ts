@@ -19,7 +19,8 @@ import {
   reconcileAudio,
   reconcileSubtitles,
   tagFileOrigin,
-  copyGroupId,
+  featureCopyCount,
+  isFeatureCopy,
   splitIdentity,
   resolutionRank,
   buildDetail,
@@ -341,8 +342,7 @@ function withTitleFlag(title: string, flags: string): string {
 
 function versionColumns(files: MediaFile[]) {
   const versions = versionsFrom(files);
-  const featureVersions = versions.filter((version) => !version.flags.some((flag) => flag === "extra" || flag === "outtake" || flag === "comic-relief" || flag === "trailer"));
-  const featurePaths = featureVersions.map((version) => version.path ?? version.name);
+  const featureVersions = versions.filter((version) => isFeatureCopy(version.flags));
   const split = featureVersions.some((version) => splitIdentity(version.path ?? version.name));
   const flags = [...new Set(versions.flatMap((version) => version.flags))];
   if (split) flags.push("split");
@@ -356,8 +356,8 @@ function versionColumns(files: MediaFile[]) {
     versionHdrs: versions.map((version) => version.hdr).join(","),
     versionFlags: flags.join(","),
     versionEditions: [...new Set(featureVersions.map((version) => version.edition).filter((edition): edition is string => Boolean(edition)))].join(","),
-    // Bonus files do not count toward Duplicate / None. Split parts are one copy, not two.
-    versionCount: new Set(featurePaths.map((filePath) => copyGroupId(filePath, featurePaths))).size,
+    // Shorts, samples, and bonus files do not count toward Duplicate / None. Split parts are one copy, not two.
+    versionCount: featureCopyCount(versions),
   };
 }
 
@@ -372,7 +372,7 @@ function bestResolution(values: Array<string | null>): string | null {
 const HOVER_KEY = "source_hover";
 let hoverReady = false;
 
-const VERSION_FILTER_KEY = "version_filter_v3";
+const VERSION_FILTER_KEY = "version_filter_v4";
 
 /** Rebuild stored titles once so language tooltips and version filter columns exist without another sync. */
 export function ensureHoverSources(db: Database.Database) {
