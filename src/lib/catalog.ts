@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
-import { clearCatalog, getMeta, loadSourceRecords, setMeta } from "@/lib/db";
+import { clearCatalog, getDb, getMeta, loadSourceRecords, setMeta } from "@/lib/db";
+import { mediaPathCandidates } from "@/lib/detect/paths";
+import { readDetectSettings } from "@/lib/detect/store";
 import { clusterMatches, externalKeys, fallbackKey, type Matchable } from "@/lib/match";
 import {
   bestHdr,
@@ -47,11 +49,19 @@ function matchable(record: SourceDraft, kind: TitleKind): SourceDraft & Matchabl
 function moviePathKeys(record: SourceDraft): string[] {
   const keys: string[] = [];
   const seen = new Set<string>();
+  let maps: ReturnType<typeof readDetectSettings>["pathMaps"] = [];
+  try {
+    maps = readDetectSettings(getDb()).pathMaps;
+  } catch {
+    maps = [];
+  }
   const add = (value: string | null | undefined) => {
-    const key = filePathKey(value);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    keys.push(key);
+    for (const candidate of mediaPathCandidates(value ?? "", maps)) {
+      const key = filePathKey(candidate);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+    }
   };
   add(record.path);
   for (const file of record.files) add(file.path);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-format";
 import { languageFromProbeTags } from "@/lib/detect/audio";
 import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
-import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { resolveMediaPath, mediaPathCandidates, type PathMap } from "@/lib/detect/paths";
 import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
@@ -178,11 +178,20 @@ type EpisodeCode = { season: number; episode: number };
 
 type KnownIndex = {
   roots: string[];
+  maps: PathMap[];
   records: SourceDraft[];
   byFolder: Map<string, SourceDraft[]>;
   episodes: SourceDraft[];
   movies: SourceDraft[];
 };
+
+function activePathMaps(): PathMap[] {
+  try {
+    return readDetectSettings(getDb()).pathMaps;
+  } catch {
+    return [];
+  }
+}
 
 export function episodeInName(name: string): EpisodeCode | null {
   const patterns = [
@@ -199,13 +208,14 @@ export function episodeInName(name: string): EpisodeCode | null {
   return null;
 }
 
-export function chooseMatch(records: SourceDraft[], filePath: string, roots: string[] = []): SourceDraft | null {
-  return pickMatch(indexKnown(records, roots), filePath);
+export function chooseMatch(records: SourceDraft[], filePath: string, roots: string[] = [], maps?: PathMap[]): SourceDraft | null {
+  return pickMatch(indexKnown(records, roots, maps), filePath);
 }
 
 /** True when the file's media folder already belongs to a series from Sonarr, Plex, or Bazarr. */
-export function underKnownSeries(records: SourceDraft[], filePath: string, roots: string[] = []): boolean {
-  return seriesIdsForPath(indexKnown(records, roots), filePath).length > 0;
+export function underKnownSeries(records: SourceDraft[], filePath: string, roots: string[] = [], maps?: PathMap[]): boolean {
+  const indexed = indexKnown(records, roots, maps);
+  return seriesIdsForPath(indexed, filePath).length > 0 || seriesTitleClaimsPath(indexed, filePath);
 }
 
 /** Disc playlists are named 00000.m2ts, 00366.m2ts, and similar. The folder around them is the title. */
@@ -223,7 +233,7 @@ export function filesRepresentingFolders(files: string[], known: SourceDraft[]):
       keep.push(file);
       continue;
     }
-    const folder = titleFromAncestors(file)?.directory ?? path.dirname(file);
+    const folder = titleFromAncestors(file, [])?.directory ?? path.dirname(file);
     const key = pathKey(folder) ?? folder;
     const list = streams.get(key) ?? [];
     list.push(file);
@@ -240,7 +250,7 @@ export function folderDraft(
   filePath: string,
   probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] },
   match: SourceDraft | null,
-  options: { underSeries?: boolean } = {},
+  options: { underSeries?: boolean; roots?: string[] } = {},
 ): SourceDraft | null {
   // Movie extras stay when they match that movie. Series Features/Extras folders
   // must not invent their own movie titles (often named Features or Extras).
@@ -248,13 +258,25 @@ export function folderDraft(
   // Unmatched files under a known series folder (Season folders, Specials, loose
   // videos without SxxExx) must not invent standalone movie titles either.
   if (!match && options.underSeries) return null;
+  const roots = options.roots ?? [];
   const base = path.basename(filePath);
-  const named = match?.kind === "episode" ? null : titleFromAncestors(filePath);
+  const named = match?.kind === "episode" ? null : titleFromAncestors(filePath, roots);
   const loose = match ? null : episodeInName(base);
   const guess = loose ? seriesGuess(base) : null;
   const stream = isStreamFile(filePath);
   const title = match?.title ?? (loose && guess ? guess : null) ?? named?.title ?? (stream ? "Untitled" : titleFromName(base));
   const year = match?.year ?? named?.year ?? (stream ? null : yearInName(base));
+  // Loose files sitting in the scan root (or titled after it) are not library titles.
+  const parentKey = pathKey(path.dirname(filePath));
+  if (
+    !match &&
+    roots.some((root) => {
+      const rootKey = pathKey(root);
+      return Boolean(rootKey && (rootKey === parentKey || normalizeTitle(path.basename(root)) === normalizeTitle(title)));
+    })
+  ) {
+    return null;
+  }
   const audioLanguages = uniqueLanguages(probed.audio.map((track) => track.language));
   const subtitleLanguages = uniqueLanguages(probed.subtitles.map((track) => track.language));
   const draft = sourceDraft({
@@ -356,7 +378,8 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     queueUnlabeledTracks(file, probed, recognized);
     const match = pickMatch(indexed, file);
     const draft = folderDraft(file, withSidecarFiles(file, probed), match, {
-      underSeries: seriesIdsForPath(indexed, file).length > 0,
+      underSeries: seriesIdsForPath(indexed, file).length > 0 || seriesTitleClaimsPath(indexed, file),
+      roots: present,
     });
     if (draft) drafts.push(draft);
   }
@@ -393,20 +416,23 @@ function matchRank(record: SourceDraft): number {
   return (record.imdbId || record.tmdbId || record.tvdbId ? 2 : 0) + (record.connector === "radarr" || record.connector === "sonarr" ? 1 : 0);
 }
 
-function indexKnown(records: SourceDraft[], roots: string[]): KnownIndex {
+function indexKnown(records: SourceDraft[], roots: string[], maps: PathMap[] = activePathMaps()): KnownIndex {
   const known = records.filter((record) => record.connector !== "files");
   const byFolder = new Map<string, SourceDraft[]>();
   for (const record of known) {
     for (const item of recordPaths(record)) {
-      const folder = mediaFolder(item, roots);
-      if (!folder) continue;
-      const list = byFolder.get(folder) ?? [];
-      list.push(record);
-      byFolder.set(folder, list);
+      for (const candidate of mediaPathCandidates(item, maps)) {
+        const folder = mediaFolder(candidate, roots);
+        if (!folder) continue;
+        const list = byFolder.get(folder) ?? [];
+        list.push(record);
+        byFolder.set(folder, list);
+      }
     }
   }
   return {
     roots,
+    maps,
     records: known,
     byFolder,
     episodes: known.filter((record) => record.kind === "episode" || record.kind === "series"),
@@ -415,13 +441,22 @@ function indexKnown(records: SourceDraft[], roots: string[]): KnownIndex {
 }
 
 function pickMatch(index: KnownIndex, filePath: string): SourceDraft | null {
-  return exactMatch(index.records, filePath) ?? matchByFolder(index, filePath) ?? matchEpisodeByName(index, filePath) ?? matchByFolderName(index, filePath);
+  return exactMatch(index.records, filePath, index.maps) ?? matchByFolder(index, filePath) ?? matchEpisodeByName(index, filePath) ?? matchByFolderName(index, filePath);
 }
 
-function exactMatch(records: SourceDraft[], filePath: string): SourceDraft | null {
-  const key = pathKey(filePath);
-  if (!key) return null;
-  const hits = records.filter((record) => recordPaths(record).some((item) => pathKey(item) === key));
+function exactMatch(records: SourceDraft[], filePath: string, maps: PathMap[] = activePathMaps()): SourceDraft | null {
+  const fileKeys = new Set<string>();
+  for (const candidate of [filePath, ...mediaPathCandidates(filePath, maps)]) {
+    const key = pathKey(candidate);
+    if (key) fileKeys.add(key);
+  }
+  if (!fileKeys.size) return null;
+  const hits = records.filter((record) =>
+    recordPaths(record).some((item) => mediaPathCandidates(item, maps).some((candidate) => {
+      const key = pathKey(candidate);
+      return Boolean(key && fileKeys.has(key));
+    })),
+  );
   hits.sort((left, right) => matchRank(right) - matchRank(left));
   return hits[0] ?? null;
 }
@@ -450,6 +485,48 @@ function seriesIdsForPath(index: KnownIndex, filePath: string): string[] {
   if (!folder) return [];
   const records = uniqueRecords(index.byFolder.get(folder) ?? []);
   return [...new Set(records.map(seriesId).filter((item): item is string => Boolean(item)))];
+}
+
+/** Folder title matches a known series even when Sonarr/Plex paths sit on the other side of a map. */
+function seriesTitleClaimsPath(index: KnownIndex, filePath: string): boolean {
+  const titles = new Set(
+    ancestorFolderTitles(filePath, index.roots)
+      .map((title) => normalizeTitle(title))
+      .filter(Boolean),
+  );
+  if (!titles.size) return false;
+  return index.episodes.some((record) => {
+    const name = record.kind === "series" ? record.title : record.seriesTitle;
+    return Boolean(name && titles.has(normalizeTitle(name)));
+  });
+}
+
+/** Title-like folder names above this file, stopping at scan roots. Skips Season folders. */
+function ancestorFolderTitles(filePath: string, roots: string[]): string[] {
+  const rootKeys = new Set(roots.map((root) => pathKey(root)).filter((key): key is string => Boolean(key)));
+  const titles: string[] = [];
+  let dir = path.dirname(filePath);
+  for (let depth = 0; depth < 8; depth += 1) {
+    const base = path.basename(dir);
+    const parent = path.dirname(dir);
+    if (!base || base === dir || base === "." || base === "/") break;
+    const dirKey = pathKey(dir);
+    if (dirKey && rootKeys.has(dirKey)) break;
+    if (!STRUCTURAL.has(base.toLowerCase()) && !isBonusFolderName(base) && !isSeasonFolderName(base) && !/^\d+$/.test(base)) {
+      const title = base
+        .replace(/\s*[\(\[](?:19|20)\d{2}[\)\]]\s*$/, "")
+        .replace(/[._]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (title && !/^\d+$/.test(title)) titles.push(title);
+    }
+    dir = parent;
+  }
+  return titles;
+}
+
+function isSeasonFolderName(name: string): boolean {
+  return /^(?:season|specials?|series)(?:\s*\d+)?$/i.test(name.trim().replace(/[._-]+/g, " "));
 }
 
 function matchByFolder(index: KnownIndex, filePath: string): SourceDraft | null {
@@ -490,7 +567,7 @@ function matchEpisodeByName(index: KnownIndex, filePath: string): SourceDraft | 
 }
 
 function matchByFolderName(index: KnownIndex, filePath: string): SourceDraft | null {
-  const named = titleFromAncestors(filePath);
+  const named = titleFromAncestors(filePath, index.roots);
   if (!named) return null;
   const title = normalizeTitle(named.title);
   if (!title) return null;
@@ -574,13 +651,17 @@ function isBonusFolderName(name: string): boolean {
   return /^(?:features?|featurettes?|extras?|outtakes?|bloopers?|trailers?|shorts?|scenes?|other|special features|behind the scenes|deleted scenes|interviews?)$/.test(key);
 }
 
-function titleFromAncestors(filePath: string): { title: string; year: number | null; directory: string } | null {
+function titleFromAncestors(filePath: string, roots: string[] = []): { title: string; year: number | null; directory: string } | null {
+  const rootKeys = new Set(roots.map((root) => pathKey(root)).filter((key): key is string => Boolean(key)));
   const found: Array<{ title: string; year: number | null; yearly: boolean; directory: string }> = [];
   let dir = path.dirname(filePath);
   for (let depth = 0; depth < 8; depth += 1) {
     const base = path.basename(dir);
     const parent = path.dirname(dir);
     if (!base || base === dir || base === "." || base === "/") break;
+    const dirKey = pathKey(dir);
+    // Scan roots are library folders (TV, Movies), not title names.
+    if (dirKey && rootKeys.has(dirKey)) break;
     const yearly = /[\(\[](?:19|20)\d{2}[\)\]]$/.test(base.trim());
     if (!STRUCTURAL.has(base.toLowerCase()) && !isBonusFolderName(base) && !/^\d+$/.test(base)) {
       const title = base

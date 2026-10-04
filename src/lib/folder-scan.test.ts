@@ -276,6 +276,73 @@ test("unmatched files under a known series folder do not invent movie titles", (
   assert.equal(draft.seriesTitle, "Top Gear");
 });
 
+test("a file in the TV scan root does not invent a title named TV", () => {
+  const file = "/mnt/media/TV/orphan-clip.mkv";
+  const roots = ["/mnt/media/TV"];
+  assert.equal(chooseMatch([], file, roots), null);
+  assert.equal(folderDraft(file, { audio: [], subtitles: [] }, null, { roots }), null);
+});
+
+test("path maps attach a local file to a plex movie and skip series invents", () => {
+  const maps = [{ from: "/data", to: "/mnt/media" }];
+  const roots = ["/mnt/media/TV", "/mnt/media/Movies"];
+  const plex = sourceDraft({
+    connector: "plex",
+    kind: "movie",
+    externalKey: "item:vadocok",
+    title: "Vadócok a Repülés Elbűvölő Mesterei, Állatkölykök",
+    year: 2012,
+    guid: "plex://movie/vadocok",
+    path: "/data/Movies/Vadócok a Repülés Elbűvölő Mesterei, Állatkölykök/Vadócok.mkv",
+  });
+  const localMovie = "/mnt/media/Movies/Vadócok a Repülés Elbűvölő Mesterei, Állatkölykök/Vadócok.mkv";
+  const movieMatch = chooseMatch([plex], localMovie, roots, maps);
+  assert.equal(movieMatch?.title, plex.title);
+  assert.equal(movieMatch?.connector, "plex");
+
+  const sonarr = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "88",
+    title: "Top Gear",
+    year: 2002,
+    tvdbId: "74608",
+    path: "/data/TV/Top Gear",
+  });
+  const episode = sourceDraft({
+    connector: "sonarr",
+    kind: "episode",
+    externalKey: "8801",
+    title: "Series 1, Episode 1",
+    seriesTitle: "Top Gear",
+    year: 2002,
+    season: 1,
+    episode: 1,
+    tvdbId: "74608",
+    parentKey: "sonarr-series:88",
+    path: "/data/TV/Top Gear/Season 01/Top Gear - S01E01.mkv",
+  });
+  const orphan = "/mnt/media/TV/Top Gear/Season 01/Episode Without Code.mkv";
+  assert.equal(chooseMatch([sonarr, episode], orphan, roots, maps), null);
+  assert.equal(underKnownSeries([sonarr, episode], orphan, roots, maps), true);
+});
+
+test("a series folder title still blocks invent when sonarr paths are elsewhere", () => {
+  const series = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "12",
+    title: "Hetedik mennyorszag",
+    year: 1996,
+    tvdbId: "73838",
+    path: "/tv/Other Place/Hetedik mennyorszag",
+  });
+  const file = "/mnt/media/TV/Hetedik mennyorszag/Season 01/loose-extra.mkv";
+  const roots = ["/mnt/media/TV"];
+  assert.equal(underKnownSeries([series], file, roots), true);
+  assert.equal(folderDraft(file, { audio: [], subtitles: [] }, null, { underSeries: true, roots }), null);
+});
+
 test("a movie Featurettes file still keeps that movie when the folder matches", () => {
   const radarr = sourceDraft({
     connector: "radarr",

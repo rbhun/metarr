@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.165
+
+- Apply path maps during folder scan, stop inventing titles named after the scan root (TV), and skip invents whose folder matches a known series title, so Plex-only movies and series leftovers stop showing as separate all-red rows.
+
 ## 0.0.164
 
 - Merge Plex and Radarr/Bazarr movie rows that share a file path, and let a Plex-only guid join on title and year, so the same movie stops showing twice.
