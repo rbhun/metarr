@@ -2,7 +2,7 @@
 
 Metarr is a local library for Plex, Radarr, Sonarr, and Bazarr. It downloads titles, files, quality, languages, ratings, and what is missing, and stores them in SQLite on this machine. Sync does not copy video or subtitle files. There is no login. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
 
-New MKV files are written only by disc remux and by rewrap, beside the source. An existing file is never overwritten, and a disc is left in place.
+New MKV files are written only by disc remux, rewrap, and version merge, beside the source. An existing file is never overwritten, and a disc is left in place.
 
 ## Sources
 
@@ -11,20 +11,24 @@ New MKV files are written only by disc remux and by rewrap, beside the source. A
 - **File scan.** Scan your NAS folders and files, and compare them to the other sources
 - **IMDb, TMDb, OMDb.** Get extra data from online sources
 
+
+
 ## Features
 
 - **Unified library.** Movies and series are matched across the connected apps by IMDb, TMDB, TVDB, and GUID, then by title and year. A movie Radarr wants and a series Sonarr has not finished stay in the list when Plex does not have them. It helps to see which service has mismatched or missing files. Music and photo libraries are skipped.
-- **Library view.** Each title shows where it lives, rating, genres, video, audio languages, and subtitles, including Bazarr’s missing list. The detail panel adds container, resolution, quality, 3D, HDR, runtime, poster, and overview. A secondary title in another language can sit under the Plex title after a lookup.
-- **Editions, extras, samples.** The file or folder name labels a cut (Director's Cut, Extended, Theatrical, Restored, etc). A split file shows as a part, such as 1 of 2. Also allows to find duplicates, samples, etc.
-- **Sidecar files.** Subtitle files beside a video are compared with what Plex lists. A file Plex does not list is its own row, marked not in Plex, with the language from the name when it is tagged. A Plex subtitle with no file on disk is marked Plex only, and the note says why. A separate audio file such as `.ac3` is listed even though Plex ignores it.
-- **Filters.** Narrow the list by movie or series, title, any language, audio, subtitles, genre, content rating, score, bitrate, year, length in minutes, resolution, HDR, file type, edition or duplicate versions, missing file, not in Plex, disc, 3D, and sample or short clips.
-- **Selected rows.** Copy titles and paths, push those folders to Plex for a rescan, look the titles up, detect languages now or queue them, and queue a disc remux. Marks stay in this browser only.
-- **Rescan one title.** The detail panel can re-read that title’s files on disk and from Plex or the *arr apps, including new files in the same folder, without walking the whole library.
 - **Language detection.** Unknown audio is sampled with Whisper, near the start and in the middle. Unknown subtitles are read as text, or as pictures when they are PGS, VobSub, or a binary `.sub`. A recognized language is written into MKV and WebM, copied onto MP4 and MOV, or renamed onto a sidecar such as `Film.hun.srt`. A commentary track gets the commentary flag. Plex, Radarr, Sonarr, and Bazarr are then asked to re-read the file. AVI, loose M2TS, and TS cannot store the tag, so the language is kept until a rewrap.
 - **Disc remux.** ISO, `VIDEO_TS`, and `BDMV` discs are remuxed with MakeMKV into an MKV in the disc’s folder. Every audio language, commentary, and subtitle is kept, in disc order, without re-encoding. The 3D video layer is left out. Optional extras save the other titles in that same folder.
 - **Rewrap to MKV.** An AVI, or a loose M2TS or TS file, is copied to an MKV beside it with the languages Metarr recognized. PGS subtitles are kept. Blu-ray PCM audio is stored as FLAC, because Matroska cannot hold it as it is.
 - **Merge multi-part files.** Auto recognize multi-part movies in a title and rewrap into a single one.
-- **Queues.** Language checks, disc remux, and rewrap each have their own hours. One job runs at a time, at idle priority, and the next waits while Plex is scanning or someone is playing. Tasks shows progress, the waiting reason, and failures. Redo retries a failed job.
+- **Editions, extras, samples.** The file or folder name labels a cut (Director's Cut, Extended, Theatrical, Restored, etc). A split file shows as a part, such as 1 of 2. Also allows to find duplicates, samples, etc.
+- **Merge audio.** Two copies of the same edit can be combined when their runtimes match and the lesser file has an audio language the better one lacks. The higher-quality file keeps its video, and both files’ audio and subtitles are copied into a new `.combined.mkv`. Each pair is started by hand.
+- ***arr-friendly rename.** A series file can be renamed to `Show - S01E07 - Episode title.ext`, the shape Sonarr accepts, and matching sidecars move with it. A file that already has the episode name is still fixed when the series name or the season and episode numbers are wrong.
+- **Library view.** Each title shows where it lives, rating, genres, video, audio languages, and subtitles, including Bazarr’s missing list. The detail panel adds container, resolution, quality, 3D, HDR, runtime, poster, and overview. A secondary title in another language can sit under the Plex title after a lookup.
+- **Sidecar files.** Subtitle files beside a video are compared with what Plex lists. A file Plex does not list is its own row, marked not in Plex, with the language from the name when it is tagged. A Plex subtitle with no file on disk is marked Plex only, and the note says why. A separate audio file such as `.ac3` is listed even though Plex ignores it.
+- **Filters.** Narrow the list by movie or series, title, any language, audio, subtitles, genre, content rating, score, bitrate, year, length in minutes, resolution, HDR, file type, edition or duplicate versions, missing file, not in Plex, disc, 3D, and sample or short clips.
+- **Selected rows.** Copy titles and paths, push those folders to Plex for a rescan, look the titles up, detect languages now or queue them, and queue a disc remux. Marks stay in this browser only.
+- **Rescan one title.** The detail panel can re-read that title’s files on disk and from Plex or the *arr apps, including new files in the same folder, without walking the whole library.
+- **Queues.** Language checks, disc remux, and rewrap each have their own hours. One job runs at a time, at idle priority, and the next waits while Plex is scanning or someone is playing. Tasks shows progress, the waiting reason, and failures. Redo retries a failed job. Time Zone is settable. You can choose to wait for Plex jobs or ignore them for better CPU usage.
 - **Online metadata.** TMDB and OMDb can fill a poster, overview, runtime, and any rating or genres that are still blank. Lookups stay in the local database and are not written back.
 - **Folders and a demo.** A File Browser address can open the folder that contains a file. Load demo library fills the table with sample titles and does not contact a server. A later successful sync replaces the sample.
 - **Update from the browser.** After the first deploy, Settings → Update Metarr asks the host to pull and rebuild. The container never gets Docker access or root.

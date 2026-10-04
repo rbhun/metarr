@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.173
+
+- List version merge and the Sonarr-friendly episode rename with the other features.
+
 ## 0.0.172
 
 - Add Rewrap to MKV on the library selection bar, so several AVI and loose M2TS files can be copied to MKV at once.
