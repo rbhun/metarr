@@ -49,6 +49,7 @@ export function mergeArgs(
   output: string,
   videoProbe: Probe,
   otherProbe: Probe,
+  startOffsetSeconds = 0,
 ): { args: string[]; video: number; audio: number; subtitles: number; converted: number } {
   const video = videoProbe.streams.filter((stream) => stream.codecType === "video");
   if (video.length === 0) throw new Error("The higher-quality file has no video stream.");
@@ -60,7 +61,11 @@ export function mergeArgs(
   const subtitles = [...subs0.map((stream) => ({ input: 0, stream })), ...subs1.map((stream) => ({ input: 1, stream }))];
   if (audio.length === 0) throw new Error("Neither file has an audio stream to keep.");
 
-  const args = ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts", "-i", videoPath, "-i", otherPath];
+  const args = ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts", "-i", videoPath];
+  const shift = Number.isFinite(startOffsetSeconds) ? Math.round(startOffsetSeconds) : 0;
+  if (shift > 0) args.push("-ss", String(shift));
+  else if (shift < 0) args.push("-itsoffset", String(-shift));
+  args.push("-i", otherPath);
   args.push("-map", `0:${video[0]!.index}`);
   for (const item of audio) args.push("-map", `${item.input}:${item.stream.index}`);
   for (const item of subtitles) args.push("-map", `${item.input}:${item.stream.index}`);
@@ -189,6 +194,7 @@ export async function mergeVersions(options: {
   const name = path.basename(target);
   onProgress(0, "Reading both files");
   const [video, other] = await Promise.all([probe(videoPath), probe(otherPath)]);
+  let startOffsetSeconds = 0;
   if (!options.skipFrameCheck) {
     onProgress(2, "Comparing frames");
     const frames = await compareFrames(videoPath, otherPath, {
@@ -200,14 +206,17 @@ export async function mergeVersions(options: {
       },
     });
     if (!frames.ok) throw new Error(frames.message);
+    startOffsetSeconds = frames.startOffsetSeconds ?? 0;
   }
   const temp = path.join(workDir, name);
-  const plan = mergeArgs(videoPath, otherPath, temp, video, other);
+  const plan = mergeArgs(videoPath, otherPath, temp, video, other, startOffsetSeconds);
   const tracks = [plural(plan.video, "video stream"), plural(plan.audio, "audio track"), plan.subtitles ? plural(plan.subtitles, "subtitle") : null]
     .filter(Boolean)
     .join(", ");
   const flac = plan.converted ? ` ${plural(plan.converted, "PCM audio track")} ${plan.converted === 1 ? "is" : "are"} stored as lossless FLAC.` : "";
-  if (options.dryRun) return `Dry run: would keep video from ${path.basename(videoPath)} and copy ${tracks} into ${target}.${flac} Nothing was written.`;
+  const offsetBit =
+    Math.abs(startOffsetSeconds) >= 2 ? ` Donor tracks are shifted ${Math.round(Math.abs(startOffsetSeconds))} s to match the open.` : "";
+  if (options.dryRun) return `Dry run: would keep video from ${path.basename(videoPath)} and copy ${tracks} into ${target}.${flac}${offsetBit} Nothing was written.`;
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the video source.`);
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(workDir, { recursive: true });
@@ -226,7 +235,7 @@ export async function mergeVersions(options: {
     if (problem) throw new Error(problem);
     onProgress(100, "Saving the MKV");
     deliverFile(temp, target);
-    return `Saved ${name} with ${tracks} (video from ${path.basename(videoPath)}).${flac} Both originals were left in place.`;
+    return `Saved ${name} with ${tracks} (video from ${path.basename(videoPath)}).${flac}${offsetBit} Both originals were left in place.`;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

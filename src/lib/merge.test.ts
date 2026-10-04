@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
 import { migrate, insertSourceRecords } from "@/lib/db";
@@ -20,7 +24,9 @@ import {
 import {
   DEFAULT_FRAME_SAMPLE_COUNT,
   DEFAULT_MAX_DURATION_DELTA_MINUTES,
+  alignedOffsets,
   classifyRuntime,
+  compareFrames,
   durationsCloseMinutes,
   durationsCloseSeconds,
   explainFrameCheck,
@@ -31,6 +37,7 @@ import {
   parseFrameSampleCount,
   requiredFrameMatches,
   sampleOffsets,
+  startOffsetSearchList,
 } from "@/lib/merge/compare";
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
 import { checkMerge, mergeArgs, parseMergeProbe, progressFromLine, type Probe } from "@/lib/merge/run";
@@ -179,6 +186,77 @@ test("frame check names PAL speed, titles, and different editions", () => {
   assert.equal(edition.kind, "edition");
   assert.match(edition.message, /2 of 12 frames matched \(17%; need 10\)/);
   assert.match(edition.message, /different editions/);
+
+  assert.equal(
+    classifyRuntime({
+      leftSeconds: 2500,
+      rightSeconds: 2520,
+      leftFps: 24,
+      rightFps: 24,
+      framesOk: true,
+      startOffsetSeconds: 20,
+    }),
+    "offset",
+  );
+  const offset = explainFrameCheck({
+    matched: 12,
+    total: 12,
+    required: 10,
+    ok: true,
+    leftSeconds: 2500,
+    rightSeconds: 2520,
+    leftFps: 24,
+    rightFps: 24,
+    startOffsetSeconds: 20,
+  });
+  assert.equal(offset.kind, "offset");
+  assert.match(offset.message, /12 of 12 frames matched \(100%\)/);
+  assert.match(offset.message, /20 s start offset/);
+  assert.match(offset.message, /front titles/);
+
+  const twenty = startOffsetSearchList(2500, 2520);
+  assert.ok(twenty.includes(20));
+  assert.ok(twenty.includes(-20));
+  const aligned = alignedOffsets(2500, 2520, 20, 5);
+  assert.ok(aligned);
+  assert.equal(aligned!.right[0], aligned!.left[0]! + 20);
+  const reverse = alignedOffsets(2520, 2500, -20, 5);
+  assert.ok(reverse);
+  assert.ok(reverse!.left[0]! >= 20);
+  assert.equal(Math.round(reverse!.right[0]! - reverse!.left[0]!), -20);
+});
+
+const hasFfmpeg = (() => {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("frame check finds a 20 s missing open", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-offset-"));
+  try {
+    const full = path.join(root, "full.mkv");
+    const cut = path.join(root, "cut.mkv");
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi",
+      "-i", "color=c=gray:s=320x180:d=40:r=24",
+      "-vf", "format=gray,geq=lum='255*(T/40)',format=yuv420p",
+      "-c:v", "mpeg4",
+      full,
+    ]);
+    execFileSync("ffmpeg", ["-v", "error", "-ss", "20", "-i", full, "-c", "copy", cut]);
+    const result = await compareFrames(full, cut, { frameCount: 4 });
+    assert.equal(result.ok, true);
+    assert.equal(result.kind, "offset");
+    assert.equal(result.startOffsetSeconds, -20);
+    assert.match(result.message, /20 s start offset/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("frame samples and grayscale diffs", () => {
@@ -540,6 +618,10 @@ test("ffmpeg merge maps video from input 0 and audio or subtitles from both", ()
   const plan = mergeArgs("/v.mkv", "/a.mkv", "/out.mkv", VIDEO, OTHER);
   const args = plan.args.join(" ");
   assert.match(args, /-i \/v\.mkv -i \/a\.mkv/);
+  const delayed = mergeArgs("/v.mkv", "/a.mkv", "/out.mkv", VIDEO, OTHER, 20).args.join(" ");
+  assert.match(delayed, /-i \/v\.mkv -ss 20 -i \/a\.mkv/);
+  const early = mergeArgs("/v.mkv", "/a.mkv", "/out.mkv", VIDEO, OTHER, -20).args.join(" ");
+  assert.match(early, /-i \/v\.mkv -itsoffset 20 -i \/a\.mkv/);
   assert.match(args, /-map 0:0 -map 0:1 -map 1:1 -map 1:2 -map 0:2 -map 1:3/);
   assert.match(args, /-c:a:2 flac/);
   assert.match(args, /-metadata:s:a:1 language=hun/);

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.179
+
+- Check frames searches for a constant start-title offset (about 20 s missing open) and reports it. Merge shifts the donor tracks by that amount so audio stays in sync.
+
 ## 0.0.178
 
 - Treat a pair of files named part 1 and part 2 as a multi-part film, so Rewrap to MKV is offered and the queue joins them instead of refusing a non-AVI.
