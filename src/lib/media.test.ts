@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileHoverSources, languageHover } from "@/lib/format";
-import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, featureCopyCount, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
+import { assignStreamLanguages, bonusFlag, copyGroupId, crossCheckAudio, crossCheckSubtitles, detect3d, detectHdr, editionLabel, ensureListedSource, featureCopyCount, fillOmittedAudio, knownLanguage, languageCode, multiPartLabel, normalizeContainer, normalizeTitle, noteFilePresence, playableFrom, presenceTooltip, reconcileAudio, resolvedResolution, sourceTooltip, spacedSplitIdentity, splitIdentity, summarizeFiles, tagFileOrigin, versionsFrom } from "@/lib/media";
 import type { MediaFile } from "@/lib/types";
 
 test("disc images and video files get distinct playable labels", () => {
@@ -125,6 +125,12 @@ test("a split movie is marked as a part, and a sequel title is not", () => {
   assert.equal(multiPartLabel("/movies/Foo/Foo - pt2.mkv"), "Part 2");
   assert.equal(multiPartLabel("/movies/Ben-Hur/Ben Hur - Part1.m2ts"), "Part 1");
   assert.equal(multiPartLabel("/movies/Foo/Foo - part 1.mkv"), null);
+  assert.equal(splitIdentity("/movies/Foo/Foo - part 1.mkv"), null);
+  assert.equal(spacedSplitIdentity("/movies/Foo/Foo - part 1.mkv")?.index, 1);
+  assert.equal(spacedSplitIdentity("/movies/Foo/Foo - part 2.mkv")?.key, spacedSplitIdentity("/movies/Foo/Foo - part 1.mkv")?.key);
+  assert.equal(spacedSplitIdentity("/movies/Foo/Foo - part 1.mkv")?.stem, "Foo");
+  assert.equal(splitIdentity("History of the World - Part 1.avi"), null);
+  assert.equal(spacedSplitIdentity("Harry Potter and the Deathly Hallows Part 2 (2011).mkv")?.index, 2);
   assert.equal(multiPartLabel("/movies/The Godfather Part II.mkv"), null);
   assert.equal(multiPartLabel("Harry Potter and the Deathly Hallows Part 2 (2011).mkv"), null);
   assert.equal(multiPartLabel("History of the World - Part 1.avi"), null);

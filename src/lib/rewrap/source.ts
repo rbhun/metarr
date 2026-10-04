@@ -1,4 +1,9 @@
-import { fileExtension, splitIdentity } from "@/lib/media";
+import { fileExtension, spacedSplitIdentity, splitIdentity, type SplitIdentity } from "@/lib/media";
+
+/** CD1, "1 of 2", or a "part 1" / "part 2" pair. A lone "Part 1" movie title is not a split. */
+export function rewrapSplit(filePath: string | null | undefined): SplitIdentity | null {
+  return splitIdentity(filePath) ?? spacedSplitIdentity(filePath);
+}
 
 const AVI = new Set(["avi", "divx"]);
 const TRANSPORT = new Set(["m2ts", "mts", "ts"]);
@@ -43,7 +48,7 @@ export function rewrapFamily(filePath: string | null | undefined): string | null
 
 /** The joined MKV for a labeled split, with the part token removed. `Foo CD1.avi` becomes `Foo.mkv`. */
 export function joinedTarget(filePath: string): string | null {
-  const split = splitIdentity(filePath);
+  const split = rewrapSplit(filePath);
   if (!split) return null;
   const name = `${split.stem}.mkv`;
   return split.directory ? `${split.directory}/${name}` : name;
@@ -89,7 +94,7 @@ function directoryOf(filePath: string): string {
  * Null when a part is missing or two files claim the same part, so the file is rewrapped alone.
  */
 export function splitSources(filePath: string, readDirectory: (directory: string) => string[] | null): string[] | null {
-  const self = splitIdentity(filePath);
+  const self = rewrapSplit(filePath);
   const family = rewrapFamily(filePath);
   if (!self || !family) return null;
   const found: SplitMember[] = [];
@@ -97,7 +102,7 @@ export function splitSources(filePath: string, readDirectory: (directory: string
   const add = (full: string) => {
     const key = full.replace(/\\/g, "/").toLowerCase();
     if (seen.has(key) || rewrapFamily(full) !== family || inDiscFolder(full)) return;
-    const split = splitIdentity(full);
+    const split = rewrapSplit(full);
     if (!split || split.key !== self.key) return;
     seen.add(key);
     found.push({ path: full, index: split.index, total: split.total });
@@ -138,7 +143,7 @@ export function needsRewrap(paths: Array<string | null | undefined>): boolean {
   const buckets = new Map<string, SplitMember[]>();
   for (const filePath of files) {
     if (inDiscFolder(filePath)) continue;
-    const split = splitIdentity(filePath);
+    const split = rewrapSplit(filePath);
     const family = rewrapFamily(filePath);
     if (!split || !family) continue;
     const key = `${split.key}|${family}`;

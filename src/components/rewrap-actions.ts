@@ -16,8 +16,8 @@ function describe(payload: RewrapResponse, immediate: boolean): string {
   const already = payload.already ?? 0;
   const promoted = payload.promoted ?? 0;
   const skipped = payload.skipped ?? 0;
-  const rest = skipped ? ` ${skipped} ${skipped === 1 ? "path is" : "paths are"} not an AVI or a loose M2TS file.` : "";
-  if (added === 0 && already === 0 && promoted === 0) return `Nothing to rewrap: no AVI or M2TS without an MKV was found.${rest}`;
+  const rest = skipped ? ` ${skipped} ${skipped === 1 ? "path is" : "paths are"} not an AVI, a loose M2TS, or a complete multi-part film.` : "";
+  if (added === 0 && already === 0 && promoted === 0) return `Nothing to rewrap: no AVI, loose M2TS, or complete multi-part film without an MKV was found.${rest}`;
   if (immediate) {
     if (added === 0 && promoted === 0) return "That file is already rewrapping or waiting to start now.";
     return `Rewrapping now. Follow it in Tasks. One file runs at a time.${rest}`;

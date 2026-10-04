@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.178
+
+- Treat a pair of files named part 1 and part 2 as a multi-part film, so Rewrap to MKV is offered and the queue joins them instead of refusing a non-AVI.
+
 ## 0.0.177
 
 - Show Rewrap to MKV on a multi-part film in the title drawer even when the parts are not AVI, and join them into one MKV.

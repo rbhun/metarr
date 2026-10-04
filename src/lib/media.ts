@@ -1184,6 +1184,40 @@ function groupKey(directory: string, stem: string): string {
   return `${directory.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase()}\0${stem.toLowerCase()}`;
 }
 
+const SPACED_PART = /(?:^|[^a-z0-9])(?:part|pt)[\s._-]+0*(\d{1,2})(?:[^a-z0-9]|$)/i;
+
+function spacedPartHit(source: string): PartHit | null {
+  const match = source.match(SPACED_PART);
+  if (!match) return null;
+  return hitFrom(match, Number(match[1]), null);
+}
+
+/**
+ * "part 1" with a space. A single file stays unlabeled, because "Part 1" is also a movie title.
+ * Rewrap uses this only when another part of the same name is present.
+ */
+export function spacedSplitIdentity(filePath: string | null | undefined): SplitIdentity | null {
+  if (!filePath?.trim() || splitIdentity(filePath)) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  const directory = slash >= 0 ? normalized.slice(0, slash) : "";
+  const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const dot = file.lastIndexOf(".");
+  const base = dot > 0 ? file.slice(0, dot) : file;
+  const named = spacedPartHit(base);
+  if (named) {
+    const stem = stemAround(base, named);
+    if (!stem) return null;
+    return { index: named.index, total: null, directory, stem, key: groupKey(directory, stem) };
+  }
+  const parentSlash = directory.lastIndexOf("/");
+  const parent = parentSlash >= 0 ? directory.slice(parentSlash + 1) : directory;
+  const folder = parent ? spacedPartHit(parent) : null;
+  if (!folder || !base.trim()) return null;
+  const grand = parentSlash >= 0 ? directory.slice(0, parentSlash) : "";
+  return { index: folder.index, total: null, directory: grand, stem: base, key: groupKey(grand, base) };
+}
+
 /**
  * A labeled split file, such as "CD1" or "1 of 2". A sequel title like "Part II" is not a split.
  * The token is read from the file name, or from the folder when the file itself has none.

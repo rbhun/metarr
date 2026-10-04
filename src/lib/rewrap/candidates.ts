@@ -3,8 +3,7 @@ import { filesForLibrary, filesForSelection } from "@/lib/detect/files";
 import type { ScanFile } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
-import { splitIdentity } from "@/lib/media";
-import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrappedPathFor } from "@/lib/rewrap/source";
+import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
   path: string;
@@ -36,7 +35,7 @@ export function subtitleStreamLanguages(tracks: SubtitleTrack[]): Array<string |
 export function avisFromFile(file: ScanFile): RewrapItem[] {
   const found: RewrapItem[] = [];
   const push = (filePath: string | null, container: string | null, audio: AudioTrack[], subtitles: SubtitleTrack[]) => {
-    if (!filePath || (!canRewrap(container, filePath) && !splitIdentity(filePath))) return;
+    if (!filePath || (!canRewrap(container, filePath) && !rewrapSplit(filePath))) return;
     if (found.some((item) => item.path === filePath)) return;
     found.push({ path: filePath, label: file.label, languages: trackLanguages(audio), subtitleLanguages: subtitleStreamLanguages(subtitles) });
   };
@@ -54,7 +53,7 @@ export function bundleRewraps(items: RewrapItem[]): RewrapItem[][] {
   const buckets = new Map<string, RewrapItem[]>();
   const singles: RewrapItem[][] = [];
   for (const item of items) {
-    const split = splitIdentity(item.path);
+    const split = rewrapSplit(item.path);
     const family = rewrapFamily(item.path);
     if (!split || !family) {
       singles.push([item]);
@@ -69,7 +68,7 @@ export function bundleRewraps(items: RewrapItem[]): RewrapItem[][] {
   for (const bucket of buckets.values()) {
     const ordered = orderedSplit(
       bucket.map((item) => {
-        const split = splitIdentity(item.path)!;
+        const split = rewrapSplit(item.path)!;
         return { path: item.path, index: split.index, total: split.total };
       }),
     );

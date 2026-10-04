@@ -1,8 +1,7 @@
 import { clampHour } from "@/lib/detect/schedule";
 import { getDb } from "@/lib/db";
 import { libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
-import { canRewrap } from "@/lib/rewrap/source";
-import { splitIdentity } from "@/lib/media";
+import { canRewrap, rewrapSplit } from "@/lib/rewrap/source";
 import {
   activeRewrap,
   clearRewrapJobs,
@@ -77,7 +76,7 @@ export async function POST(request: Request) {
       return known ? { ...known, label: item.label ?? known.label } : item;
     }),
   ];
-  const avis = items.filter((item) => canRewrap(null, item.path) || Boolean(splitIdentity(item.path)));
+  const avis = items.filter((item) => canRewrap(null, item.path) || Boolean(rewrapSplit(item.path)));
   const result = enqueueRewraps(db, avis, record.immediate === true);
   kickRewrapWorker();
   return NextResponse.json({ ...result, skipped: items.length - avis.length, totals: rewrapTotals(db) });

@@ -313,6 +313,14 @@ test("a labeled split joins into one MKV, and a missing part stays a single file
   assert.equal(needsRewrap(["/movies/Foo/Foo CD1.mkv", "/movies/Foo/Foo CD2.mkv", "/movies/Foo/Foo.mkv"]), false);
   assert.equal(needsRewrap(["/movies/Foo/Foo CD1.mkv"]), false);
   assert.equal(needsRewrap(["/movies/Film.mkv"]), false);
+  assert.equal(needsRewrap(["/movies/Foo/Foo - part 1.mkv"]), false);
+  assert.equal(needsRewrap(["/movies/Foo/Foo - part 1.mkv", "/movies/Foo/Foo - part 2.mkv"]), true);
+  assert.equal(needsRewrap(["/movies/Foo/Foo - part 1.mkv", "/movies/Foo/Foo - part 2.mkv", "/movies/Foo/Foo.mkv"]), false);
+  assert.equal(joinedTarget("/movies/Foo/Foo - part 1.mkv"), "/movies/Foo/Foo.mkv");
+  assert.deepEqual(
+    splitSources("/movies/Foo/Foo - part 2.mkv", (directory) => (directory === "/movies/Foo" ? ["Foo - part 1.mkv", "Foo - part 2.mkv"] : null)),
+    ["/movies/Foo/Foo - part 1.mkv", "/movies/Foo/Foo - part 2.mkv"],
+  );
   const mkvParts = bundleRewraps([
     { path: "/movies/Foo/Foo CD2.mkv", label: "Foo" },
     { path: "/movies/Foo/Foo CD1.mkv", label: "Foo" },
