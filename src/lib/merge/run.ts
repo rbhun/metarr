@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { compareFrames, durationsCloseSeconds, probeDurationSeconds } from "@/lib/merge/compare";
+import { compareFrames } from "@/lib/merge/compare";
 import { mergeTarget } from "@/lib/merge/source";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
@@ -180,6 +180,7 @@ export async function mergeVersions(options: {
   otherPath: string;
   workDir: string;
   skipFrameCheck?: boolean;
+  frameCount?: number;
   dryRun?: boolean;
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
@@ -188,18 +189,10 @@ export async function mergeVersions(options: {
   const name = path.basename(target);
   onProgress(0, "Reading both files");
   const [video, other] = await Promise.all([probe(videoPath), probe(otherPath)]);
-  const duration = durationsCloseSeconds(video.duration, other.duration);
-  if (!duration.ok) {
-    throw new Error(
-      duration.deltaSeconds == null
-        ? "Could not read both runtimes."
-        : `Runtimes differ by ${Math.round(duration.deltaSeconds)} s, so these are probably different edits.`,
-    );
-  }
   if (!options.skipFrameCheck) {
     onProgress(2, "Comparing frames");
     const frames = await compareFrames(videoPath, otherPath, {
-      durationSeconds: video.duration,
+      frameCount: options.frameCount,
       workDir: path.join(workDir, "frames"),
       onProgress: (done, total) => {
         const percent = 2 + Math.floor((done / Math.max(1, total)) * 8);
@@ -238,5 +231,3 @@ export async function mergeVersions(options: {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
 }
-
-export { probeDurationSeconds };

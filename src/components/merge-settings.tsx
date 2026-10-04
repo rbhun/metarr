@@ -9,11 +9,12 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
-type Settings = { enabled: boolean; maxDurationDeltaMinutes: number };
+type Settings = { enabled: boolean; maxDurationDeltaMinutes: number; frameSampleCount: number };
 
 export function MergeSettingsCard() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [deltaText, setDeltaText] = useState("1");
+  const [framesText, setFramesText] = useState("12");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function MergeSettingsCard() {
           if (body.settings) {
             setSettings(body.settings);
             setDeltaText(String(body.settings.maxDurationDeltaMinutes));
+            setFramesText(String(body.settings.frameSampleCount));
           }
         })
         .catch(() => undefined);
@@ -43,6 +45,7 @@ export function MergeSettingsCard() {
         body: JSON.stringify({
           enabled: patch.enabled ?? settings!.enabled,
           maxDurationDeltaMinutes: patch.maxDurationDeltaMinutes ?? settings!.maxDurationDeltaMinutes,
+          frameSampleCount: patch.frameSampleCount ?? settings!.frameSampleCount,
         }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; settings?: Settings } | null;
@@ -50,6 +53,7 @@ export function MergeSettingsCard() {
       if (body?.settings) {
         setSettings(body.settings);
         setDeltaText(String(body.settings.maxDurationDeltaMinutes));
+        setFramesText(String(body.settings.frameSampleCount));
       }
       toast.success("Version merge settings saved.");
     } catch (caught) {
@@ -66,8 +70,8 @@ export function MergeSettingsCard() {
         <CardDescription>
           Manually combine two copies of the same edit that carry different audio or subtitle tracks. The higher-resolution or higher-bitrate file keeps its
           video; both files keep their audio and subtitles in a new{" "}
-          <span className="font-mono text-[11px]">.combined.mkv</span>. Same runtime is required, and ffmpeg compares frames before writing. Nothing runs on a
-          schedule.
+          <span className="font-mono text-[11px]">.combined.mkv</span>. ffmpeg compares frames before writing. A runtime gap can be PAL speed or titles; the
+          pictures decide. Nothing runs on a schedule.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -114,8 +118,41 @@ export function MergeSettingsCard() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Two versions can differ by up to this many minutes and still count as the same edit. Default is 1.
+            Two versions can differ by up to this many minutes and still appear on the list. Check frames, not this number, decides if they are the same edit.
+            Default is 1.
           </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="merge-frame-count">Frame samples</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="merge-frame-count"
+              type="number"
+              min={4}
+              max={24}
+              step={1}
+              value={framesText}
+              disabled={busy}
+              className="w-28"
+              onChange={(event) => setFramesText(event.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                const value = Number(framesText);
+                if (!Number.isInteger(value) || value < 4 || value > 24) {
+                  toast.error("Use between 4 and 24 frame samples.");
+                  return;
+                }
+                void save({ frameSampleCount: value });
+              }}
+            >
+              Save
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">How many pictures Check frames compares. Default is 12. About 80% must match.</p>
         </div>
         {settings.enabled ? (
           <Button type="button" size="sm" variant="outline" asChild>

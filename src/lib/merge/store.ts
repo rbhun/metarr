@@ -1,13 +1,15 @@
 import path from "node:path";
 import type Database from "better-sqlite3";
 
-import { DEFAULT_MAX_DURATION_DELTA_MINUTES } from "@/lib/merge/compare";
+import { DEFAULT_FRAME_SAMPLE_COUNT, DEFAULT_MAX_DURATION_DELTA_MINUTES, parseFrameSampleCount } from "@/lib/merge/compare";
 
 export type MergeSettings = {
   /** When off, the Merge page stays hidden and new jobs are refused. Manual only — never scheduled. */
   enabled: boolean;
   /** Max runtime difference in minutes for two versions to count as the same edit. */
   maxDurationDeltaMinutes: number;
+  /** How many grayscale samples Check frames takes from each file. */
+  frameSampleCount: number;
 };
 
 export type MergeItem = {
@@ -80,19 +82,24 @@ export function parseMaxDurationDeltaMinutes(value: unknown): number | null {
 export function readMergeSettings(db: Database.Database): MergeSettings {
   // Beta default: on, so the page is reachable without a trip through Settings first.
   const delta = parseMaxDurationDeltaMinutes(meta(db, "merge_max_duration_delta_minutes"));
+  const frames = parseFrameSampleCount(meta(db, "merge_frame_sample_count"));
   return {
     enabled: meta(db, "merge_enabled") !== "0",
     maxDurationDeltaMinutes: delta ?? DEFAULT_MAX_DURATION_DELTA_MINUTES,
+    frameSampleCount: frames ?? DEFAULT_FRAME_SAMPLE_COUNT,
   };
 }
 
 export function writeMergeSettings(
   db: Database.Database,
-  settings: { enabled?: boolean; maxDurationDeltaMinutes?: number },
+  settings: { enabled?: boolean; maxDurationDeltaMinutes?: number; frameSampleCount?: number },
 ) {
   if (settings.enabled != null) setMetaValue(db, "merge_enabled", settings.enabled ? "1" : "0");
   if (settings.maxDurationDeltaMinutes != null) {
     setMetaValue(db, "merge_max_duration_delta_minutes", String(settings.maxDurationDeltaMinutes));
+  }
+  if (settings.frameSampleCount != null) {
+    setMetaValue(db, "merge_frame_sample_count", String(settings.frameSampleCount));
   }
 }
 
