@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.181
+
+- Check all runs frame compare on every possible pair, including mismatched frame rates and runtimes over the set limit, then sorts the list so the best matches are first.
+
+## 0.0.180
+
+- Check frames still hunts for a missing-open start offset when both copies are the same frame rate, even if the runtime gap looks like a PAL 4% speed change.
+
 ## 0.0.179
 
 - Check frames searches for a constant start-title offset (about 20 s missing open). Merge delays or trims the other file's audio and subtitles by that amount so they stay in sync with the kept video.

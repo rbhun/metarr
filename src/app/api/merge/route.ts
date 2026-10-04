@@ -35,8 +35,8 @@ function existsFile(candidate: string): boolean {
   }
 }
 
-function pairOptions(db: ReturnType<typeof getDb>) {
-  return { maxDurationDeltaMinutes: readMergeSettings(db).maxDurationDeltaMinutes };
+function pairOptions(db: ReturnType<typeof getDb>, extra: { ignoreDuration?: boolean } = {}) {
+  return { maxDurationDeltaMinutes: readMergeSettings(db).maxDurationDeltaMinutes, ...extra };
 }
 
 function itemFromBody(record: Record<string, unknown>, db: ReturnType<typeof getDb>): MergeItem | null {
@@ -45,7 +45,7 @@ function itemFromBody(record: Record<string, unknown>, db: ReturnType<typeof get
   if (!leftPath || !rightPath || leftPath === rightPath) return null;
   const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
   const skipFrameCheck = record.skipFrameCheck === true;
-  const known = mergeCandidateForPaths(db, leftPath, rightPath, pairOptions(db));
+  const known = mergeCandidateForPaths(db, leftPath, rightPath, pairOptions(db, { ignoreDuration: true }));
   if (known) {
     const preferred = known.videoFrom === "left" ? known.left.path : known.right.path;
     const requested = typeof record.videoPath === "string" ? record.videoPath.trim() : "";
@@ -63,6 +63,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const search = url.searchParams.get("q") ?? "";
   const includeCandidates = url.searchParams.get("candidates") === "1";
+  const wide = url.searchParams.get("wide") === "1";
   const settings = readMergeSettings(db);
   return NextResponse.json({
     settings,
@@ -70,7 +71,12 @@ export async function GET(request: Request) {
     active: activeMerge(db),
     pause: readMergePause(db),
     latest: latestMerge(db),
-    candidates: includeCandidates ? listMergeCandidates(db, search, { maxDurationDeltaMinutes: settings.maxDurationDeltaMinutes }) : undefined,
+    candidates: includeCandidates
+      ? listMergeCandidates(db, search, {
+          maxDurationDeltaMinutes: settings.maxDurationDeltaMinutes,
+          ignoreDuration: wide,
+        })
+      : undefined,
   });
 }
 

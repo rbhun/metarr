@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { sortMergeCandidates } from "@/lib/merge/sort";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -34,6 +35,7 @@ type Candidate = {
   subtitleOnlyLeft: string[];
   subtitleOnlyRight: string[];
   editionConflict: boolean;
+  overDelta?: boolean;
   reason: string;
 };
 
@@ -130,6 +132,7 @@ function PairCard({
   videoFrom,
   reason,
   editionConflict,
+  overDelta,
   audioOnlyLeft,
   audioOnlyRight,
   eligible,
@@ -146,6 +149,7 @@ function PairCard({
   videoFrom: "left" | "right";
   reason: string;
   editionConflict?: boolean;
+  overDelta?: boolean;
   audioOnlyLeft?: string[];
   audioOnlyRight?: string[];
   eligible: boolean;
@@ -173,6 +177,9 @@ function PairCard({
             )}
             {editionConflict ? (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-200">Edition labels differ</span>
+            ) : null}
+            {overDelta ? (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-200">Over runtime limit</span>
             ) : null}
           </div>
           <p className={`text-xs ${eligible ? "text-muted-foreground" : "text-amber-800 dark:text-amber-200"}`}>{reason}</p>
@@ -225,11 +232,18 @@ export function MergeView() {
   const [titleInput, setTitleInput] = useState("");
   const [inspecting, setInspecting] = useState(false);
   const [inspect, setInspect] = useState<TitleInspect | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<{ done: number; total: number } | null>(null);
+  const [wideList, setWideList] = useState(false);
+  const wideListRef = useRef(false);
+  const checkingAllRef = useRef(false);
 
   const load = useCallback(async (needle: string) => {
+    if (checkingAllRef.current) return;
     try {
       const params = new URLSearchParams({ candidates: "1" });
       if (needle.trim()) params.set("q", needle.trim());
+      if (wideListRef.current) params.set("wide", "1");
       const response = await fetch(`/api/merge?${params}`, { cache: "no-store" });
       const next = (await response.json().catch(() => null)) as MergeBody | null;
       if (!response.ok || !next) throw new Error(next?.error || "Merge candidates could not be loaded.");
@@ -257,7 +271,10 @@ export function MergeView() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const candidates = useMemo(() => body?.candidates ?? [], [body]);
+  const candidates = useMemo(
+    () => sortMergeCandidates(body?.candidates ?? [], frameNotes),
+    [body, frameNotes],
+  );
 
   async function saveDelta() {
     if (savingDelta) return;
@@ -348,23 +365,76 @@ export function MergeView() {
     }
   }
 
+  async function runCompare(candidate: Candidate): Promise<FrameResult> {
+    const response = await fetch("/api/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "compare", leftPath: candidate.left.path, rightPath: candidate.right.path }),
+    });
+    const next = (await response.json().catch(() => null)) as { result?: FrameResult; error?: string } | null;
+    if (!response.ok || !next?.result) throw new Error(next?.error || "Frame compare failed.");
+    setFrameNotes((previous) => ({ ...previous, [candidate.key]: next.result! }));
+    return next.result;
+  }
+
   async function compare(candidate: Candidate) {
-    if (comparing) return;
+    if (comparing || checkingAll) return;
     setComparing(candidate.key);
     try {
-      const response = await fetch("/api/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "compare", leftPath: candidate.left.path, rightPath: candidate.right.path }),
-      });
-      const next = (await response.json().catch(() => null)) as { result?: FrameResult; error?: string } | null;
-      if (!response.ok || !next?.result) throw new Error(next?.error || "Frame compare failed.");
-      setFrameNotes((previous) => ({ ...previous, [candidate.key]: next.result! }));
-      if (next.result.ok) toast.success(next.result.message);
-      else toast.message(next.result.message);
+      const result = await runCompare(candidate);
+      if (result.ok) toast.success(result.message);
+      else toast.message(result.message);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Frame compare failed.");
     } finally {
+      setComparing(null);
+    }
+  }
+
+  async function checkAll() {
+    if (checkingAll || comparing) return;
+    checkingAllRef.current = true;
+    wideListRef.current = true;
+    setWideList(true);
+    setCheckingAll(true);
+    setCheckProgress({ done: 0, total: 0 });
+    try {
+      const params = new URLSearchParams({ candidates: "1", wide: "1" });
+      if (query.trim()) params.set("q", query.trim());
+      const response = await fetch(`/api/merge?${params}`, { cache: "no-store" });
+      const next = (await response.json().catch(() => null)) as MergeBody | null;
+      if (!response.ok || !next) throw new Error(next?.error || "Merge candidates could not be loaded.");
+      setBody(next);
+      if (!deltaDirtyRef.current) setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      if (!framesDirtyRef.current) setFramesText(String(next.settings.frameSampleCount));
+      setError(null);
+      const list = next.candidates ?? [];
+      if (!list.length) {
+        toast.message(query.trim() ? "No matching possible pairs to check." : "No possible pairs to check.");
+        return;
+      }
+      let matched = 0;
+      let failed = 0;
+      for (let index = 0; index < list.length; index += 1) {
+        const candidate = list[index]!;
+        setCheckProgress({ done: index, total: list.length });
+        setComparing(candidate.key);
+        try {
+          const result = await runCompare(candidate);
+          if (result.ok) matched += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      const checked = list.length - failed;
+      const extra = failed ? ` · ${failed} failed` : "";
+      toast.success(`Checked ${checked} pair${checked === 1 ? "" : "s"} · ${matched} matched${extra}. Sorted by match.`);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Check all failed.");
+    } finally {
+      checkingAllRef.current = false;
+      setCheckingAll(false);
+      setCheckProgress(null);
       setComparing(null);
     }
   }
@@ -537,9 +607,10 @@ export function MergeView() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Runtime difference filters the automatic list. Check frames reports how many pictures matched, looks for a constant start-title offset (one copy
-          missing the open), and says whether a runtime gap is PAL speed, titles, or a different edition. If it finds an offset, Merge delays or trims the other
-          file's audio and subtitles so they stay in sync.
+          Runtime difference filters the automatic list. Check all still compares every possible pair — including mismatched frame rates and runtimes over that
+          limit — then sorts the best picture matches to the top. Check frames reports how many pictures matched, looks for a constant start-title offset (one
+          copy missing the open), and says whether a runtime gap is PAL speed, titles, or a different edition. If it finds an offset, Merge delays or trims the
+          other file's audio and subtitles so they stay in sync.
         </p>
       </div>
 
@@ -556,10 +627,10 @@ export function MergeView() {
               Clear check
             </Button>
           </div>
-          {inspect.pairs.length === 0 ? (
+          {            inspect.pairs.length === 0 ? (
             <p className="text-sm text-muted-foreground">This title does not have two mergeable video files.</p>
           ) : (
-            inspect.pairs.map((pair) => (
+            sortMergeCandidates(inspect.pairs, frameNotes).map((pair) => (
               <PairCard
                 key={pair.key}
                 title={inspect.label}
@@ -569,6 +640,7 @@ export function MergeView() {
                 videoFrom={pair.videoFrom}
                 reason={pair.reason}
                 editionConflict={pair.candidate?.editionConflict}
+                overDelta={pair.candidate?.overDelta}
                 audioOnlyLeft={pair.candidate?.audioOnlyLeft}
                 audioOnlyRight={pair.candidate?.audioOnlyRight}
                 eligible={pair.eligible}
@@ -595,6 +667,13 @@ export function MergeView() {
           <Checkbox checked={skipFrame} onCheckedChange={(value) => setSkipFrame(value === true)} />
           Skip frame check when merging
         </label>
+        <Button type="button" size="sm" variant="outline" disabled={checkingAll || comparing !== null} onClick={() => void checkAll()}>
+          {checkingAll && checkProgress && checkProgress.total
+            ? `Checking ${Math.min(checkProgress.done + 1, checkProgress.total)} of ${checkProgress.total}…`
+            : checkingAll
+              ? "Checking…"
+              : "Check all"}
+        </Button>
         <Button type="button" size="sm" variant="outline" disabled={clearing || !body?.totals.pending} onClick={() => void clearWaiting()}>
           {clearing ? "Clearing…" : "Clear waiting"}
         </Button>
@@ -607,11 +686,22 @@ export function MergeView() {
 
       {!body ? <p className="text-sm text-muted-foreground">Looking for candidates…</p> : null}
 
-      <h2 className="text-sm font-medium">Automatic candidates</h2>
+      <h2 className="text-sm font-medium">
+        Automatic candidates
+        {Object.keys(frameNotes).length ? (
+          <span className="ml-2 font-normal text-muted-foreground">sorted by match</span>
+        ) : wideList ? (
+          <span className="ml-2 font-normal text-muted-foreground">including over the runtime limit</span>
+        ) : null}
+      </h2>
 
       {body && candidates.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {query.trim() ? "No matching titles with complementary audio and similar runtime." : "No titles with two similar-length versions and different audio yet."}
+          {query.trim()
+            ? "No matching titles with complementary audio."
+            : wideList
+              ? "No titles with two versions and different audio yet."
+              : "No titles with two similar-length versions and different audio yet."}
         </p>
       ) : null}
 
@@ -626,14 +716,15 @@ export function MergeView() {
             videoFrom={candidate.videoFrom}
             reason={candidate.reason}
             editionConflict={candidate.editionConflict}
+            overDelta={candidate.overDelta}
             audioOnlyLeft={candidate.audioOnlyLeft}
             audioOnlyRight={candidate.audioOnlyRight}
             eligible
             frames={frameNotes[candidate.key]}
             comparing={comparing === candidate.key}
             sending={sending === candidate.key}
-            onCompare={() => void compare(candidate)}
-            onMerge={() => void merge(candidate)}
+            onCompare={checkingAll ? undefined : () => void compare(candidate)}
+            onMerge={checkingAll ? undefined : () => void merge(candidate)}
           />
         ))}
       </div>

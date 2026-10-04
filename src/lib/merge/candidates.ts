@@ -39,11 +39,14 @@ export type MergeCandidate = {
   subtitleOnlyLeft: string[];
   subtitleOnlyRight: string[];
   editionConflict: boolean;
+  overDelta: boolean;
   reason: string;
 };
 
 export type MergePairOptions = {
   maxDurationDeltaMinutes?: number | null;
+  /** Include complementary-audio pairs even when runtime is over the list limit. */
+  ignoreDuration?: boolean;
 };
 
 export type MergePairInspect = {
@@ -189,7 +192,8 @@ export function evaluatePair(
   if (left.durationMinutes == null || right.durationMinutes == null) {
     return { ...base, eligible: false, reason: "One or both files have no known runtime.", candidate: null };
   }
-  if (!duration.ok) {
+  const overDelta = !duration.ok;
+  if (overDelta && !options.ignoreDuration) {
     const delta = durationDeltaMinutes == null ? "?" : String(Math.round(durationDeltaMinutes * 10) / 10);
     const allowed = formatTolerance(duration.toleranceSeconds / 60);
     return {
@@ -219,9 +223,13 @@ export function evaluatePair(
   const conflict = editionConflict(left.edition, right.edition);
   const donor = videoFrom === "left" ? right : left;
   const audioParts = `${donorAudio.join(", ")} from ${donor.name}`;
-  const reason = conflict
-    ? `Same length, but labels say ${left.edition} and ${right.edition}. Adds ${audioParts}.`
-    : `Same length (±${formatTolerance(duration.toleranceSeconds / 60)}). Adds ${audioParts}.`;
+  const allowed = formatTolerance(duration.toleranceSeconds / 60);
+  const delta = durationDeltaMinutes == null ? "?" : String(Math.round(durationDeltaMinutes * 10) / 10);
+  const reason = overDelta
+    ? `Runtimes differ by ${delta} min (allowed ${allowed}). Adds ${audioParts}.`
+    : conflict
+      ? `Same length, but labels say ${left.edition} and ${right.edition}. Adds ${audioParts}.`
+      : `Same length (±${allowed}). Adds ${audioParts}.`;
   const candidate: MergeCandidate = {
     key,
     titleId: file.titleId ?? null,
@@ -235,6 +243,7 @@ export function evaluatePair(
     subtitleOnlyLeft,
     subtitleOnlyRight,
     editionConflict: conflict,
+    overDelta,
     reason,
   };
   return { ...base, eligible: true, reason, candidate };

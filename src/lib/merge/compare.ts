@@ -110,6 +110,11 @@ export function isPalFilmPair(leftFps: number | null, rightFps: number | null): 
   return (left === "film" && right === "pal") || (left === "pal" && right === "film");
 }
 
+/** A 4% runtime gap is PAL only when one file is 24 fps and the other is 25. Same-fps copies can still have a missing open. */
+export function shouldSearchStartOffset(leftFps: number | null, rightFps: number | null): boolean {
+  return !isPalFilmPair(leftFps, rightFps);
+}
+
 export function classifyRuntime(input: {
   leftSeconds: number | null;
   rightSeconds: number | null;
@@ -142,6 +147,7 @@ export function explainFrameCheck(input: {
   leftFps: number | null;
   rightFps: number | null;
   startOffsetSeconds?: number | null;
+  offsetSearched?: boolean;
 }): { kind: RuntimeKind; percent: number; message: string } {
   const percent = input.total > 0 ? Math.round((input.matched / input.total) * 100) : 0;
   const kind = classifyRuntime({ ...input, framesOk: input.ok });
@@ -186,10 +192,13 @@ export function explainFrameCheck(input: {
     };
   }
   if (kind === "edition") {
+    const offsetBit = input.offsetSearched
+      ? " Tried a constant start-title offset (including the runtime gap and common opens like 20 s); none lined up the pictures."
+      : "";
     return {
       kind,
       percent,
-      message: `${matchBit}. Runtimes differ by ${Math.round(delta ?? 0)} s${fpsBit ? ` (${fpsBit})` : ""} — likely different editions. No start-title offset lined up the pictures.`,
+      message: `${matchBit}. Runtimes differ by ${Math.round(delta ?? 0)} s${fpsBit ? ` (${fpsBit})` : ""} — likely different editions.${offsetBit}`,
     };
   }
   return { kind, percent, message: `${matchBit}. These may be different cuts.` };
@@ -210,7 +219,7 @@ export function startOffsetSearchList(leftSeconds: number, rightSeconds: number,
   add(0);
   add(delta);
   add(-delta);
-  for (const step of [5, 10, 15, 20, 25, 30, 45, 60]) {
+  for (const step of [5, 10, 15, 20, 25, 30, 45, 60, 90, 120]) {
     add(step);
     add(-step);
   }
@@ -527,7 +536,7 @@ export async function compareFrames(
   const workDir = options.workDir;
   if (workDir) fs.mkdirSync(workDir, { recursive: true });
 
-  const finish = (samples: FrameSample[], startOffsetSeconds: number | null): FrameCheck => {
+  const finish = (samples: FrameSample[], startOffsetSeconds: number | null, offsetSearched = false): FrameCheck => {
     const matched = samples.filter((sample) => sample.matched).length;
     const ok = matched >= required;
     const explained = explainFrameCheck({
@@ -540,6 +549,7 @@ export async function compareFrames(
       leftFps: left.fps,
       rightFps: right.fps,
       startOffsetSeconds,
+      offsetSearched,
     });
     return {
       ok,
@@ -560,16 +570,15 @@ export async function compareFrames(
   const relativeOk = relative.filter((sample) => sample.matched).length >= required;
   if (relativeOk) return finish(relative, 0);
 
-  const pal = isPalSpeedDuration(leftSeconds, rightSeconds);
-  if (pal) return finish(relative, null);
+  if (!shouldSearchStartOffset(left.fps, right.fps)) return finish(relative, null);
 
   const found = await findStartOffset(leftPath, rightPath, leftSeconds, rightSeconds);
-  if (!found) return finish(relative, null);
+  if (!found) return finish(relative, null, true);
 
   const aligned = alignedOffsets(leftSeconds, rightSeconds, found.offset, frameCount);
-  if (!aligned) return finish(relative, null);
+  if (!aligned) return finish(relative, null, true);
   const shifted = await sampleAlignedFrames(leftPath, rightPath, aligned.left, aligned.right, workDir, options.onProgress);
   const shiftedOk = shifted.filter((sample) => sample.matched).length >= required;
   const reportedOffset = shiftedOk && Math.abs(found.offset) >= 2 ? found.offset : null;
-  return finish(shiftedOk ? shifted : relative, reportedOffset);
+  return finish(shiftedOk ? shifted : relative, reportedOffset, true);
 }
