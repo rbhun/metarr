@@ -732,6 +732,8 @@ test("the demo library exposes a merge candidate with complementary audio", () =
   assert.equal(candidates[0]!.label.includes("Blade Runner 2049"), true);
   assert.equal(candidates[0]!.videoFrom, "left");
   assert.ok(candidates[0]!.audioOnlyRight.includes("Hungarian") || candidates[0]!.audioOnlyLeft.includes("Hungarian"));
+  assert.equal(candidates[0]!.left.frameRate, "23.976 fps");
+  assert.equal(candidates[0]!.right.frameRate, "25 fps");
   db.close();
 });
 

@@ -17,6 +17,7 @@ function video(partial: Partial<MediaFile> & Pick<MediaFile, "path">): MediaFile
     subtitleLanguages: partial.subtitleLanguages ?? ["English"],
     bitrateKbps: partial.bitrateKbps ?? 8000,
     durationMinutes: partial.durationMinutes ?? null,
+    frameRate: partial.frameRate ?? null,
   };
 }
 
