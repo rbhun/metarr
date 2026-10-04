@@ -203,6 +203,11 @@ export function chooseMatch(records: SourceDraft[], filePath: string, roots: str
   return pickMatch(indexKnown(records, roots), filePath);
 }
 
+/** True when the file's media folder already belongs to a series from Sonarr, Plex, or Bazarr. */
+export function underKnownSeries(records: SourceDraft[], filePath: string, roots: string[] = []): boolean {
+  return seriesIdsForPath(indexKnown(records, roots), filePath).length > 0;
+}
+
 /** Disc playlists are named 00000.m2ts, 00366.m2ts, and similar. The folder around them is the title. */
 export function isStreamFile(filePath: string): boolean {
   const stem = path.basename(filePath).replace(/\.[^.]+$/, "");
@@ -231,10 +236,18 @@ export function filesRepresentingFolders(files: string[], known: SourceDraft[]):
   return keep;
 }
 
-export function folderDraft(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }, match: SourceDraft | null): SourceDraft | null {
+export function folderDraft(
+  filePath: string,
+  probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] },
+  match: SourceDraft | null,
+  options: { underSeries?: boolean } = {},
+): SourceDraft | null {
   // Movie extras stay when they match that movie. Series Features/Extras folders
   // must not invent their own movie titles (often named Features or Extras).
   if (!match && bonusFlag(filePath)) return null;
+  // Unmatched files under a known series folder (Season folders, Specials, loose
+  // videos without SxxExx) must not invent standalone movie titles either.
+  if (!match && options.underSeries) return null;
   const base = path.basename(filePath);
   const named = match?.kind === "episode" ? null : titleFromAncestors(filePath);
   const loose = match ? null : episodeInName(base);
@@ -316,10 +329,14 @@ function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subti
 }
 
 /** Probe one video. Used after a language write so the folder scanner does not walk the library. */
-export async function scanOneFile(filePath: string, match: SourceDraft | null): Promise<SourceDraft | null> {
+export async function scanOneFile(
+  filePath: string,
+  match: SourceDraft | null,
+  options: { underSeries?: boolean } = {},
+): Promise<SourceDraft | null> {
   const probed = tracksFromProbe(await probeFile(filePath));
   if (!probed) return null;
-  return folderDraft(filePath, withSidecarFiles(filePath, probed), match);
+  return folderDraft(filePath, withSidecarFiles(filePath, probed), match, options);
 }
 
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {
@@ -337,7 +354,10 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     const probed = tracksFromProbe(await probeFile(file));
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);
-    const draft = folderDraft(file, withSidecarFiles(file, probed), pickMatch(indexed, file));
+    const match = pickMatch(indexed, file);
+    const draft = folderDraft(file, withSidecarFiles(file, probed), match, {
+      underSeries: seriesIdsForPath(indexed, file).length > 0,
+    });
     if (draft) drafts.push(draft);
   }
   onProgress({
@@ -425,13 +445,20 @@ function mediaFolder(filePath: string, roots: string[]): string | null {
   return chosen;
 }
 
+function seriesIdsForPath(index: KnownIndex, filePath: string): string[] {
+  const folder = mediaFolder(filePath, index.roots);
+  if (!folder) return [];
+  const records = uniqueRecords(index.byFolder.get(folder) ?? []);
+  return [...new Set(records.map(seriesId).filter((item): item is string => Boolean(item)))];
+}
+
 function matchByFolder(index: KnownIndex, filePath: string): SourceDraft | null {
   const folder = mediaFolder(filePath, index.roots);
   if (!folder) return null;
   const records = uniqueRecords(index.byFolder.get(folder) ?? []);
   if (!records.length) return null;
   const code = episodeInName(path.basename(filePath)) ?? episodeInName(path.basename(path.dirname(filePath)));
-  const seriesIds = [...new Set(records.map(seriesId).filter((item): item is string => Boolean(item)))];
+  const seriesIds = seriesIdsForPath(index, filePath);
   if (code && seriesIds.length === 1) {
     const id = seriesIds[0]!;
     const picked = pickEpisode(

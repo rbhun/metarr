@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chooseMatch, cleanRoots, filesRepresentingFolders, folderDraft, formatRefreshPaths, tracksFromProbe } from "@/lib/folder-scan";
+import { chooseMatch, cleanRoots, filesRepresentingFolders, folderDraft, formatRefreshPaths, tracksFromProbe, underKnownSeries } from "@/lib/folder-scan";
 import { sourceDraft } from "@/lib/source";
 
 test("a probe report becomes audio and subtitle tracks in file order", () => {
@@ -216,6 +216,64 @@ test("series Features and Extras folders do not invent movie titles", () => {
   assert.equal(folderDraft(apocalypse, { audio: [], subtitles: [] }, null), null);
   assert.equal(folderDraft(italian, { audio: [], subtitles: [] }, null), null);
   assert.equal(folderDraft(extra, { audio: [], subtitles: [] }, null), null);
+});
+
+test("unmatched files under a known series folder do not invent movie titles", () => {
+  const topGear = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "88",
+    title: "Top Gear",
+    year: 2002,
+    tvdbId: "74608",
+    path: "/mnt/media/TV/Top Gear",
+  });
+  const episode = sourceDraft({
+    connector: "sonarr",
+    kind: "episode",
+    externalKey: "8801",
+    title: "Series 1, Episode 1",
+    seriesTitle: "Top Gear",
+    year: 2002,
+    season: 1,
+    episode: 1,
+    tvdbId: "74608",
+    parentKey: "sonarr-series:88",
+    path: "/mnt/media/TV/Top Gear/Season 01/Top Gear - S01E01.mkv",
+  });
+  const men = sourceDraft({
+    connector: "sonarr",
+    kind: "series",
+    externalKey: "99",
+    title: "Two and a Half Men",
+    year: 2003,
+    tvdbId: "75760",
+    path: "/mnt/media/TV/Two and a Half Men",
+  });
+  const roots = ["/mnt/media/TV"];
+  const known = [topGear, episode, men];
+  const orphans = [
+    "/mnt/media/TV/Top Gear/Season 01/Episode Without Code.mkv",
+    "/mnt/media/TV/Top Gear/Specials/Christmas Special.mkv",
+    "/mnt/media/TV/Top Gear/720p/Some Documentary.mkv",
+    "/mnt/media/TV/Top Gear/Top Gear - The Movie.mkv",
+    "/mnt/media/TV/Two and a Half Men/Season 2/Two.and.a.Half.Men.202.mkv",
+    "/mnt/media/TV/Top Gear/Season 01/E02 Title.mkv",
+  ];
+  for (const file of orphans) {
+    assert.equal(chooseMatch(known, file, roots), null, file);
+    assert.equal(underKnownSeries(known, file, roots), true, file);
+    assert.equal(folderDraft(file, { audio: [], subtitles: [] }, null, { underSeries: true }), null, file);
+  }
+  const matched = "/mnt/media/TV/Top Gear/Season 01/Top Gear - S01E02.mkv";
+  const hit = chooseMatch(known, matched, roots);
+  assert.equal(hit?.kind, "episode");
+  assert.equal(hit?.season, 1);
+  assert.equal(hit?.episode, 2);
+  const draft = folderDraft(matched, { audio: [], subtitles: [] }, hit, { underSeries: true });
+  assert.ok(draft);
+  assert.equal(draft.kind, "episode");
+  assert.equal(draft.seriesTitle, "Top Gear");
 });
 
 test("a movie Featurettes file still keeps that movie when the folder matches", () => {
