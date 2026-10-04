@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.172
+
+- Add Rewrap to MKV on the library selection bar, so several AVI and loose M2TS files can be copied to MKV at once.
+
+## 0.0.171
+
+- Rename for Sonarr also fixes a file that already has the episode name when the series name or the season and episode numbers are wrong.
+
 ## 0.0.170
 
 - Version merge uses the same audio languages the library shows (tagged and detected tracks), so pairs like a 2160p English copy and a 1080p English+Italian copy are offered again.

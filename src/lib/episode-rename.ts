@@ -6,6 +6,7 @@ import { asRecord, fetchJson, normalizeBaseUrl } from "@/lib/connectors/http";
 import { getMeta, listConnectors, queryEpisodes } from "@/lib/db";
 import { readDetectSettings } from "@/lib/detect/store";
 import { resolveMediaPath } from "@/lib/detect/paths";
+import { episodeInName } from "@/lib/folder-scan";
 import { normalizeTitle } from "@/lib/media";
 import { enrichmentKey, matchLocalEpisode, recognizeEpisode, type RecognizedEpisode } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
@@ -26,7 +27,95 @@ export function sonarrEpisodeCode(season: number, episode: number): string {
 }
 
 export function hasSonarrCode(filePath: string, season: number, episode: number): boolean {
-  return path.basename(filePath).toUpperCase().includes(sonarrEpisodeCode(season, episode));
+  const code = episodeInName(path.basename(filePath));
+  return code?.season === season && code?.episode === episode;
+}
+
+/** The file already carries this series, this episode code, and this episode title. A wrong code or a wrong series name does not count. */
+export function alreadySonarrName(filePath: string, seriesTitle: string, season: number, episode: number, episodeTitle: string): boolean {
+  if (!hasSonarrCode(filePath, season, episode)) return false;
+  const haystack = normalizeTitle(path.basename(filePath));
+  const series = normalizeTitle(seriesTitle);
+  const title = normalizeTitle(episodeTitle);
+  if (series.length >= 3 && !haystack.includes(series)) return false;
+  if (title.length >= 8 && !haystack.includes(title)) return false;
+  return true;
+}
+
+export type NamedEpisode = { season: number; episode: number; title: string };
+
+export function sonarrEpisodeRefs(payload: unknown): NamedEpisode[] {
+  if (!Array.isArray(payload)) return [];
+  const episodes: NamedEpisode[] = [];
+  for (const item of payload) {
+    const record = asRecord(item);
+    const season = record?.seasonNumber;
+    const episode = record?.episodeNumber;
+    const title = typeof record?.title === "string" ? record.title.trim() : "";
+    if (typeof season !== "number" || typeof episode !== "number" || !Number.isInteger(season) || !Number.isInteger(episode) || !title) continue;
+    episodes.push({ season, episode, title });
+  }
+  return episodes;
+}
+
+function titleKey(filePath: string, episodeTitles: Record<string, Record<string, string>>, language: string): string | null {
+  const local = matchLocalEpisode(filePath, episodeTitles[language]);
+  const english = language === "en" ? null : matchLocalEpisode(filePath, episodeTitles.en);
+  if (!local) return english;
+  if (!english || english === local) return local;
+  const localLength = normalizeTitle(episodeTitles[language]?.[local] ?? "").length;
+  const englishLength = normalizeTitle(episodeTitles.en?.[english] ?? "").length;
+  if (localLength === englishLength) return null;
+  return englishLength > localLength ? english : local;
+}
+
+function sameTitle(left: string, right: string): boolean {
+  const a = normalizeTitle(left);
+  const b = normalizeTitle(right);
+  return a.length >= 8 && a === b;
+}
+
+/**
+ * The episode a file should be renamed to.
+ * The episode name in the file wins over a season or episode number written beside it.
+ * Sonarr’s own list supplies the number when that name is one of its episodes.
+ */
+export function episodeRenameTarget(input: {
+  filePath: string;
+  episodeTitles: Record<string, Record<string, string>>;
+  language: string;
+  catalog: RecognizedEpisode[];
+  sonarrEpisodes?: NamedEpisode[];
+}): NamedEpisode | null {
+  const key = titleKey(input.filePath, input.episodeTitles, input.language);
+  if (!key) return null;
+  const [seasonText, episodeText] = key.split(":");
+  const season = Number(seasonText);
+  const episode = Number(episodeText);
+  if (!Number.isInteger(season) || !Number.isInteger(episode)) return null;
+  const english = input.episodeTitles.en?.[key]?.trim() || "";
+  const localName = input.episodeTitles[input.language]?.[key]?.trim() || "";
+  const lookupTitle = english || localName;
+  const sonarrHits = (input.sonarrEpisodes ?? []).filter((row) => sameTitle(row.title, english) || sameTitle(row.title, localName));
+  const sonarrCodes = new Map<string, NamedEpisode>();
+  for (const hit of sonarrHits) sonarrCodes.set(`${hit.season}:${hit.episode}`, hit);
+  if (sonarrCodes.size === 1) return [...sonarrCodes.values()][0];
+
+  const recognized = recognizeEpisode(input.filePath, input.episodeTitles, input.language, input.catalog);
+  const coded = episodeInName(path.basename(input.filePath));
+  if (recognized?.season != null && recognized.episode != null) {
+    const echoed = coded?.season === recognized.season && coded?.episode === recognized.episode;
+    const lookupDiffers = recognized.season !== season || recognized.episode !== episode;
+    if (!(echoed && lookupDiffers)) {
+      return {
+        season: recognized.season,
+        episode: recognized.episode,
+        title: filenameEpisodeTitle(recognized.title, english || null),
+      };
+    }
+  }
+  if (!lookupTitle) return null;
+  return { season, episode, title: lookupTitle };
 }
 
 /** Prefer the English episode title in the file name. Keep the matched title when it is already that English name. */
@@ -62,7 +151,7 @@ export function planEpisodeRename(input: {
 }): { plan: EpisodeRenamePlan } | { plan: null; reason: "keep" | "taken" | "skip" } {
   const { match } = input;
   if (match.season == null || match.episode == null || !Number.isInteger(match.season) || !Number.isInteger(match.episode)) return { plan: null, reason: "skip" };
-  if (hasSonarrCode(input.filePath, match.season, match.episode)) return { plan: null, reason: "keep" };
+  if (alreadySonarrName(input.filePath, input.seriesTitle, match.season, match.episode, match.title)) return { plan: null, reason: "keep" };
   const directory = path.dirname(input.filePath);
   const base = path.basename(input.filePath);
   const extension = path.extname(base);
@@ -200,6 +289,25 @@ function asArraySafe(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+async function sonarrNaming(db: Database.Database, folders: string[]): Promise<{ title: string; episodes: NamedEpisode[] } | null> {
+  const sonarr = listConnectors(db).find((connector) => connector.id === "sonarr" && connector.enabled && connector.baseUrl && connector.apiKey);
+  if (!sonarr || folders.length === 0) return null;
+  try {
+    const base = normalizeBaseUrl(sonarr.baseUrl, 8989);
+    const headers = { Accept: "application/json", "X-Api-Key": sonarr.apiKey };
+    const series = asArraySafe(await fetchJson(`${base}/api/v3/series`, headers, 60_000));
+    const seriesId = sonarrSeriesFor(series, folders);
+    if (seriesId == null) return null;
+    const show = series.map((item) => asRecord(item)).find((record) => record?.id === seriesId);
+    const title = typeof show?.title === "string" ? show.title.trim() : "";
+    const episodes = sonarrEpisodeRefs(asArraySafe(await fetchJson(`${base}/api/v3/episode?seriesId=${seriesId}`, headers, 60_000)));
+    if (!title) return null;
+    return { title, episodes };
+  } catch {
+    return null;
+  }
+}
+
 export async function renameSeriesForSonarr(
   db: Database.Database,
   catalogId: number,
@@ -252,6 +360,15 @@ export async function renameSeriesForSonarr(
     title: episode.title,
   }));
   const maps = readDetectSettings(db).pathMaps;
+  const folderHints = new Set<string>();
+  for (const episode of allEpisodes) {
+    for (const filePath of [episode.path, ...episode.versions.map((version) => version.path)]) {
+      if (!filePath) continue;
+      folderHints.add(path.dirname(filePath));
+    }
+  }
+  const naming = await sonarrNaming(db, [...folderHints]);
+  const seriesTitle = naming?.title || row.title;
   const claimed = new Set<string>();
   let renamed = 0;
   let collisions = 0;
@@ -259,10 +376,15 @@ export async function renameSeriesForSonarr(
   for (const episode of episodes) {
     const paths = [episode.path, ...episode.versions.map((version) => version.path)].filter((value): value is string => Boolean(value));
     for (const filePath of paths) {
-      const match = recognizeEpisode(filePath, episodeTitles, language, identities);
-      if (!match || match.season == null || match.episode == null) continue;
-      const localKey = matchLocalEpisode(filePath, episodeTitles[language]);
-      const title = filenameEpisodeTitle(match.title, localKey ? episodeTitles.en?.[localKey] : null);
+      const match = episodeRenameTarget({
+        filePath,
+        episodeTitles,
+        language,
+        catalog: identities,
+        sonarrEpisodes: naming?.episodes,
+      });
+      if (!match) continue;
+      const title = match.title;
       const local = localFile(filePath, maps);
       if (!local) continue;
       let names: string[] = [];
@@ -273,7 +395,7 @@ export async function renameSeriesForSonarr(
       }
       const planned = planEpisodeRename({
         filePath: local,
-        seriesTitle: row.title,
+        seriesTitle,
         match: { season: match.season, episode: match.episode, title },
         namesInFolder: names,
       });
@@ -295,7 +417,7 @@ export async function renameSeriesForSonarr(
   if (renamed === 0) {
     const why = collisions
       ? `${collisions} file${collisions === 1 ? "" : "s"} stayed put because the Sonarr name already exists.`
-      : "No file had a secondary-language title that still needs a Sonarr name. A file that already contains the right SxxExx is left as it is.";
+      : "No file had an episode title that still needs a Sonarr name. A file that already has the series, the right SxxExx, and that title is left as it is.";
     return { renamed: 0, message: why, catalogId };
   }
   const apps = await askApps(db, [...folders]);

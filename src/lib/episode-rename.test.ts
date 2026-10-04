@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyEpisodeRename, filenameEpisodeTitle, hasSonarrCode, planEpisodeRename, sonarrEpisodeBasename } from "@/lib/episode-rename";
+import { applyEpisodeRename, episodeRenameTarget, filenameEpisodeTitle, hasSonarrCode, planEpisodeRename, sonarrEpisodeBasename } from "@/lib/episode-rename";
 
 test("a Sonarr name uses the episode code and the English title", () => {
   assert.equal(
@@ -49,6 +49,57 @@ test("the file name uses the English title when the library row still has the lo
   assert.equal(filenameEpisodeTitle("Amit ma megtehetsz", "Time Waits for No Bear"), "Time Waits for No Bear");
   assert.equal(filenameEpisodeTitle("Time Waits for No Bear", "Time Waits for No Bear"), "Time Waits for No Bear");
   assert.equal(filenameEpisodeTitle("Amit ma megtehetsz", ""), "Amit ma megtehetsz");
+});
+
+test("a correct episode name with a bad season or episode number is renamed", () => {
+  const titles = {
+    hu: { "1:7": "Amit ma megtehetsz" },
+    en: { "1:7": "Time Waits for No Bear" },
+  };
+  const fromFile = episodeRenameTarget({
+    filePath: "/tv/TaleSpin/TaleSpin - S02E03 - Time Waits for No Bear.avi",
+    episodeTitles: titles,
+    language: "hu",
+    catalog: [{ season: 2, episode: 3, title: "Time Waits for No Bear" }],
+  });
+  assert.deepEqual(fromFile, { season: 1, episode: 7, title: "Time Waits for No Bear" });
+  const echoed = episodeRenameTarget({
+    filePath: "/tv/TaleSpin/Show - S02E03 - Amit ma megtehetsz.avi",
+    episodeTitles: titles,
+    language: "hu",
+    catalog: [{ season: 2, episode: 3, title: "Time Waits for No Bear" }],
+  });
+  assert.deepEqual(echoed, { season: 1, episode: 7, title: "Time Waits for No Bear" });
+  const sonarrOrder = episodeRenameTarget({
+    filePath: "/dvd/12 - Amit ma megtehetsz.avi",
+    episodeTitles: titles,
+    language: "hu",
+    catalog: [{ season: 1, episode: 14, title: "Time Waits for No Bear" }],
+  });
+  assert.deepEqual(sonarrOrder, { season: 1, episode: 14, title: "Time Waits for No Bear" });
+  const fromSonarr = episodeRenameTarget({
+    filePath: "/tv/TaleSpin/Balu kapitány kalandjai - S01E07 - Amit ma megtehetsz.avi",
+    episodeTitles: titles,
+    language: "hu",
+    catalog: [{ season: 1, episode: 7, title: "Time Waits for No Bear" }],
+    sonarrEpisodes: [{ season: 1, episode: 14, title: "Time Waits for No Bear" }],
+  });
+  assert.deepEqual(fromSonarr, { season: 1, episode: 14, title: "Time Waits for No Bear" });
+  const wrongSeries = planEpisodeRename({
+    filePath: "/tv/TaleSpin/Balu - S01E14 - Time Waits for No Bear.avi",
+    seriesTitle: "TaleSpin",
+    match: { season: 1, episode: 14, title: "Time Waits for No Bear" },
+    namesInFolder: ["Balu - S01E14 - Time Waits for No Bear.avi"],
+  });
+  assert.equal(wrongSeries.plan?.video.to, "/tv/TaleSpin/TaleSpin - S01E14 - Time Waits for No Bear.avi");
+  const kept = planEpisodeRename({
+    filePath: "/tv/TaleSpin/TaleSpin - S01E14 - Time Waits for No Bear 1080p.avi",
+    seriesTitle: "TaleSpin",
+    match: { season: 1, episode: 14, title: "Time Waits for No Bear" },
+    namesInFolder: ["TaleSpin - S01E14 - Time Waits for No Bear 1080p.avi"],
+  });
+  assert.equal(kept.plan, null);
+  assert.equal(kept.reason, "keep");
 });
 
 test("a taken Sonarr name is not overwritten", () => {

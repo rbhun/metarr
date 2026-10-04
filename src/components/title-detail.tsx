@@ -95,7 +95,7 @@ export function TitleDetail({
   }
   async function renameForSonarr() {
     if (!title) return;
-    if (!window.confirm("Rename files whose secondary-language title matches an episode to Show - S01E07 - English title, then ask Sonarr to rescan and search for episodes that are still missing?")) return;
+    if (!window.confirm("Rename files to Show - S01E07 - English title, using the episode name even when the season or episode number in the file is wrong, then ask Sonarr to rescan and search for episodes that are still missing?")) return;
     setRenameBusy(true);
     try {
       const response = await fetch(`/api/library/${title.id}/rename`, {
@@ -263,7 +263,7 @@ export function TitleDetail({
                     className="w-fit"
                     disabled={renameBusy}
                     onClick={() => void renameForSonarr()}
-                    title="Rename a file that contains a secondary-language episode title to Show - S01E07 - English title, then ask Sonarr to rescan"
+                    title="Rename a file to Show - S01E07 - English title. The episode name is used even when the season or episode number in the file is wrong"
                   >
                     {renameBusy ? "Renaming…" : "Rename for Sonarr"}
                   </Button>

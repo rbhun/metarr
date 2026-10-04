@@ -7,6 +7,7 @@ import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { toastRemux } from "@/components/remux-tasks";
+import { rewrapNow } from "@/components/rewrap-actions";
 import { RemuxStatus } from "@/components/remux-status";
 import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
@@ -294,6 +295,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupAllProgress, setLookupAllProgress] = useState<string | null>(null);
   const [plexBusy, setPlexBusy] = useState(false);
+  const [rewrapBusy, setRewrapBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
@@ -573,6 +575,25 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function rewrapSelected() {
+    const titles: number[] = [];
+    const episodes: number[] = [];
+    for (const row of selected.values()) {
+      const title = row.key.match(/^title:(\d+)$/);
+      const episode = row.key.match(/^episode:(\d+)$/);
+      if (title) titles.push(Number(title[1]));
+      if (episode) episodes.push(Number(episode[1]));
+    }
+    setRewrapBusy(true);
+    try {
+      toastRemux(await rewrapNow(titles, episodes), "rewrap");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
+    } finally {
+      setRewrapBusy(false);
+    }
+  }
+
   async function pushSelected() {
     const items = [...selected.values()].map((row) => ({ catalogId: row.catalogId, episodeId: row.episodeId }));
     setPlexBusy(true);
@@ -714,6 +735,9 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             </label>
             <Button size="sm" variant="outline" onClick={() => void remuxSelected()}>
               Queue disc remux
+            </Button>
+            <Button size="sm" variant="outline" disabled={rewrapBusy} onClick={() => void rewrapSelected()} title="Copy each selected AVI or loose M2TS into an MKV beside it, without re-encoding">
+              {rewrapBusy ? "Starting…" : "Rewrap to MKV"}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear
