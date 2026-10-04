@@ -70,8 +70,9 @@ export function MergeSettingsCard() {
         <CardDescription>
           Manually combine two copies of the same edit that carry different audio or subtitle tracks. The higher-resolution or higher-bitrate file keeps its
           video; both files keep their audio and subtitles in a new{" "}
-          <span className="font-mono text-[11px]">.combined.mkv</span>. ffmpeg compares frames before writing. A runtime gap can be PAL speed or titles; the
-          pictures decide. Nothing runs on a schedule.
+          <span className="font-mono text-[11px]">.combined.mkv</span>. ffmpeg compares frames before writing. A runtime gap can be PAL speed, titles, or a
+          missing open; Check frames looks for a constant start offset and Merge delays or trims the other file's audio to match. The pictures decide. Nothing
+          runs on a schedule.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

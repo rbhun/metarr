@@ -15,6 +15,7 @@ export const DEFAULT_MAX_DURATION_DELTA_MINUTES = 1;
 export const DEFAULT_FRAME_SAMPLE_COUNT = 12;
 export const MIN_FRAME_SAMPLE_COUNT = 4;
 export const MAX_FRAME_SAMPLE_COUNT = 24;
+export const MAX_START_OFFSET_SECONDS = 180;
 
 export type DurationCheck = {
   ok: boolean;
@@ -33,7 +34,7 @@ export type FrameSample = {
   matched: boolean;
 };
 
-export type RuntimeKind = "same" | "framerate" | "edition" | "titles";
+export type RuntimeKind = "same" | "framerate" | "edition" | "titles" | "offset";
 
 export type FrameCheck = {
   ok: boolean;
@@ -45,6 +46,7 @@ export type FrameCheck = {
   leftFps: number | null;
   rightFps: number | null;
   durationDeltaSeconds: number | null;
+  startOffsetSeconds: number | null;
   message: string;
 };
 
@@ -114,14 +116,18 @@ export function classifyRuntime(input: {
   leftFps: number | null;
   rightFps: number | null;
   framesOk: boolean | null;
+  startOffsetSeconds?: number | null;
 }): RuntimeKind {
-  const { leftSeconds, rightSeconds, leftFps, rightFps, framesOk } = input;
+  const { leftSeconds, rightSeconds, leftFps, rightFps, framesOk, startOffsetSeconds } = input;
   if (leftSeconds == null || rightSeconds == null || leftSeconds <= 0 || rightSeconds <= 0) return "same";
-  if (durationsCloseSeconds(leftSeconds, rightSeconds).ok) return "same";
+  if (durationsCloseSeconds(leftSeconds, rightSeconds).ok && !(startOffsetSeconds != null && Math.abs(startOffsetSeconds) >= 2 && framesOk)) {
+    return "same";
+  }
   const palDuration = isPalSpeedDuration(leftSeconds, rightSeconds);
   const palFps = isPalFilmPair(leftFps, rightFps);
   const fpsUnknown = fpsFamily(leftFps) == null && fpsFamily(rightFps) == null;
-  if (palDuration && (palFps || fpsUnknown)) return "framerate";
+  if (palDuration && (palFps || fpsUnknown) && !(startOffsetSeconds != null && Math.abs(startOffsetSeconds) >= 2)) return "framerate";
+  if (framesOk && startOffsetSeconds != null && Math.abs(startOffsetSeconds) >= 2) return "offset";
   if (framesOk) return "titles";
   return "edition";
 }
@@ -135,6 +141,7 @@ export function explainFrameCheck(input: {
   rightSeconds: number | null;
   leftFps: number | null;
   rightFps: number | null;
+  startOffsetSeconds?: number | null;
 }): { kind: RuntimeKind; percent: number; message: string } {
   const percent = input.total > 0 ? Math.round((input.matched / input.total) * 100) : 0;
   const kind = classifyRuntime({ ...input, framesOk: input.ok });
@@ -145,7 +152,16 @@ export function explainFrameCheck(input: {
   const matchBit = input.ok
     ? `${input.matched} of ${input.total} frames matched (${percent}%)`
     : `${input.matched} of ${input.total} frames matched (${percent}%; need ${input.required})`;
+  const shift = input.startOffsetSeconds;
   if (input.ok) {
+    if (kind === "offset" && shift != null) {
+      const seconds = Math.round(Math.abs(shift));
+      return {
+        kind,
+        percent,
+        message: `${matchBit}. Pictures line up with a ${seconds} s start offset — the ${shift > 0 ? "second" : "first"} file has about that much extra at the open (front titles). Merge ${shift > 0 ? "trims" : "delays"} the other file's audio and subtitles by ${seconds} s to match.`,
+      };
+    }
     if (kind === "framerate") {
       return {
         kind,
@@ -173,10 +189,57 @@ export function explainFrameCheck(input: {
     return {
       kind,
       percent,
-      message: `${matchBit}. Runtimes differ by ${Math.round(delta ?? 0)} s${fpsBit ? ` (${fpsBit})` : ""} — likely different editions.`,
+      message: `${matchBit}. Runtimes differ by ${Math.round(delta ?? 0)} s${fpsBit ? ` (${fpsBit})` : ""} — likely different editions. No start-title offset lined up the pictures.`,
     };
   }
   return { kind, percent, message: `${matchBit}. These may be different cuts.` };
+}
+
+/** Offsets to try so right[t + offset] lines up with left[t]. Extra front titles on B are +delta. */
+export function startOffsetSearchList(leftSeconds: number, rightSeconds: number, maxSearch = MAX_START_OFFSET_SECONDS): number[] {
+  const delta = rightSeconds - leftSeconds;
+  const seen = new Set<number>();
+  const out: number[] = [];
+  const add = (value: number) => {
+    const rounded = Math.round(value);
+    if (!Number.isFinite(rounded) || Math.abs(rounded) > maxSearch) return;
+    if (seen.has(rounded)) return;
+    seen.add(rounded);
+    out.push(rounded);
+  };
+  add(0);
+  add(delta);
+  add(-delta);
+  for (const step of [5, 10, 15, 20, 25, 30, 45, 60]) {
+    add(step);
+    add(-step);
+  }
+  for (const center of [delta, -delta]) {
+    for (let offset = -6; offset <= 6; offset += 2) add(center + offset);
+  }
+  return out;
+}
+
+export function probeAnchorTime(durationSeconds: number): number {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 20) return Math.max(0, durationSeconds / 2);
+  return Math.min(Math.max(25, durationSeconds * 0.12), durationSeconds - 15);
+}
+
+/** Sample the overlapping region after shifting B by offset seconds (right = left + offset). */
+export function alignedOffsets(
+  leftSeconds: number,
+  rightSeconds: number,
+  offset: number,
+  count: number,
+): { left: number[]; right: number[] } | null {
+  const start = Math.max(0, -offset);
+  const end = Math.min(leftSeconds, rightSeconds - offset);
+  const span = end - start;
+  if (span < 10) return null;
+  const left = sampleOffsets(span, count).map((value) => value + start);
+  const right = left.map((value) => value + offset);
+  if (!left.length || right.some((value) => value < 0 || value > rightSeconds + 0.5)) return null;
+  return { left, right };
 }
 
 /**
@@ -346,9 +409,85 @@ async function grayscaleFrame(file: string, offsetSeconds: number): Promise<Buff
   );
 }
 
+async function sampleAlignedFrames(
+  leftPath: string,
+  rightPath: string,
+  leftOffsets: number[],
+  rightOffsets: number[],
+  workDir: string | undefined,
+  onProgress?: (done: number, total: number) => void,
+): Promise<FrameSample[]> {
+  const samples: FrameSample[] = [];
+  for (let index = 0; index < leftOffsets.length; index += 1) {
+    const leftOffset = leftOffsets[index]!;
+    const rightOffset = rightOffsets[index]!;
+    onProgress?.(index, leftOffsets.length);
+    try {
+      const [leftFrame, rightFrame] = await Promise.all([grayscaleFrame(leftPath, leftOffset), grayscaleFrame(rightPath, rightOffset)]);
+      if (workDir) {
+        fs.writeFileSync(path.join(workDir, `left-${index}.raw`), leftFrame);
+        fs.writeFileSync(path.join(workDir, `right-${index}.raw`), rightFrame);
+      }
+      const meanDiff = meanAbsoluteDiff(leftFrame, rightFrame);
+      samples.push({
+        index,
+        offsetSeconds: leftOffset,
+        rightOffsetSeconds: rightOffset,
+        meanDiff,
+        matched: meanDiff != null && meanDiff <= MATCH_THRESHOLD,
+      });
+    } catch {
+      samples.push({ index, offsetSeconds: leftOffset, rightOffsetSeconds: rightOffset, meanDiff: null, matched: false });
+    }
+  }
+  onProgress?.(leftOffsets.length, leftOffsets.length);
+  return samples;
+}
+
+async function findStartOffset(
+  leftPath: string,
+  rightPath: string,
+  leftSeconds: number,
+  rightSeconds: number,
+): Promise<{ offset: number; meanDiff: number } | null> {
+  const shorterIsLeft = leftSeconds <= rightSeconds;
+  const shortPath = shorterIsLeft ? leftPath : rightPath;
+  const longPath = shorterIsLeft ? rightPath : leftPath;
+  const shortDur = Math.min(leftSeconds, rightSeconds);
+  const longDur = Math.max(leftSeconds, rightSeconds);
+  const extras = [...new Set(startOffsetSearchList(0, longDur - shortDur).map((value) => Math.abs(value)))].sort((left, right) => left - right);
+  const anchors = [...new Set([probeAnchorTime(shortDur), Math.min(Math.max(45, shortDur * 0.35), shortDur - 20)])];
+  let winner: { offset: number; meanDiff: number } | null = null;
+  for (const anchor of anchors) {
+    if (anchor < 1 || anchor > shortDur - 1) continue;
+    let shortFrame: Buffer;
+    try {
+      shortFrame = await grayscaleFrame(shortPath, anchor);
+    } catch {
+      continue;
+    }
+    for (const extra of extras) {
+      const longTime = anchor + extra;
+      if (longTime < 0 || longTime > longDur - 1) continue;
+      try {
+        const longFrame = await grayscaleFrame(longPath, longTime);
+        const meanDiff = meanAbsoluteDiff(shortFrame, longFrame);
+        if (meanDiff == null || meanDiff > MATCH_THRESHOLD) continue;
+        const offset = shorterIsLeft ? extra : -extra;
+        if (winner == null || meanDiff < winner.meanDiff) winner = { offset, meanDiff };
+      } catch {
+        continue;
+      }
+    }
+    if (winner) return winner;
+  }
+  return winner;
+}
+
 /**
  * Grab the same relative moments from both files and compare low-res grayscale frames.
  * Duration is not a stop: titles, credits, or PAL speed can change length; the pictures decide.
+ * If relative samples fail, search for a constant start-title offset (one copy missing the open).
  */
 export async function compareFrames(
   leftPath: string,
@@ -370,66 +509,67 @@ export async function compareFrames(
       left?.durationSeconds != null && right?.durationSeconds != null
         ? Math.abs(left.durationSeconds - right.durationSeconds)
         : null,
+    startOffsetSeconds: null,
     message,
   });
 
   const [left, right] = await Promise.all([probeMediaTiming(leftPath), probeMediaTiming(rightPath)]);
-  if (left.durationSeconds == null || right.durationSeconds == null) {
+  const leftSeconds = left.durationSeconds;
+  const rightSeconds = right.durationSeconds;
+  if (leftSeconds == null || rightSeconds == null) {
     return empty("Could not read both runtimes, so the edit check did not run.", left, right);
   }
-  const leftOffsets = sampleOffsets(left.durationSeconds, frameCount);
-  const rightOffsets = sampleOffsets(right.durationSeconds, frameCount);
+  const leftOffsets = sampleOffsets(leftSeconds, frameCount);
+  const rightOffsets = sampleOffsets(rightSeconds, frameCount);
   if (leftOffsets.length < required || rightOffsets.length < required) {
     return empty("The files are too short to compare frames.", left, right);
   }
   const workDir = options.workDir;
   if (workDir) fs.mkdirSync(workDir, { recursive: true });
-  const samples: FrameSample[] = [];
-  for (let index = 0; index < leftOffsets.length; index += 1) {
-    const leftOffset = leftOffsets[index]!;
-    const rightOffset = rightOffsets[index]!;
-    options.onProgress?.(index, leftOffsets.length);
-    try {
-      const [leftFrame, rightFrame] = await Promise.all([grayscaleFrame(leftPath, leftOffset), grayscaleFrame(rightPath, rightOffset)]);
-      if (workDir) {
-        fs.writeFileSync(path.join(workDir, `left-${index}.raw`), leftFrame);
-        fs.writeFileSync(path.join(workDir, `right-${index}.raw`), rightFrame);
-      }
-      const meanDiff = meanAbsoluteDiff(leftFrame, rightFrame);
-      samples.push({
-        index,
-        offsetSeconds: leftOffset,
-        rightOffsetSeconds: rightOffset,
-        meanDiff,
-        matched: meanDiff != null && meanDiff <= MATCH_THRESHOLD,
-      });
-    } catch {
-      samples.push({ index, offsetSeconds: leftOffset, rightOffsetSeconds: rightOffset, meanDiff: null, matched: false });
-    }
-  }
-  options.onProgress?.(leftOffsets.length, leftOffsets.length);
-  const matched = samples.filter((sample) => sample.matched).length;
-  const ok = matched >= required;
-  const explained = explainFrameCheck({
-    matched,
-    total: samples.length,
-    required,
-    ok,
-    leftSeconds: left.durationSeconds,
-    rightSeconds: right.durationSeconds,
-    leftFps: left.fps,
-    rightFps: right.fps,
-  });
-  return {
-    ok,
-    samples,
-    matched,
-    required,
-    percent: explained.percent,
-    kind: explained.kind,
-    leftFps: left.fps,
-    rightFps: right.fps,
-    durationDeltaSeconds: Math.abs(left.durationSeconds - right.durationSeconds),
-    message: explained.message,
+
+  const finish = (samples: FrameSample[], startOffsetSeconds: number | null): FrameCheck => {
+    const matched = samples.filter((sample) => sample.matched).length;
+    const ok = matched >= required;
+    const explained = explainFrameCheck({
+      matched,
+      total: samples.length,
+      required,
+      ok,
+      leftSeconds,
+      rightSeconds,
+      leftFps: left.fps,
+      rightFps: right.fps,
+      startOffsetSeconds,
+    });
+    return {
+      ok,
+      samples,
+      matched,
+      required,
+      percent: explained.percent,
+      kind: explained.kind,
+      leftFps: left.fps,
+      rightFps: right.fps,
+      durationDeltaSeconds: Math.abs(leftSeconds - rightSeconds),
+      startOffsetSeconds,
+      message: explained.message,
+    };
   };
+
+  const relative = await sampleAlignedFrames(leftPath, rightPath, leftOffsets, rightOffsets, workDir, options.onProgress);
+  const relativeOk = relative.filter((sample) => sample.matched).length >= required;
+  if (relativeOk) return finish(relative, 0);
+
+  const pal = isPalSpeedDuration(leftSeconds, rightSeconds);
+  if (pal) return finish(relative, null);
+
+  const found = await findStartOffset(leftPath, rightPath, leftSeconds, rightSeconds);
+  if (!found) return finish(relative, null);
+
+  const aligned = alignedOffsets(leftSeconds, rightSeconds, found.offset, frameCount);
+  if (!aligned) return finish(relative, null);
+  const shifted = await sampleAlignedFrames(leftPath, rightPath, aligned.left, aligned.right, workDir, options.onProgress);
+  const shiftedOk = shifted.filter((sample) => sample.matched).length >= required;
+  const reportedOffset = shiftedOk && Math.abs(found.offset) >= 2 ? found.offset : null;
+  return finish(shiftedOk ? shifted : relative, reportedOffset);
 }
