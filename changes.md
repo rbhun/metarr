@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.176
+
+- Check frames always runs (duration does not stop it), reports the match percent, and says whether a runtime gap is PAL speed, titles/credits, or a different edition. The number of sampled frames is adjustable.
+
 ## 0.0.175
 
 - Leave a movie that only has a short or an extra out of Duplicate versions. Those files stay on the title, and they no longer count as a second copy.

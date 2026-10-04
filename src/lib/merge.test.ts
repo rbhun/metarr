@@ -18,11 +18,18 @@ import {
   type MergeVersionView,
 } from "@/lib/merge/candidates";
 import {
+  DEFAULT_FRAME_SAMPLE_COUNT,
   DEFAULT_MAX_DURATION_DELTA_MINUTES,
+  classifyRuntime,
   durationsCloseMinutes,
   durationsCloseSeconds,
+  explainFrameCheck,
   framesMatch,
+  isPalSpeedDuration,
   meanAbsoluteDiff,
+  parseFrameRate,
+  parseFrameSampleCount,
+  requiredFrameMatches,
   sampleOffsets,
 } from "@/lib/merge/compare";
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
@@ -114,6 +121,64 @@ test("duration closeness rejects extended cuts and allows restored copies", () =
   assert.equal(parseMaxDurationDeltaMinutes("2.5"), 2.5);
   assert.equal(parseMaxDurationDeltaMinutes(-1), null);
   assert.equal(parseMaxDurationDeltaMinutes(121), null);
+});
+
+test("frame check names PAL speed, titles, and different editions", () => {
+  assert.equal(parseFrameRate("24000/1001"), 24000 / 1001);
+  assert.equal(parseFrameRate("25/1"), 25);
+  assert.equal(isPalSpeedDuration(6100, 6100 - 249), true);
+  assert.equal(isPalSpeedDuration(7200, 9000), false);
+  assert.equal(requiredFrameMatches(12), 10);
+  assert.equal(requiredFrameMatches(6), 5);
+  assert.equal(parseFrameSampleCount(8), 8);
+  assert.equal(parseFrameSampleCount(3), null);
+  assert.equal(DEFAULT_FRAME_SAMPLE_COUNT, 12);
+
+  assert.equal(
+    classifyRuntime({ leftSeconds: 6100, rightSeconds: 5851, leftFps: 23.976, rightFps: 25, framesOk: true }),
+    "framerate",
+  );
+  assert.equal(
+    classifyRuntime({ leftSeconds: 6100, rightSeconds: 5851, leftFps: null, rightFps: null, framesOk: true }),
+    "framerate",
+  );
+  assert.equal(
+    classifyRuntime({ leftSeconds: 7200, rightSeconds: 7440, leftFps: 23.976, rightFps: 23.976, framesOk: true }),
+    "titles",
+  );
+  assert.equal(
+    classifyRuntime({ leftSeconds: 7200, rightSeconds: 8700, leftFps: 24, rightFps: 24, framesOk: false }),
+    "edition",
+  );
+
+  const pal = explainFrameCheck({
+    matched: 11,
+    total: 12,
+    required: 10,
+    ok: true,
+    leftSeconds: 6100,
+    rightSeconds: 5851,
+    leftFps: 23.976,
+    rightFps: 25,
+  });
+  assert.equal(pal.kind, "framerate");
+  assert.equal(pal.percent, 92);
+  assert.match(pal.message, /11 of 12 frames matched \(92%\)/);
+  assert.match(pal.message, /PAL speed change/);
+
+  const edition = explainFrameCheck({
+    matched: 2,
+    total: 12,
+    required: 10,
+    ok: false,
+    leftSeconds: 7200,
+    rightSeconds: 8700,
+    leftFps: 24,
+    rightFps: 24,
+  });
+  assert.equal(edition.kind, "edition");
+  assert.match(edition.message, /2 of 12 frames matched \(17%; need 10\)/);
+  assert.match(edition.message, /different editions/);
 });
 
 test("frame samples and grayscale diffs", () => {
@@ -511,11 +576,11 @@ test("the demo library exposes a merge candidate with complementary audio", () =
 test("merge queue is manual and can be turned off", () => {
   const db = new Database(":memory:");
   migrate(db);
-  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 1 });
+  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 1, frameSampleCount: 12 });
   writeMergeSettings(db, { enabled: false });
   assert.equal(readMergeSettings(db).enabled, false);
-  writeMergeSettings(db, { enabled: true, maxDurationDeltaMinutes: 2.5 });
-  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 2.5 });
+  writeMergeSettings(db, { enabled: true, maxDurationDeltaMinutes: 2.5, frameSampleCount: 8 });
+  assert.deepEqual(readMergeSettings(db), { enabled: true, maxDurationDeltaMinutes: 2.5, frameSampleCount: 8 });
 
   assert.deepEqual(
     enqueueMerges(db, [

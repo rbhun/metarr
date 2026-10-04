@@ -139,6 +139,7 @@ async function step() {
       otherPath: otherLocal,
       workDir,
       skipFrameCheck: job.skipFrameCheck,
+      frameCount: settings.frameSampleCount,
       dryRun: rehearsal,
       onProgress: (percent, text) => updateMergeProgress(db, job.id, percent, text),
     });

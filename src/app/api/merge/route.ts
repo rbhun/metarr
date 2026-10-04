@@ -1,4 +1,4 @@
-import { compareFrames } from "@/lib/merge/compare";
+import { compareFrames, parseFrameSampleCount } from "@/lib/merge/compare";
 import {
   inspectTitleMerge,
   listMergeCandidates,
@@ -113,7 +113,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cannot open both files. Add a path mapping in Settings if Plex uses a different path." }, { status: 400 });
     }
     try {
-      const result = await compareFrames(left, right);
+      const settings = readMergeSettings(db);
+      const result = await compareFrames(left, right, { frameCount: settings.frameSampleCount });
       return NextResponse.json({ result });
     } catch (caught) {
       return NextResponse.json({ error: caught instanceof Error ? caught.message : "Frame compare failed." }, { status: 500 });
@@ -142,9 +143,15 @@ export async function PUT(request: Request) {
   if (maxDurationDeltaMinutes == null) {
     return NextResponse.json({ error: "Use a runtime difference between 0 and 120 minutes." }, { status: 400 });
   }
+  const frameSampleCount =
+    record.frameSampleCount == null ? current.frameSampleCount : parseFrameSampleCount(record.frameSampleCount);
+  if (frameSampleCount == null) {
+    return NextResponse.json({ error: "Use between 4 and 24 frame samples." }, { status: 400 });
+  }
   writeMergeSettings(db, {
     enabled: typeof record.enabled === "boolean" ? record.enabled : current.enabled,
     maxDurationDeltaMinutes,
+    frameSampleCount,
   });
   kickMergeWorker();
   return NextResponse.json({ settings: readMergeSettings(db) });

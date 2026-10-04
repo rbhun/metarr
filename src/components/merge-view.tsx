@@ -60,13 +60,15 @@ type FrameResult = {
   ok: boolean;
   matched: number;
   required: number;
+  percent?: number;
+  kind?: "same" | "framerate" | "edition" | "titles";
   message: string;
 };
 
 type Totals = { pending: number; running: number; done: number; failed: number };
 
 type MergeBody = {
-  settings: { enabled: boolean; maxDurationDeltaMinutes: number };
+  settings: { enabled: boolean; maxDurationDeltaMinutes: number; frameSampleCount: number };
   totals: Totals;
   pause: "plex" | "detect" | "remux" | "rewrap" | "off" | null;
   active: { label: string; progress: number | null; message: string | null } | null;
@@ -217,6 +219,8 @@ export function MergeView() {
   const [clearing, setClearing] = useState(false);
   const [deltaText, setDeltaText] = useState("1");
   const deltaDirtyRef = useRef(false);
+  const [framesText, setFramesText] = useState("12");
+  const framesDirtyRef = useRef(false);
   const [savingDelta, setSavingDelta] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const [inspecting, setInspecting] = useState(false);
@@ -232,6 +236,7 @@ export function MergeView() {
       setBody(next);
       // Polling must not clobber the field while the user is editing it.
       if (!deltaDirtyRef.current) setDeltaText(String(next.settings.maxDurationDeltaMinutes));
+      if (!framesDirtyRef.current) setFramesText(String(next.settings.frameSampleCount));
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Merge candidates could not be loaded.");
@@ -279,6 +284,34 @@ export function MergeView() {
       if (inspect) await checkTitle(inspect.label);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not save the runtime difference.");
+    } finally {
+      setSavingDelta(false);
+    }
+  }
+
+  async function saveFrames() {
+    if (savingDelta) return;
+    const value = Number(framesText);
+    if (!Number.isInteger(value) || value < 4 || value > 24) {
+      toast.error("Use between 4 and 24 frame samples.");
+      return;
+    }
+    setSavingDelta(true);
+    try {
+      const response = await fetch("/api/merge", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frameSampleCount: value }),
+      });
+      const next = (await response.json().catch(() => null)) as { error?: string; settings?: MergeBody["settings"] } | null;
+      if (!response.ok) throw new Error(next?.error || "Could not save the frame count.");
+      if (next?.settings) {
+        framesDirtyRef.current = false;
+        setFramesText(String(next.settings.frameSampleCount));
+      }
+      toast.success(`Frame check set to ${next?.settings?.frameSampleCount ?? value} samples.`);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not save the frame count.");
     } finally {
       setSavingDelta(false);
     }
@@ -454,6 +487,34 @@ export function MergeView() {
               </Button>
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="merge-frame-count">Frame samples</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="merge-frame-count"
+                type="number"
+                min={4}
+                max={24}
+                step={1}
+                value={framesText}
+                disabled={savingDelta}
+                className="w-28"
+                onChange={(event) => {
+                  framesDirtyRef.current = true;
+                  setFramesText(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void saveFrames();
+                  }
+                }}
+              />
+              <Button type="button" size="sm" disabled={savingDelta} onClick={() => void saveFrames()}>
+                {savingDelta ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
           <div className="min-w-0 flex-1 space-y-1.5">
             <Label htmlFor="merge-title-check">Check a title</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -476,7 +537,7 @@ export function MergeView() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Runtime difference filters the automatic list. Check title shows every version pair on one library title and why each is or is not eligible.
+          Runtime difference filters the automatic list. Check frames reports how many pictures matched and whether a runtime gap is PAL speed, titles, or a different edition.
         </p>
       </div>
 
