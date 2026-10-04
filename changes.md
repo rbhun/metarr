@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.164
+
+- Merge Plex and Radarr/Bazarr movie rows that share a file path, and let a Plex-only guid join on title and year, so the same movie stops showing twice.
+
 ## 0.0.163
 
 - Do not invent standalone movie titles from unmatched files under a known series folder, so Season folders, Specials, and loose videos without episode codes stay off the library as separate red titles.

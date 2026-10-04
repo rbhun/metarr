@@ -40,7 +40,22 @@ function matchable(record: SourceDraft, kind: TitleKind): SourceDraft & Matchabl
     ...record,
     kind,
     extraKeys: record.parentKey ? [record.parentKey] : [],
+    pathKeys: kind === "movie" ? moviePathKeys(record) : [],
   };
+}
+
+function moviePathKeys(record: SourceDraft): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string | null | undefined) => {
+    const key = filePathKey(value);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    keys.push(key);
+  };
+  add(record.path);
+  for (const file of record.files) add(file.path);
+  return keys;
 }
 
 function seriesKeys(records: SourceDraft[]): Set<string> {
