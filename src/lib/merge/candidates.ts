@@ -67,6 +67,14 @@ export function donorAudioLanguages(
     : languagesOnlyIn(left.audioLanguages, right.audioLanguages);
 }
 
+/** Untagged or empty audio on either file is not enough to justify a merge. */
+export function bothHaveKnownAudio(
+  left: Pick<MergeVersionView, "audioLanguages">,
+  right: Pick<MergeVersionView, "audioLanguages">,
+): boolean {
+  return namedLanguages(left.audioLanguages).length > 0 && namedLanguages(right.audioLanguages).length > 0;
+}
+
 function editionConflict(left: string | null, right: string | null): boolean {
   if (!left || !right) return false;
   return left.toLowerCase() !== right.toLowerCase();
@@ -113,6 +121,7 @@ export function pairCandidates(file: ScanFile): MergeCandidate[] {
       const right = versions[j]!;
       const duration = durationsCloseMinutes(left.durationMinutes, right.durationMinutes);
       if (!duration.ok) continue;
+      if (!bothHaveKnownAudio(left, right)) continue;
       const videoFrom = pickVideoSource(left, right);
       const donorAudio = donorAudioLanguages(left, right, videoFrom);
       if (donorAudio.length === 0) continue;
@@ -194,6 +203,7 @@ export function candidateFromVersions(
 ): MergeCandidate | null {
   const duration = durationsCloseMinutes(left.durationMinutes, right.durationMinutes);
   if (!duration.ok) return null;
+  if (!bothHaveKnownAudio(left, right)) return null;
   const videoFrom = pickVideoSource(left, right);
   const donorAudio = donorAudioLanguages(left, right, videoFrom);
   if (donorAudio.length === 0) return null;

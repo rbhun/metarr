@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.168
+
+- Version merge skips pairs where either file has no known audio language, so an English copy is not offered against one with untagged or missing audio.
+
 ## 0.0.167
 
 - Version merge only lists a pair when the worse file has audio the better video source lacks, so a 2160p Russian+English copy is not offered against a 480p English-only copy.
