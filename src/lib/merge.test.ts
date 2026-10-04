@@ -43,6 +43,7 @@ import {
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
 import { checkMerge, mergeArgs, parseMergeProbe, progressFromLine, type Probe } from "@/lib/merge/run";
 import { canMergeVersion, mergeTarget } from "@/lib/merge/source";
+import { frameMatchRank, sortMergeCandidates } from "@/lib/merge/sort";
 import {
   claimNextMerge,
   enqueueMerges,
@@ -299,6 +300,7 @@ test("complementary audio languages make a pair", () => {
   assert.equal(pair!.videoFrom, "left");
   assert.deepEqual(pair!.audioOnlyRight, ["Hungarian"]);
   assert.equal(pair!.editionConflict, false);
+  assert.equal(pair!.overDelta, false);
   assert.match(pair!.reason, /Adds Hungarian from Film-Hun\.mkv/);
 
   const extended = candidateFromVersions("Film (1999)", 1, left, version({ ...right, durationMinutes: 145, edition: "Extended" }));
@@ -737,6 +739,7 @@ test("the demo library exposes a merge candidate with complementary audio", () =
   assert.equal(candidates[0]!.label.includes("Blade Runner 2049"), true);
   assert.equal(candidates[0]!.videoFrom, "left");
   assert.ok(candidates[0]!.audioOnlyRight.includes("Hungarian") || candidates[0]!.audioOnlyLeft.includes("Hungarian"));
+  assert.equal(candidates[0]!.overDelta, false);
   db.close();
 });
 
@@ -788,10 +791,67 @@ test("evaluatePair explains duration and audio rejections", () => {
   assert.match(rejected.reason, /Runtimes differ by 5 min \(allowed 1 min\)/);
   assert.equal(rejected.candidate, null);
 
+  const ignored = evaluatePair(file, left, far, { maxDurationDeltaMinutes: 1, ignoreDuration: true });
+  assert.equal(ignored.eligible, true);
+  assert.equal(ignored.candidate?.overDelta, true);
+  assert.match(ignored.reason, /Runtimes differ by 5 min \(allowed 1 min\)/);
+  assert.match(ignored.reason, /Adds Hungarian from Film-B\.mkv/);
+
   const allowed = evaluatePair(file, left, far, { maxDurationDeltaMinutes: 5 });
   assert.equal(allowed.eligible, true);
   assert.ok(allowed.candidate);
+  assert.equal(allowed.candidate!.overDelta, false);
   assert.match(allowed.reason, /±5 min/);
+
+  const farFile: ScanFile = {
+    ...file,
+    versions: [
+      {
+        name: left.name,
+        path: left.path,
+        container: "mkv",
+        resolution: "2160p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 40_000,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["English"],
+        subtitleLanguages: [],
+        audioTracks: [],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 40_000_000_000,
+        durationMinutes: 120,
+      },
+      {
+        name: far.name,
+        path: far.path,
+        container: "mkv",
+        resolution: "1080p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 8_000,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["Hungarian"],
+        subtitleLanguages: [],
+        audioTracks: [],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 8_000_000_000,
+        durationMinutes: 125,
+      },
+    ],
+  };
+  assert.equal(pairCandidates(farFile, { maxDurationDeltaMinutes: 1 }).length, 0);
+  const wide = pairCandidates(farFile, { maxDurationDeltaMinutes: 1, ignoreDuration: true });
+  assert.equal(wide.length, 1);
+  assert.equal(wide[0]!.overDelta, true);
 });
 
 test("manual title check lists eligible and rejected pairs", () => {
@@ -812,6 +872,26 @@ test("manual title check lists eligible and rejected pairs", () => {
   assert.ok(inspect!.eligibleCount >= 1);
   assert.ok(inspect!.pairs.some((pair) => pair.eligible));
   db.close();
+});
+
+test("sortMergeCandidates puts high frame matches first", () => {
+  const list = [
+    { key: "low", label: "Zebra", left: { name: "z.mkv" } },
+    { key: "high", label: "Alpha", left: { name: "a.mkv" } },
+    { key: "mid", label: "Mid", left: { name: "m.mkv" } },
+    { key: "none", label: "Unchecked", left: { name: "u.mkv" } },
+  ];
+  assert.equal(frameMatchRank(undefined), -1);
+  assert.equal(frameMatchRank({ percent: 92 }), 92);
+  const sorted = sortMergeCandidates(list, {
+    high: { percent: 92, ok: true },
+    mid: { percent: 50, ok: false },
+    low: { percent: 8, ok: false },
+  });
+  assert.deepEqual(
+    sorted.map((item) => item.key),
+    ["high", "mid", "low", "none"],
+  );
 });
 
 test("removing one waiting or failed merge leaves the others", () => {
