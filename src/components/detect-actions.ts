@@ -12,7 +12,7 @@ function detectionMessage(mode: "now" | "queue", added: number, already: number)
   if (added === 0 && already > 0) return already === 1 ? "That track is already in Tasks." : `${already} tracks are already in Tasks.`;
   if (added === 0) return "Those files have no unknown audio or subtitle tracks to scan.";
   const tracks = added === 1 ? "1 track" : `${added} tracks`;
-  return mode === "now" ? `Started ${tracks}. Follow it in Tasks.` : `Queued ${tracks} for the scheduled window.`;
+  return mode === "now" ? `Started ${tracks}. Follow ${added === 1 ? "it" : "them"} in Tasks.` : `Queued ${tracks} for the scheduled window.`;
 }
 
 async function postDetection(body: Record<string, unknown>, mode: "now" | "queue"): Promise<string> {
@@ -28,6 +28,10 @@ async function postDetection(body: Record<string, unknown>, mode: "now" | "queue
 
 export async function enqueueDetection(mode: "now" | "queue", titles: number[], episodes: number[]): Promise<string> {
   return postDetection({ titles, episodes }, mode);
+}
+
+export async function enqueueLibraryDetection(mode: "now" | "queue"): Promise<string> {
+  return postDetection({ all: true }, mode);
 }
 
 export async function enqueueTrack(track: DetectRequest): Promise<string> {

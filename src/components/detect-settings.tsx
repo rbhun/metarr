@@ -59,7 +59,7 @@ export function DetectSettingsCard() {
       <CardHeader>
         <CardTitle>Language detection</CardTitle>
         <CardDescription>
-          Listens to unknown audio with Whisper and reads unknown subtitles. A recognized language is written into the file. Plex, Radarr, and Sonarr are asked to re-read it, and Bazarr is asked when the track is a subtitle. The daily hours are set under Schedule.
+          Listens to unknown audio with Whisper and reads unknown subtitles. A recognized language is written into the file. Plex, Radarr, and Sonarr are asked to re-read it, and Bazarr is asked when the track is a subtitle. The daily hours are set under Schedule. Detect all unknown on the library queues remaining tracks now. Failed checks stay in Tasks under Languages → Failed, where Redo starts them again now.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

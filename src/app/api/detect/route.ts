@@ -1,8 +1,8 @@
-import { filesForSelection } from "@/lib/detect/files";
 import { parsePathMaps } from "@/lib/detect/paths";
+import { queueDetection } from "@/lib/detect/queue";
 import { clampHour } from "@/lib/detect/schedule";
-import { activeJob, clearJobs, detectCounts, enqueueTargets, jobTotals, listJobs, readDetectSettings, writeDetectSettings, type DetectJobStatus } from "@/lib/detect/store";
-import { targetsFromFiles, type DetectTarget } from "@/lib/detect/targets";
+import { activeJob, clearJobs, detectCounts, jobTotals, listJobs, readDetectSettings, writeDetectSettings, type DetectJobStatus } from "@/lib/detect/store";
+import { type DetectTarget } from "@/lib/detect/targets";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
@@ -87,9 +87,16 @@ export async function POST(request: Request) {
   const mode = record.mode === "now" || record.mode === "queue" ? record.mode : null;
   if (!mode) return NextResponse.json({ error: "Choose start now or queue." }, { status: 400 });
   const db = getDb();
-  const direct = trackList(record.tracks);
-  const targets = direct.length ? direct : targetsFromFiles(filesForSelection(db, idList(record.titles), idList(record.episodes)), true, new Set());
-  const queued = enqueueTargets(db, targets, mode === "now" ? "immediate" : "window");
+  const queued = queueDetection(
+    db,
+    {
+      tracks: trackList(record.tracks),
+      titles: idList(record.titles),
+      episodes: idList(record.episodes),
+      all: record.all === true,
+    },
+    mode === "now" ? "immediate" : "window",
+  );
   if (mode === "now") kickDetectWorker();
   else startDetectWorker();
   return NextResponse.json({ ...queued, counts: detectCounts(db) });

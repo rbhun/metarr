@@ -2,7 +2,7 @@
 
 import { AudioTracks } from "@/components/audio-tracks";
 import { SubtitleRows } from "@/components/subtitle-rows";
-import { enqueueDetection } from "@/components/detect-actions";
+import { enqueueDetection, enqueueLibraryDetection } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
@@ -296,6 +296,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [lookupAllProgress, setLookupAllProgress] = useState<string | null>(null);
   const [plexBusy, setPlexBusy] = useState(false);
   const [rewrapBusy, setRewrapBusy] = useState(false);
+  const [detectBusy, setDetectBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
 
@@ -552,10 +553,26 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
       if (title) titles.push(Number(title[1]));
       if (episode) episodes.push(Number(episode[1]));
     }
+    setDetectBusy(true);
     try {
       toastDetection(await enqueueDetection(mode, titles, episodes));
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
+    } finally {
+      setDetectBusy(false);
+    }
+  }
+
+  async function detectAllUnknown() {
+    if (detectBusy) return;
+    if (!window.confirm("Queue every unknown audio and subtitle track in the library? Failed checks are started again now.")) return;
+    setDetectBusy(true);
+    try {
+      toastDetection(await enqueueLibraryDetection("now"));
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not queue language detection.");
+    } finally {
+      setDetectBusy(false);
     }
   }
 
@@ -638,6 +655,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Button size="sm" variant="outline" disabled={lookupBusy} onClick={() => void lookupAll()}>
               {lookupAllProgress ?? "Look up all"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={detectBusy}
+              onClick={() => void detectAllUnknown()}
+              title="Queue unknown audio and subtitle tracks across the library, including failed checks, and start now"
+            >
+              {detectBusy ? "Queuing…" : "Detect all unknown"}
             </Button>
             {filtersActive ? <span>{filtered} matching</span> : null}
             <span>{data?.stats.total ?? 0} titles</span>
@@ -723,10 +749,10 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             >
               Look up selected
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void detectSelected("now")}>
-              Detect languages now
+            <Button size="sm" variant="outline" disabled={detectBusy} onClick={() => void detectSelected("now")}>
+              {detectBusy ? "Queuing…" : "Detect languages now"}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void detectSelected("queue")}>
+            <Button size="sm" variant="outline" disabled={detectBusy} onClick={() => void detectSelected("queue")}>
               Queue language detection
             </Button>
             <label htmlFor="remux-extras" className="flex items-center gap-2">

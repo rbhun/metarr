@@ -111,7 +111,16 @@ export function enqueueTargets(db: Database.Database, targets: DetectTarget[], p
   const existing = db.prepare(
     `SELECT id, priority, status FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status IN ('pending', 'running')`,
   );
+  const failedRows = db.prepare(
+    `SELECT id FROM detect_jobs WHERE path = ? AND kind = ? AND ordinal = ? AND status = 'failed' ORDER BY id DESC`,
+  );
   const promote = db.prepare(`UPDATE detect_jobs SET priority = 'immediate' WHERE id = ?`);
+  const reopenFailed = db.prepare(
+    `UPDATE detect_jobs
+     SET status = 'pending', priority = ?, message = NULL, started_at = NULL, finished_at = NULL
+     WHERE id = ? AND status = 'failed'`,
+  );
+  const dropFailed = db.prepare(`DELETE FROM detect_jobs WHERE id = ? AND status = 'failed'`);
   const insert = db.prepare(
     `INSERT INTO detect_jobs (
       path, kind, ordinal, priority, status, label, format, placement, stream_label, created_at
@@ -128,6 +137,14 @@ export function enqueueTargets(db: Database.Database, targets: DetectTarget[], p
           promote.run(row.id);
           added += 1;
         } else already += 1;
+        continue;
+      }
+      const failed = failedRows.all(target.path, target.kind, target.ordinal) as Array<{ id: number }>;
+      if (failed.length) {
+        const [latest, ...older] = failed;
+        for (const extra of older) dropFailed.run(extra.id);
+        reopenFailed.run(priority, latest.id);
+        added += 1;
         continue;
       }
       insert.run(target.path, target.kind, target.ordinal, priority, target.label, target.format, target.placement, target.streamLabel, now);
@@ -201,7 +218,7 @@ export function retryFailedJob(db: Database.Database, id: number): "retried" | "
   return changed.changes === 1 ? "retried" : "missing";
 }
 
-/** Put every failed language check back on the overnight queue, once per track. */
+/** Put every failed language check back on the queue and start it now, once per track. */
 export function retryAllFailedJobs(db: Database.Database): number {
   return db.transaction(() => {
     db.prepare(
@@ -221,7 +238,7 @@ export function retryAllFailedJobs(db: Database.Database): number {
     return db
       .prepare(
         `UPDATE detect_jobs
-         SET status = 'pending', priority = 'window', message = NULL, started_at = NULL, finished_at = NULL
+         SET status = 'pending', priority = 'immediate', message = NULL, started_at = NULL, finished_at = NULL
          WHERE status = 'failed'`,
       )
       .run().changes;
