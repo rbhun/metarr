@@ -37,6 +37,7 @@ import {
   parseFrameSampleCount,
   requiredFrameMatches,
   sampleOffsets,
+  shouldSearchStartOffset,
   startOffsetSearchList,
 } from "@/lib/merge/compare";
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
@@ -186,6 +187,26 @@ test("frame check names PAL speed, titles, and different editions", () => {
   assert.equal(edition.kind, "edition");
   assert.match(edition.message, /2 of 12 frames matched \(17%; need 10\)/);
   assert.match(edition.message, /different editions/);
+  assert.equal(/start-title offset/.test(edition.message), false);
+
+  const searched = explainFrameCheck({
+    matched: 1,
+    total: 12,
+    required: 10,
+    ok: false,
+    leftSeconds: 2520,
+    rightSeconds: 2416,
+    leftFps: 23.976,
+    rightFps: 23.976,
+    offsetSearched: true,
+  });
+  assert.equal(searched.kind, "edition");
+  assert.match(searched.message, /Tried a constant start-title offset/);
+  assert.equal(isPalSpeedDuration(2520, 2416), true);
+  assert.equal(shouldSearchStartOffset(23.976, 23.976), true);
+  assert.equal(shouldSearchStartOffset(23.976, 25), false);
+  assert.ok(startOffsetSearchList(0, 104).includes(20));
+  assert.ok(startOffsetSearchList(0, 104).includes(104));
 
   assert.equal(
     classifyRuntime({
