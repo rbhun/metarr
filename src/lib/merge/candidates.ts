@@ -1,11 +1,14 @@
 import type Database from "better-sqlite3";
 import { filesForLibrary, filesForSelection } from "@/lib/detect/files";
+import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
+import type { StoredDetection } from "@/lib/detect/store";
+import { detectionMap } from "@/lib/detect/store";
 import type { ScanFile } from "@/lib/detect/targets";
 import { durationsCloseMinutes } from "@/lib/merge/compare";
 import { pickVideoSource } from "@/lib/merge/quality";
 import { canMergeVersion } from "@/lib/merge/source";
 import { languageName, sameSpokenLanguage } from "@/lib/media";
-import type { HdrLabel, MediaVersion, PlayableLabel } from "@/lib/types";
+import type { AudioTrack, HdrLabel, MediaVersion, PlayableLabel, SubtitleTrack } from "@/lib/types";
 
 export type MergeVersionView = {
   path: string;
@@ -72,6 +75,37 @@ function namedLanguages(values: string[]): string[] {
   return named;
 }
 
+/**
+ * Languages the library UI would show for a version: summary list plus internal tracks
+ * (tagged or detected). External sidecar files are ignored — merge only remuxes the two videos.
+ */
+export function languagesFromVersion(
+  summary: string[],
+  tracks: Array<Pick<AudioTrack, "language" | "detectedLanguage" | "detectedRole" | "file" | "folderOnly">>,
+): string[] {
+  const values = [...summary];
+  for (const track of tracks) {
+    if (track.folderOnly || track.file) continue;
+    if (track.detectedRole === "commentary" || track.detectedRole === "short") continue;
+    const language = track.language || track.detectedLanguage;
+    if (language) values.push(language);
+  }
+  return namedLanguages(values);
+}
+
+function subtitleLanguagesFromVersion(
+  summary: string[],
+  tracks: Array<Pick<SubtitleTrack, "language" | "detectedLanguage" | "placement" | "file">>,
+): string[] {
+  const values = [...summary];
+  for (const track of tracks) {
+    if (track.placement === "external" || track.file) continue;
+    const language = track.language || track.detectedLanguage;
+    if (language) values.push(language);
+  }
+  return namedLanguages(values);
+}
+
 export function languagesOnlyIn(left: string[], right: string[]): string[] {
   return namedLanguages(left).filter((language) => !namedLanguages(right).some((other) => sameSpokenLanguage(language, other)));
 }
@@ -103,9 +137,13 @@ function editionConflict(left: string | null, right: string | null): boolean {
   return left.toLowerCase() !== right.toLowerCase();
 }
 
-function toView(version: MediaVersion): MergeVersionView | null {
+function toView(version: MediaVersion, detections?: Map<string, StoredDetection>): MergeVersionView | null {
   if (!version.path || !canMergeVersion(version.playableLabel, version.container, version.path)) return null;
   if (version.flags.includes("sample") || version.flags.includes("short")) return null;
+  const audioTracks = detections ? overlayAudio(version.path, version.audioTracks, detections) : version.audioTracks;
+  const subtitleTracks = detections
+    ? overlaySubtitles(version.path, version.subtitleTracks, detections)
+    : version.subtitleTracks;
   return {
     path: version.path,
     name: version.name,
@@ -115,19 +153,19 @@ function toView(version: MediaVersion): MergeVersionView | null {
     hdr: version.hdr,
     edition: version.edition,
     durationMinutes: version.durationMinutes,
-    audioLanguages: namedLanguages(version.audioLanguages),
-    subtitleLanguages: namedLanguages(version.subtitleLanguages),
+    audioLanguages: languagesFromVersion(version.audioLanguages, audioTracks),
+    subtitleLanguages: subtitleLanguagesFromVersion(version.subtitleLanguages, subtitleTracks),
     flags: version.flags,
     playableLabel: version.playableLabel,
     container: version.container,
   };
 }
 
-function versionsOf(file: ScanFile): MergeVersionView[] {
+function versionsOf(file: ScanFile, detections?: Map<string, StoredDetection>): MergeVersionView[] {
   const views: MergeVersionView[] = [];
   const seen = new Set<string>();
   for (const version of file.versions) {
-    const view = toView(version);
+    const view = toView(version, detections);
     if (!view || seen.has(view.path)) continue;
     seen.add(view.path);
     views.push(view);
@@ -208,8 +246,12 @@ export function evaluatePair(
   return { ...base, eligible: true, reason, candidate };
 }
 
-export function pairCandidates(file: ScanFile, options: MergePairOptions = {}): MergeCandidate[] {
-  const versions = versionsOf(file);
+export function pairCandidates(
+  file: ScanFile,
+  options: MergePairOptions = {},
+  detections?: Map<string, StoredDetection>,
+): MergeCandidate[] {
+  const versions = versionsOf(file, detections);
   const pairs: MergeCandidate[] = [];
   for (let i = 0; i < versions.length; i += 1) {
     for (let j = i + 1; j < versions.length; j += 1) {
@@ -224,9 +266,10 @@ export function listMergeCandidates(db: Database.Database, search = "", options:
   const needle = search.trim().toLowerCase();
   const candidates: MergeCandidate[] = [];
   const seen = new Set<string>();
+  const detections = detectionMap(db);
   for (const file of filesForLibrary(db)) {
     if (needle && !file.label.toLowerCase().includes(needle) && !(file.path ?? "").toLowerCase().includes(needle)) continue;
-    for (const pair of pairCandidates(file, options)) {
+    for (const pair of pairCandidates(file, options, detections)) {
       if (seen.has(pair.key)) continue;
       seen.add(pair.key);
       candidates.push(pair);
@@ -245,8 +288,9 @@ export function mergeCandidateForPaths(
   const left = leftPath.trim();
   const right = rightPath.trim();
   if (!left || !right || left === right) return null;
+  const detections = detectionMap(db);
   for (const file of filesForLibrary(db)) {
-    for (const pair of pairCandidates(file, options)) {
+    for (const pair of pairCandidates(file, options, detections)) {
       if (pair.left.path === left && pair.right.path === right) return pair;
       if (pair.left.path === right && pair.right.path === left) {
         return {
@@ -282,6 +326,7 @@ export function inspectTitleMerge(db: Database.Database, titleId: number, option
   if (!Number.isInteger(titleId) || titleId < 1) return null;
   const files = filesForSelection(db, [titleId], []);
   if (!files.length) return null;
+  const detections = detectionMap(db);
   // Movies are one ScanFile; series yield many episodes — inspect each file that has versions.
   const pairs: MergePairInspect[] = [];
   const versions: MergeVersionView[] = [];
@@ -289,7 +334,7 @@ export function inspectTitleMerge(db: Database.Database, titleId: number, option
   let label = files[0]!.label;
   for (const file of files) {
     if (files.length === 1) label = file.label;
-    const fileVersions = versionsOf(file);
+    const fileVersions = versionsOf(file, detections);
     for (const version of fileVersions) {
       if (seenVersion.has(version.path)) continue;
       seenVersion.add(version.path);

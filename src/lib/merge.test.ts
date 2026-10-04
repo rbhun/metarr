@@ -10,6 +10,7 @@ import {
   donorAudioLanguages,
   evaluatePair,
   inspectTitleMerge,
+  languagesFromVersion,
   languagesOnlyIn,
   listMergeCandidates,
   pairCandidates,
@@ -221,6 +222,102 @@ test("a file with no known audio language is not a merge candidate", () => {
     }).length,
     0,
   );
+});
+
+test("merge sees track and detected languages the library UI shows", () => {
+  // Jason Bourne-style: summary list can omit Italian while the 1080p stream list has it.
+  assert.deepEqual(
+    languagesFromVersion(["English"], [
+      { language: "English", layout: "7.1", codec: "DTS-HD" },
+      { language: "Italian", layout: "5.1", codec: "Dolby Digital" },
+    ]),
+    ["English", "Italian"],
+  );
+  assert.deepEqual(
+    languagesFromVersion(["English"], [{ language: null, detectedLanguage: "Italian", layout: "5.1", codec: "Dolby Digital" }]),
+    ["English", "Italian"],
+  );
+  assert.deepEqual(
+    languagesFromVersion(["English"], [{ language: "Italian", file: "/m/Film.it.ac3", folderOnly: true, fromFile: true }]),
+    ["English"],
+  );
+
+  const uhd = version({
+    path: "/m/Jason Bourne-UHD.mkv",
+    name: "Jason Bourne-UHD.mkv",
+    resolution: "2160p",
+    bitrateKbps: 67_100,
+    durationMinutes: 123,
+    audioLanguages: ["English"],
+  });
+  const hd = version({
+    path: "/m/Jason Bourne-HD.mkv",
+    name: "Jason Bourne-HD.mkv",
+    resolution: "1080p",
+    bitrateKbps: 11_300,
+    durationMinutes: 123,
+    audioLanguages: ["English"],
+  });
+  const file: ScanFile = {
+    titleId: 42,
+    label: "Jason Bourne (2016)",
+    path: uhd.path,
+    container: "mkv",
+    playableLabel: "video",
+    audioTracks: [],
+    subtitleTracks: [],
+    versions: [
+      {
+        name: uhd.name,
+        path: uhd.path,
+        container: "mkv",
+        resolution: "2160p",
+        hdr: "none",
+        is3d: false,
+        qualityName: "Bluray-2160p",
+        bitrateKbps: 67_100,
+        playableLabel: "video",
+        edition: null,
+        audioLanguages: ["English"],
+        subtitleLanguages: [],
+        audioTracks: [{ language: "English", layout: "7.1", codec: "DTS-HD", streamIndex: 0 }],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 60_000_000_000,
+        durationMinutes: 123,
+      },
+      {
+        name: hd.name,
+        path: hd.path,
+        container: "mkv",
+        resolution: "1080p",
+        hdr: "none",
+        is3d: false,
+        qualityName: null,
+        bitrateKbps: 11_300,
+        playableLabel: "video",
+        edition: null,
+        // Summary list looks English-only; Italian lives on the stream row the library shows.
+        audioLanguages: ["English"],
+        subtitleLanguages: [],
+        audioTracks: [
+          { language: "English", layout: "5.1", codec: "Dolby Digital", streamIndex: 0 },
+          { language: "Italian", layout: "5.1", codec: "Dolby Digital", streamIndex: 1 },
+        ],
+        subtitleTracks: [],
+        missing: [],
+        flags: [],
+        fileBytes: 10_000_000_000,
+        durationMinutes: 123,
+      },
+    ],
+  };
+  const pairs = pairCandidates(file, { maxDurationDeltaMinutes: 1 });
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.videoFrom, "left");
+  assert.deepEqual(pairs[0]!.audioOnlyRight, ["Italian"]);
+  assert.match(pairs[0]!.reason, /Adds Italian/);
 });
 
 test("a worse file that adds no new audio is not a merge candidate", () => {
