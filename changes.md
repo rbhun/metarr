@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.166
+
+- Fix TypeScript build errors from the ghost-title merge tests (`poster_path` typing and `scanOneFile` roots option).
+
 ## 0.0.165
 
 - Apply path maps during folder scan, stop inventing titles named after the scan root (TV), and skip invents whose folder matches a known series title, so Plex-only movies and series leftovers stop showing as separate all-red rows.
