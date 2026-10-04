@@ -10,7 +10,7 @@ import { commentaryRole } from "@/lib/detect/commentary";
 import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
-import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
+import { resolveMediaPath, siblingSubtitlePath, siblingSubtitlesAlreadyTagged, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
@@ -206,8 +206,45 @@ test("a subtitle file Plex will not read by name says what name Plex expects", (
   assert.equal(tracks.length, 1);
   assert.equal(tracks[0]?.folderOnly, true);
   assert.equal(plexReadsSidecar(video, tracks[0]!.file!), false);
-  assert.match(tracks[0]!.conflict!, /"refined-21\.hun\.srt"/);
+  assert.match(tracks[0]!.conflict!, /"refined-21\.hu\.srt"/);
   assert.deepEqual(unreadSidecars([{ path: video, subtitleTracks: JSON.stringify(tracks), versions: null }]), []);
+});
+
+test("an unlabeled movie.srt next to a tagged hungarian sidecar merges with plex and can be renamed", () => {
+  const video =
+    "/mnt/media/Movies/Harry Potter and the Order of the Phoenix (2007)/Harry Potter and the Order of the Phoenix (2007).mkv";
+  const hun = "Harry Potter and the Order of the Phoenix (2007).hi.hu.srt";
+  const bare = "Harry Potter and the Order of the Phoenix (2007).srt";
+  const plex: SubtitleTrack[] = [
+    { language: "Hungarian", placement: "external", format: "SRT", forced: false },
+    { language: null, placement: "external", format: "SRT", forced: false },
+  ];
+  const tracks = mergedWithScan(video, plex, sidecarTracks(video, [path.basename(video), hun, bare]));
+  assert.equal(tracks.length, 2);
+  const hungarian = tracks.find((track) => track.language === "Hungarian");
+  const unknown = tracks.find((track) => !track.language);
+  assert.equal(hungarian?.file?.endsWith(".hi.hu.srt"), true);
+  assert.equal(hungarian?.folderOnly, undefined);
+  assert.equal(unknown?.file?.endsWith(bare), true);
+  assert.equal(unknown?.folderOnly, undefined);
+  const queued = subtitleTargets(video, unknown!, 1, "Harry Potter");
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0]?.path.endsWith(bare), true);
+  const renamed = planTag(unknown!.file!, "subtitle", 0, "English", null);
+  assert.equal(renamed.action, "rename");
+  assert.equal(renamed.action === "rename" && renamed.to.endsWith(".en.srt"), true);
+});
+
+test("a stale plex sidecar path still opens the unlabeled sibling", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-sub-"));
+  fs.writeFileSync(path.join(directory, "Movie.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+  fs.writeFileSync(path.join(directory, "Movie.hi.hu.srt"), "1\n00:00:01,000 --> 00:00:02,000\nSzia\n");
+  assert.equal(path.basename(siblingSubtitlePath(path.join(directory, "Movie.srt"))!), "Movie.srt");
+  assert.equal(path.basename(siblingSubtitlePath(path.join(directory, "Movie.en.srt"))!), "Movie.srt");
+  assert.equal(siblingSubtitlesAlreadyTagged(path.join(directory, "Movie.srt")), false);
+  fs.renameSync(path.join(directory, "Movie.srt"), path.join(directory, "Movie.en.srt"));
+  assert.equal(siblingSubtitlesAlreadyTagged(path.join(directory, "Movie.en.srt")), true);
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("an external subtitle with no path is not queued against the video file", () => {
@@ -984,13 +1021,13 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
     forced: false,
   });
   const renamed = planTag("/movies/Dune.srt", "subtitle", 0, "Hungarian", null);
-  assert.equal(renamed.action === "rename" && renamed.to, "/movies/Dune.hun.srt");
+  assert.equal(renamed.action === "rename" && renamed.to, "/movies/Dune.hu.srt");
   const signs = planTag("/movies/Backrooms.srt", "subtitle", 0, "French", "forced");
-  assert.equal(signs.action === "rename" && signs.to, "/movies/Backrooms.fra.forced.srt");
+  assert.equal(signs.action === "rename" && signs.to, "/movies/Backrooms.fr.forced.srt");
   const forced = planTag("/movies/Dune.forced.srt", "subtitle", 0, "Hungarian", null);
-  assert.equal(forced.action === "rename" && forced.to, "/movies/Dune.hun.forced.srt");
+  assert.equal(forced.action === "rename" && forced.to, "/movies/Dune.hu.forced.srt");
   const pair = planTag("/movies/Dune.idx", "subtitle", 0, "Hungarian", null);
-  assert.equal(pair.action === "rename" && pair.pairTo, "/movies/Dune.hun.sub");
+  assert.equal(pair.action === "rename" && pair.pairTo, "/movies/Dune.hu.sub");
   assert.deepEqual(planTag("/movies/Dune.eng.srt", "subtitle", 0, "Hungarian", null), { action: "skip", reason: "already-named" });
   assert.deepEqual(planTag("/movies/Dune.avi", "audio", 0, "Hungarian", null), {
     action: "riff",
@@ -1005,7 +1042,7 @@ test("a recognized language is planned as a file tag or a renamed subtitle", () 
     commentary: false,
   });
   assert.deepEqual(planTag("/movies/Film.m2ts", "audio", 0, "English", null), { action: "skip", reason: "container" });
-  assert.equal(retargetPath("/mnt/media/Dune.srt", "/Volumes/media/Dune.srt", "/Volumes/media/Dune.hun.srt"), "/mnt/media/Dune.hun.srt");
+  assert.equal(retargetPath("/mnt/media/Dune.srt", "/Volumes/media/Dune.srt", "/Volumes/media/Dune.hu.srt"), "/mnt/media/Dune.hu.srt");
   const mkv = planTag("/movies/Dune.mkv", "audio", 0, "Hungarian", null);
   assert.equal(fileOmitsSavedLanguage(mkv, null), true);
   assert.equal(fileOmitsSavedLanguage(mkv, "Hungarian"), false);

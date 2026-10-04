@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { languageFromSubtitleName } from "@/lib/detect/subtitle-name";
 
 export type PathMap = { from: string; to: string };
 
@@ -96,12 +97,23 @@ export function listSiblingSubtitles(filePath: string): string[] {
 /**
  * Plex sometimes stores a subtitle name that no longer matches the disc. Prefer an
  * existing sidecar in the same folder whose stem matches after dropping language tags.
+ * When several files share the stem, the unlabeled one is the file to recognize.
  */
 export function siblingSubtitlePath(filePath: string): string | null {
   const matches = listSiblingSubtitles(filePath);
   if (matches.length === 1) return matches[0]!;
   const base = path.basename(filePath);
-  return matches.find((found) => path.basename(found) === base) ?? null;
+  const exact = matches.find((found) => path.basename(found) === base);
+  if (exact) return exact;
+  const unlabeled = matches.filter((found) => !languageFromSubtitleName(path.basename(found)));
+  if (unlabeled.length === 1) return unlabeled[0]!;
+  return null;
+}
+
+/** True when every sidecar for this title already has a language in its name. */
+export function siblingSubtitlesAlreadyTagged(filePath: string): boolean {
+  const matches = listSiblingSubtitles(filePath);
+  return matches.length > 0 && matches.every((found) => Boolean(languageFromSubtitleName(path.basename(found))));
 }
 
 /** Folder + title stem, ignoring language / forced / SDH tags on the subtitle name. */

@@ -3,7 +3,7 @@ import path from "node:path";
 import { audioCodecFromName, isAudioFile, languageFromAudioName } from "@/lib/detect/audio-name";
 import { subtitleStem } from "@/lib/detect/paths";
 import { isSubtitleFile, languageFromSubtitleName } from "@/lib/detect/subtitle-name";
-import { languageName } from "@/lib/media";
+import { dedupeExternalSubtitles, languageName } from "@/lib/media";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 
 export { isSubtitleFile, languageFromSubtitleName };
@@ -147,7 +147,7 @@ export function assignSidecars(videoPath: string | null, tracks: SubtitleTrack[]
     stillUnknown[0].file = choice.file;
     if (choice.language) stillUnknown[0].language = choice.language;
   }
-  return next;
+  return dedupeExternalSubtitles(next);
 }
 
 /** The subtitle files on disk that belong to this video, as folder-scan tracks. */
