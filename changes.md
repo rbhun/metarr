@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.174
+
+- Fix the Docker TypeScript build: merge tests no longer fail typecheck on extra audio-track fields.
+
 ## 0.0.173
 
 - List version merge and the Sonarr-friendly episode rename with the other features.

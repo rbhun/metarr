@@ -79,10 +79,7 @@ function namedLanguages(values: string[]): string[] {
  * Languages the library UI would show for a version: summary list plus internal tracks
  * (tagged or detected). External sidecar files are ignored — merge only remuxes the two videos.
  */
-export function languagesFromVersion(
-  summary: string[],
-  tracks: Array<Pick<AudioTrack, "language" | "detectedLanguage" | "detectedRole" | "file" | "folderOnly">>,
-): string[] {
+export function languagesFromVersion(summary: string[], tracks: Array<Partial<AudioTrack>>): string[] {
   const values = [...summary];
   for (const track of tracks) {
     if (track.folderOnly || track.file) continue;
@@ -93,10 +90,7 @@ export function languagesFromVersion(
   return namedLanguages(values);
 }
 
-function subtitleLanguagesFromVersion(
-  summary: string[],
-  tracks: Array<Pick<SubtitleTrack, "language" | "detectedLanguage" | "placement" | "file">>,
-): string[] {
+function subtitleLanguagesFromVersion(summary: string[], tracks: Array<Partial<SubtitleTrack>>): string[] {
   const values = [...summary];
   for (const track of tracks) {
     if (track.placement === "external" || track.file) continue;
