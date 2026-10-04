@@ -40,6 +40,7 @@ import {
   startOffsetSearchList,
 } from "@/lib/merge/compare";
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
+import { formatVersionFps, markBitrate, markFrameRate, markResolution } from "@/lib/merge/marks";
 import { checkMerge, mergeArgs, parseMergeProbe, progressFromLine, type Probe } from "@/lib/merge/run";
 import { canMergeVersion, mergeTarget } from "@/lib/merge/source";
 import {
@@ -78,6 +79,7 @@ function version(partial: Partial<MergeVersionView> & Pick<MergeVersionView, "pa
   return {
     resolution: "1080p",
     bitrateKbps: 8000,
+    frameRate: null,
     fileBytes: 8_000_000_000,
     hdr: "none",
     edition: null,
@@ -113,6 +115,20 @@ test("higher resolution or bitrate becomes the video source", () => {
     "left",
   );
   assert.ok(qualityScore({ resolution: "2160p", bitrateKbps: 1, fileBytes: 1, hdr: "none" }) > qualityScore({ resolution: "1080p", bitrateKbps: 50_000, fileBytes: 50_000_000_000, hdr: "Dolby Vision" }));
+});
+
+test("merge pair marks higher resolution or bitrate green and a fps mismatch red", () => {
+  assert.equal(markResolution("2160p", "1080p"), "better");
+  assert.equal(markResolution("1080p", "2160p"), "worse");
+  assert.equal(markResolution("1080p", "1080p"), null);
+  assert.equal(markBitrate(45_000, 12_000), "better");
+  assert.equal(markBitrate(12_000, 45_000), "worse");
+  assert.equal(markBitrate(12_000, 12_000), null);
+  assert.equal(markFrameRate("23.976 fps", "25 fps"), "differ");
+  assert.equal(markFrameRate("23.976 fps", "23.976"), null);
+  assert.equal(markFrameRate("24 fps", "23.976 fps"), null);
+  assert.equal(formatVersionFps("23.976"), "23.976 fps");
+  assert.equal(formatVersionFps("25 fps"), "25 fps");
 });
 
 test("duration closeness rejects extended cuts and allows restored copies", () => {
@@ -716,6 +732,8 @@ test("the demo library exposes a merge candidate with complementary audio", () =
   assert.equal(candidates[0]!.label.includes("Blade Runner 2049"), true);
   assert.equal(candidates[0]!.videoFrom, "left");
   assert.ok(candidates[0]!.audioOnlyRight.includes("Hungarian") || candidates[0]!.audioOnlyLeft.includes("Hungarian"));
+  assert.equal(candidates[0]!.left.frameRate, "23.976 fps");
+  assert.equal(candidates[0]!.right.frameRate, "25 fps");
   db.close();
 });
 

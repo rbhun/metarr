@@ -17,6 +17,7 @@ function video(partial: Partial<MediaFile> & Pick<MediaFile, "path">): MediaFile
     subtitleLanguages: partial.subtitleLanguages ?? ["English"],
     bitrateKbps: partial.bitrateKbps ?? 8000,
     durationMinutes: partial.durationMinutes ?? null,
+    frameRate: partial.frameRate ?? null,
   };
 }
 
@@ -408,6 +409,7 @@ export function demoRecords(): SourceDraft[] {
         hdr: "HDR10",
         bitrateKbps: 45_000,
         durationMinutes: 164,
+        frameRate: "23.976 fps",
         audioLanguages: ["English"],
         subtitleLanguages: ["English"],
       }),
@@ -417,6 +419,7 @@ export function demoRecords(): SourceDraft[] {
         resolution: "1080p",
         bitrateKbps: 12_000,
         durationMinutes: 164,
+        frameRate: "25 fps",
         audioLanguages: ["Hungarian", "English"],
         subtitleLanguages: ["Hungarian", "English"],
       }),

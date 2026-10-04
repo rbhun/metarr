@@ -150,6 +150,7 @@ export type MediaVersion = {
   is3d: boolean;
   qualityName: string | null;
   bitrateKbps: number | null;
+  frameRate?: string | null;
   playableLabel: PlayableLabel;
   edition: string | null;
   audioLanguages: string[];
