@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.177
+
+- Show Rewrap to MKV on a multi-part film in the title drawer even when the parts are not AVI, and join them into one MKV.
+
 ## 0.0.176
 
 - Check frames always runs (duration does not stop it), reports the match percent, and says whether a runtime gap is PAL speed, titles/credits, or a different edition. The number of sampled frames is adjustable.

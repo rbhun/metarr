@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
 import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, type Probe } from "@/lib/rewrap/run";
-import { canRewrap, isAvi, joinedTarget, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
+import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   parseLanguages,
@@ -305,6 +305,19 @@ test("a labeled split joins into one MKV, and a missing part stays a single file
     ["/movies/Bar/Bar - 1 of 3.avi", "/movies/Bar/Bar - 2 of 3.avi", "/movies/Bar/Bar - 3 of 3.avi"],
   );
   assert.equal(joinedTarget("/movies/Bar/Bar - 3 of 3.avi"), "/movies/Bar/Bar.mkv");
+  assert.deepEqual(
+    splitSources("/movies/Foo/Foo CD1.mkv", (directory) => (directory === "/movies/Foo" ? ["Foo CD1.mkv", "Foo CD2.mkv"] : null)),
+    ["/movies/Foo/Foo CD1.mkv", "/movies/Foo/Foo CD2.mkv"],
+  );
+  assert.equal(needsRewrap(["/movies/Foo/Foo CD1.mkv", "/movies/Foo/Foo CD2.mkv"]), true);
+  assert.equal(needsRewrap(["/movies/Foo/Foo CD1.mkv", "/movies/Foo/Foo CD2.mkv", "/movies/Foo/Foo.mkv"]), false);
+  assert.equal(needsRewrap(["/movies/Foo/Foo CD1.mkv"]), false);
+  assert.equal(needsRewrap(["/movies/Film.mkv"]), false);
+  const mkvParts = bundleRewraps([
+    { path: "/movies/Foo/Foo CD2.mkv", label: "Foo" },
+    { path: "/movies/Foo/Foo CD1.mkv", label: "Foo" },
+  ]).map((group) => group.map((item) => item.path));
+  assert.deepEqual(mkvParts, [["/movies/Foo/Foo CD1.mkv", "/movies/Foo/Foo CD2.mkv"]]);
   const plan = rewrapArgs("parts.txt", "Foo.mkv", XVID, { languages: ["English"], firstLanguage: "", concat: true });
   assert.match(plan.args.join(" "), /-f concat -safe 0 -i parts.txt/);
   const bundled = bundleRewraps([

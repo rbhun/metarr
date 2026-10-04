@@ -151,15 +151,15 @@ async function step() {
       finishRewrap(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
       return;
     }
-    if (!canRewrap(null, local)) {
-      finishRewrap(db, job.id, "failed", "This file is not an AVI or a loose M2TS or TS file.");
+    const sources = splitSourcesOnDisk(local) ?? [local];
+    if (!canRewrap(null, local) && sources.length < 2) {
+      finishRewrap(db, job.id, "failed", "This file is not an AVI or a loose M2TS or TS file, and it is not a complete multi-part film.");
       return;
     }
     const kind = sourceKind(local);
     const known = currentLanguages(db, job.path);
     const directory = path.dirname(local);
     const rehearsal = dryRun();
-    const sources = splitSourcesOnDisk(local) ?? [local];
     const outputDir = sources.length > 1 ? path.dirname(joinedTarget(local) ?? local) : directory;
     if (rehearsal) {
       const problem = discFolderProblem(outputDir);

@@ -2,6 +2,7 @@ import { fileExtension, splitIdentity } from "@/lib/media";
 
 const AVI = new Set(["avi", "divx"]);
 const TRANSPORT = new Set(["m2ts", "mts", "ts"]);
+const VIDEO = new Set(["avi", "divx", "m2ts", "mts", "ts", "mkv", "mp4", "m4v", "mpg", "mpeg", "wmv", "mov", "webm"]);
 
 function inDiscFolder(filePath: string): boolean {
   return /[\\/](bdmv|video_ts)[\\/]/i.test(filePath);
@@ -31,12 +32,13 @@ export function sourceKind(filePath: string): string {
   return ext.toUpperCase();
 }
 
-/** "avi" or "ts", so a CD1 AVI is not joined with a CD2 transport stream. */
-export function rewrapFamily(filePath: string | null | undefined): "avi" | "ts" | null {
+/** Files of one kind join together. A CD1 AVI is not joined with a CD2 MKV. */
+export function rewrapFamily(filePath: string | null | undefined): string | null {
   const ext = fileExtension(filePath);
-  if (ext && AVI.has(ext)) return "avi";
-  if (ext && TRANSPORT.has(ext)) return "ts";
-  return null;
+  if (!ext || !VIDEO.has(ext)) return null;
+  if (AVI.has(ext)) return "avi";
+  if (TRANSPORT.has(ext)) return "ts";
+  return ext;
 }
 
 /** The joined MKV for a labeled split, with the part token removed. `Foo CD1.avi` becomes `Foo.mkv`. */
@@ -94,7 +96,7 @@ export function splitSources(filePath: string, readDirectory: (directory: string
   const seen = new Set<string>();
   const add = (full: string) => {
     const key = full.replace(/\\/g, "/").toLowerCase();
-    if (seen.has(key) || rewrapFamily(full) !== family || !canRewrap(null, full)) return;
+    if (seen.has(key) || rewrapFamily(full) !== family || inDiscFolder(full)) return;
     const split = splitIdentity(full);
     if (!split || split.key !== self.key) return;
     seen.add(key);
@@ -126,6 +128,32 @@ export function rewrapTarget(filePath: string): string {
   const dot = filePath.lastIndexOf(".");
   const stem = dot > slash ? filePath.slice(0, dot) : filePath;
   return `${stem}.mkv`;
+}
+
+/** True when this title still has an AVI or loose transport stream to copy, or a complete multi-part film that is not already one MKV. */
+export function needsRewrap(paths: Array<string | null | undefined>): boolean {
+  const files = paths.filter((item): item is string => Boolean(item));
+  const lowered = new Set(files.map((item) => item.replace(/\\/g, "/").toLowerCase()));
+  if (files.some((file) => canRewrap(null, file) && !rewrappedPathFor(file, files))) return true;
+  const buckets = new Map<string, SplitMember[]>();
+  for (const filePath of files) {
+    if (inDiscFolder(filePath)) continue;
+    const split = splitIdentity(filePath);
+    const family = rewrapFamily(filePath);
+    if (!split || !family) continue;
+    const key = `${split.key}|${family}`;
+    const bucket = buckets.get(key) ?? [];
+    bucket.push({ path: filePath, index: split.index, total: split.total });
+    buckets.set(key, bucket);
+  }
+  for (const members of buckets.values()) {
+    const ordered = orderedSplit(members);
+    if (!ordered) continue;
+    const joined = joinedTarget(ordered[0].path);
+    if (!joined || lowered.has(joined.replace(/\\/g, "/").toLowerCase())) continue;
+    return true;
+  }
+  return false;
 }
 
 /** An MKV already sitting on the same title under the rewrap name. */

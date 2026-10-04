@@ -16,7 +16,7 @@ import { isDiscImage, multiPartLabel } from "@/lib/media";
 import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
 import { rewrapNow } from "@/components/rewrap-actions";
-import { canRewrap, rewrappedPathFor } from "@/lib/rewrap/source";
+import { needsRewrap } from "@/lib/rewrap/source";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
@@ -178,11 +178,8 @@ export function TitleDetail({
     ? isDiscImage(file.container, file.path) || file.versions.some((version) => isDiscImage(version.container, version.path))
     : false;
   const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
-  const rewrapPaths = file
-    ? [file.path, ...file.versions.map((version) => version.path)].filter((item): item is string => Boolean(item) && canRewrap(null, item))
-    : [];
   const knownPaths = file ? [file.path, ...file.versions.map((version) => version.path)] : [];
-  const showRewrap = Boolean(title && (episode || title.kind === "movie") && rewrapPaths.some((item) => !rewrappedPathFor(item, knownPaths)));
+  const showRewrap = Boolean(title && (episode || title.kind === "movie") && needsRewrap(knownPaths));
   async function rewrapFile() {
     if (!title) return;
     setConvertBusy(true);
@@ -274,7 +271,7 @@ export function TitleDetail({
                   </Button>
                 ) : null}
                 {showRewrap ? (
-                  <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void rewrapFile()} title="Copy this file into an MKV beside it now, without re-encoding, so track languages can be stored">
+                  <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void rewrapFile()} title="Copy an AVI or loose transport stream into an MKV, or join a multi-part film into one MKV, without re-encoding">
                     {convertBusy ? "Starting…" : "Rewrap to MKV"}
                   </Button>
                 ) : null}

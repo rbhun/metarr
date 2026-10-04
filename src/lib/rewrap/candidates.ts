@@ -36,7 +36,7 @@ export function subtitleStreamLanguages(tracks: SubtitleTrack[]): Array<string |
 export function avisFromFile(file: ScanFile): RewrapItem[] {
   const found: RewrapItem[] = [];
   const push = (filePath: string | null, container: string | null, audio: AudioTrack[], subtitles: SubtitleTrack[]) => {
-    if (!filePath || !canRewrap(container, filePath)) return;
+    if (!filePath || (!canRewrap(container, filePath) && !splitIdentity(filePath))) return;
     if (found.some((item) => item.path === filePath)) return;
     found.push({ path: filePath, label: file.label, languages: trackLanguages(audio), subtitleLanguages: subtitleStreamLanguages(subtitles) });
   };
@@ -74,7 +74,9 @@ export function bundleRewraps(items: RewrapItem[]): RewrapItem[][] {
       }),
     );
     if (!ordered) {
-      for (const item of bucket) groups.push([item]);
+      for (const item of bucket) {
+        if (canRewrap(null, item.path)) groups.push([item]);
+      }
       continue;
     }
     const byPath = new Map(bucket.map((item) => [item.path, item]));
