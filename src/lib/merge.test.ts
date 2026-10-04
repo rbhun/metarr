@@ -213,6 +213,7 @@ test("frame check names PAL speed, titles, and different editions", () => {
   assert.match(offset.message, /12 of 12 frames matched \(100%\)/);
   assert.match(offset.message, /20 s start offset/);
   assert.match(offset.message, /front titles/);
+  assert.match(offset.message, /audio and subtitles/);
 
   const twenty = startOffsetSearchList(2500, 2520);
   assert.ok(twenty.includes(20));
@@ -629,6 +630,69 @@ test("ffmpeg merge maps video from input 0 and audio or subtitles from both", ()
   assert.equal(progressFromLine("out_time_us=3600000000", 7200), 50);
   assert.equal(checkMerge(VIDEO, { ...VIDEO, streams: [...VIDEO.streams, ...OTHER.streams.filter((stream) => stream.codecType !== "video")] }, plan), null);
   assert.match(checkMerge(VIDEO, VIDEO, plan) ?? "", /missing a stream/);
+});
+
+/** First packet timestamp for a stream, in seconds. */
+function firstPacketTime(file: string, selector: string): number {
+  const text = execFileSync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", selector, "-show_entries", "packet=pts_time", "-read_intervals", "%+#1", "-of", "csv=p=0", file],
+    { encoding: "utf8" },
+  );
+  const value = Number(text.trim().split(/\r?\n/)[0]);
+  assert.equal(Number.isFinite(value), true);
+  return value;
+}
+
+test("merge delays donor audio when the open was cut", { skip: !hasFfmpeg }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-shift-"));
+  try {
+    const videoPath = path.join(root, "video.mkv");
+    const otherPath = path.join(root, "other.mkv");
+    const output = path.join(root, "out.mkv");
+    for (const [file, tone] of [
+      [videoPath, "440"],
+      [otherPath, "880"],
+    ] as const) {
+      execFileSync("ffmpeg", [
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=320x180:d=8:r=24",
+        "-f",
+        "lavfi",
+        "-i",
+        `sine=frequency=${tone}:duration=8`,
+        "-c:v",
+        "mpeg4",
+        "-c:a",
+        "aac",
+        file,
+      ]);
+    }
+    const videoProbe: Probe = {
+      duration: 8,
+      streams: [
+        { index: 0, codecType: "video", codecName: "mpeg4", language: null },
+        { index: 1, codecType: "audio", codecName: "aac", language: "eng" },
+      ],
+    };
+    const otherProbe: Probe = {
+      duration: 8,
+      streams: [
+        { index: 0, codecType: "video", codecName: "mpeg4", language: null },
+        { index: 1, codecType: "audio", codecName: "aac", language: "hun" },
+      ],
+    };
+    const plan = mergeArgs(videoPath, otherPath, output, videoProbe, otherProbe, -20);
+    execFileSync("ffmpeg", plan.args);
+    assert.ok(firstPacketTime(output, "a:0") < 1);
+    assert.ok(Math.abs(firstPacketTime(output, "a:1") - 20) < 0.25);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("probe JSON keeps stream languages", () => {

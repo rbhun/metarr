@@ -2,7 +2,7 @@
 
 ## 0.0.179
 
-- Check frames searches for a constant start-title offset (about 20 s missing open) and reports it. Merge shifts the donor tracks by that amount so audio stays in sync.
+- Check frames searches for a constant start-title offset (about 20 s missing open). Merge delays or trims the other file's audio and subtitles by that amount so they stay in sync with the kept video.
 
 ## 0.0.178
 

@@ -538,7 +538,8 @@ export function MergeView() {
         </div>
         <p className="text-xs text-muted-foreground">
           Runtime difference filters the automatic list. Check frames reports how many pictures matched, looks for a constant start-title offset (one copy
-          missing the open), and says whether a runtime gap is PAL speed, titles, or a different edition.
+          missing the open), and says whether a runtime gap is PAL speed, titles, or a different edition. If it finds an offset, Merge delays or trims the other
+          file's audio and subtitles so they stay in sync.
         </p>
       </div>
 

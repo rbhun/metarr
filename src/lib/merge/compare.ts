@@ -159,7 +159,7 @@ export function explainFrameCheck(input: {
       return {
         kind,
         percent,
-        message: `${matchBit}. Pictures line up with a ${seconds} s start offset — the ${shift > 0 ? "second" : "first"} file has about that much extra at the open (front titles).`,
+        message: `${matchBit}. Pictures line up with a ${seconds} s start offset — the ${shift > 0 ? "second" : "first"} file has about that much extra at the open (front titles). Merge ${shift > 0 ? "trims" : "delays"} the other file's audio and subtitles by ${seconds} s to match.`,
       };
     }
     if (kind === "framerate") {

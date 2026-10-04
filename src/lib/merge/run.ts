@@ -215,7 +215,11 @@ export async function mergeVersions(options: {
     .join(", ");
   const flac = plan.converted ? ` ${plural(plan.converted, "PCM audio track")} ${plan.converted === 1 ? "is" : "are"} stored as lossless FLAC.` : "";
   const offsetBit =
-    Math.abs(startOffsetSeconds) >= 2 ? ` Donor tracks are shifted ${Math.round(Math.abs(startOffsetSeconds))} s to match the open.` : "";
+    Math.abs(startOffsetSeconds) >= 2
+      ? startOffsetSeconds > 0
+        ? ` The other file's audio and subtitles are trimmed ${Math.round(startOffsetSeconds)} s to skip the extra open.`
+        : ` The other file's audio and subtitles are delayed ${Math.round(Math.abs(startOffsetSeconds))} s to match the extra open.`
+      : "";
   if (options.dryRun) return `Dry run: would keep video from ${path.basename(videoPath)} and copy ${tracks} into ${target}.${flac}${offsetBit} Nothing was written.`;
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the video source.`);
   fs.rmSync(workDir, { recursive: true, force: true });
