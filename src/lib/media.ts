@@ -405,6 +405,14 @@ export function languageCode(name: string): string | null {
   return LANGUAGE_CODES[named] ?? null;
 }
 
+/** Two-letter code Plex looks for on sidecar names (`en`, `hu`). Falls back to ISO 639-2. */
+export function sidecarLanguageCode(name: string): string | null {
+  const named = languageName(name);
+  if (!named) return null;
+  const short = Object.entries(LANGUAGE_NAMES).find(([code, label]) => label === named && /^[a-z]{2}$/.test(code))?.[0];
+  return short ?? LANGUAGE_CODES[named] ?? null;
+}
+
 const LANGUAGE_BY_NAME = new Map(Object.values(LANGUAGE_NAMES).map((name) => [name.toLowerCase(), name]));
 
 function languageKey(raw: string): string {
@@ -693,7 +701,7 @@ export function plexReadsSidecar(videoPath: string, file: string): boolean {
 export function plexSidecarName(videoPath: string, file: string, language: string | null, forced: boolean): string {
   const video = (videoPath.split(/[\\/]/).pop() ?? videoPath).replace(/\.[^.]+$/, "");
   const ext = (file.match(/\.([^.\\/]+)$/)?.[1] ?? "srt").toLowerCase();
-  const code = language ? languageCode(language) : null;
+  const code = language ? sidecarLanguageCode(language) : null;
   return [video, code, forced ? "forced" : null, ext].filter(Boolean).join(".");
 }
 
@@ -710,8 +718,9 @@ export function folderOnlySubtitleNote(videoPath: string | null, file: string, l
  */
 export function markSubtitlePresence(file: MediaFile): MediaFile {
   if (file.presence?.plex !== true || file.presence?.file !== true || !file.subtitleTracks?.length) return file;
-  let changed = false;
-  const subtitleTracks = file.subtitleTracks.map((track) => {
+  const merged = dedupeExternalSubtitles(file.subtitleTracks);
+  let changed = merged !== file.subtitleTracks;
+  const subtitleTracks = merged.map((track) => {
     if (track.placement !== "external") return track;
     const inPlex = Boolean(track.sources && "plex" in track.sources);
     if (track.fromFile && track.file && !inPlex) {
@@ -736,22 +745,58 @@ export function markSubtitlePresence(file: MediaFile): MediaFile {
 }
 
 /** A sidecar the folder scan found is the same file Plex lists when the file names match. */
+function mergeSidecarPair(report: SubtitleTrack, scan: SubtitleTrack): SubtitleTrack {
+  return {
+    ...report,
+    file: scan.file ?? report.file,
+    language: report.language ?? scan.language,
+    forced: report.forced || scan.forced,
+    fromFile: true,
+    folderOnly: undefined,
+    sources: { ...report.sources, ...scan.sources },
+    conflict: undefined,
+  };
+}
+
+function takeSidecar(list: SubtitleTrack[], match: (scan: SubtitleTrack) => boolean): SubtitleTrack | null {
+  const index = list.findIndex(match);
+  if (index < 0) return null;
+  const [scan] = list.splice(index, 1);
+  return scan ?? null;
+}
+
 function crossCheckSidecars(reported: SubtitleTrack[], scanned: SubtitleTrack[]): SubtitleTrack[] {
   const left = [...scanned];
   const tracks = reported.map((report) => {
-    const index = report.file ? left.findIndex((scan) => scan.file && baseOf(scan.file) === baseOf(report.file!)) : -1;
-    if (index < 0) return report;
-    const [scan] = left.splice(index, 1);
-    return {
-      ...report,
-      file: scan!.file,
-      language: report.language ?? scan!.language,
-      forced: report.forced || scan!.forced,
-      fromFile: true,
-      sources: { ...report.sources, ...scan!.sources },
-    };
+    const byName = report.file ? takeSidecar(left, (scan) => Boolean(scan.file && baseOf(scan.file) === baseOf(report.file!))) : null;
+    if (byName) return mergeSidecarPair(report, byName);
+    if (report.language) {
+      const byLanguage = takeSidecar(left, (scan) => sameSpokenLanguage(scan.language, report.language));
+      if (byLanguage) return mergeSidecarPair(report, byLanguage);
+    }
+    return report;
   });
+  const unlabeled = tracks.filter((track) => !track.file && !track.language);
+  if (unlabeled.length === 1) {
+    const unnamedFiles = left.filter((scan) => !scan.language);
+    const scan = unnamedFiles.length === 1 ? takeSidecar(left, (item) => item === unnamedFiles[0]) : left.length === 1 ? takeSidecar(left, () => true) : null;
+    if (scan) {
+      const index = tracks.indexOf(unlabeled[0]!);
+      if (index >= 0) tracks[index] = mergeSidecarPair(unlabeled[0]!, scan);
+    }
+  }
   return [...tracks, ...left.map((track) => ({ ...track, fromFile: true }))];
+}
+
+/** Collapse a Plex-only external row with the folder-scan sidecar for the same file or language. */
+export function dedupeExternalSubtitles(tracks: SubtitleTrack[]): SubtitleTrack[] {
+  const internals = tracks.filter((track) => track.placement !== "external");
+  const externals = tracks.filter((track) => track.placement === "external");
+  if (externals.length < 2) return tracks;
+  const scanned = externals.filter((track) => track.fromFile && track.file);
+  const reported = externals.filter((track) => !scanned.includes(track));
+  if (!reported.length || !scanned.length) return tracks;
+  return [...internals, ...crossCheckSidecars(reported, scanned)];
 }
 
 export function crossCheckSubtitles(reported: SubtitleTrack[], allScanned: SubtitleTrack[]): SubtitleTrack[] {

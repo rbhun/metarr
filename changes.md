@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.182
+
+- Recognize an unlabeled sidecar such as `movie.srt` even when the folder already has a tagged file, merge it with the Plex row instead of listing both twice, and rename it to `movie.en.srt` so Plex can read the language.
+
 ## 0.0.181
 
 - Check all runs frame compare on every possible pair, including mismatched frame rates and runtimes over the set limit, then sorts the list so the best matches are first.

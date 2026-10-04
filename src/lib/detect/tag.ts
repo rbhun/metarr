@@ -1,6 +1,6 @@
 import path from "node:path";
 import { languageFromSubtitleName } from "@/lib/detect/sidecars";
-import { fileExtension, languageCode } from "@/lib/media";
+import { fileExtension, languageCode, sidecarLanguageCode } from "@/lib/media";
 
 const MATROSKA = new Set(["mkv", "mka", "mks", "mk3d", "webm"]);
 const ISO_BMFF = new Set(["mp4", "m4v", "mov", "m4p"]);
@@ -16,7 +16,7 @@ export type TagPlan =
   | { action: "rename"; to: string; pairFrom: string | null; pairTo: string | null }
   | { action: "skip"; reason: "unknown-language" | "container" | "already-named" };
 
-/** Insert an ISO 639-2 code into a sidecar name, keeping a forced/SDH flag at the end. */
+/** Insert a Plex-style language code into a sidecar name, keeping a forced/SDH flag at the end. */
 export function renamedSidecar(file: string, code: string): string | null {
   if (languageFromSubtitleName(path.basename(file))) return null;
   const ext = path.extname(file);
@@ -49,28 +49,33 @@ export function planTag(
   language: string,
   role: "commentary" | "forced" | "short" | null,
 ): TagPlan {
-  const code = languageCode(language);
-  if (!code) return { action: "skip", reason: "unknown-language" };
+  const fileCode = languageCode(language);
+  const nameCode = sidecarLanguageCode(language);
+  if (!fileCode && !nameCode) return { action: "skip", reason: "unknown-language" };
   const ext = fileExtension(file);
   const commentary = kind === "audio" && role === "commentary";
   const forced = kind === "subtitle" && role === "forced";
   if (ext && MATROSKA.has(ext)) {
+    if (!fileCode) return { action: "skip", reason: "unknown-language" };
     const track = kind === "audio" ? "a" : "s";
-    return { action: "matroska", selector: `track:${track}${ordinal + 1}`, language: code, commentary, forced };
+    return { action: "matroska", selector: `track:${track}${ordinal + 1}`, language: fileCode, commentary, forced };
   }
   if (ext && ISO_BMFF.has(ext)) {
+    if (!fileCode) return { action: "skip", reason: "unknown-language" };
     const track = kind === "audio" ? "a" : "s";
-    return { action: "mp4", specifier: `s:${track}:${ordinal}`, language: code, commentary, forced };
+    return { action: "mp4", specifier: `s:${track}:${ordinal}`, language: fileCode, commentary, forced };
   }
   if (ext && RIFF.has(ext) && kind === "audio" && ordinal < 9) {
-    return { action: "riff", header: `IAS${ordinal + 1}`, language: code, commentary };
+    if (!fileCode) return { action: "skip", reason: "unknown-language" };
+    return { action: "riff", header: `IAS${ordinal + 1}`, language: fileCode, commentary };
   }
   if (ext && SIDECAR.has(ext) && kind === "subtitle") {
-    const named = renamedSidecar(file, code);
+    if (!nameCode) return { action: "skip", reason: "unknown-language" };
+    const named = renamedSidecar(file, nameCode);
     if (!named) return { action: "skip", reason: "already-named" };
     const to = forced ? withForcedFlag(named) : named;
     const pairFrom = sidecarPair(file);
-    const pairNamed = pairFrom ? renamedSidecar(pairFrom, code) : null;
+    const pairNamed = pairFrom ? renamedSidecar(pairFrom, nameCode) : null;
     const pairTo = pairNamed && forced ? withForcedFlag(pairNamed) : pairNamed;
     return { action: "rename", to, pairFrom: pairTo ? pairFrom : null, pairTo };
   }
