@@ -5,6 +5,7 @@ import { rebuildCatalog } from "@/lib/catalog";
 import { migrate, insertSourceRecords } from "@/lib/db";
 import { demoRecords } from "@/lib/demo";
 import {
+  bothHaveKnownAudio,
   candidateFromVersions,
   donorAudioLanguages,
   languagesOnlyIn,
@@ -132,6 +133,82 @@ test("complementary audio languages make a pair", () => {
     version({ ...right, edition: "Remastered" }),
   );
   assert.ok(labeled?.editionConflict);
+});
+
+test("a file with no known audio language is not a merge candidate", () => {
+  const named = version({
+    path: "/m/Film-A.mkv",
+    name: "Film-A.mkv",
+    resolution: "352p",
+    bitrateKbps: 1100,
+    durationMinutes: 22,
+    audioLanguages: ["English"],
+  });
+  const unknown = version({
+    path: "/m/Film-B.mkv",
+    name: "Film-B.mkv",
+    resolution: "352p",
+    bitrateKbps: 1100,
+    durationMinutes: 21,
+    audioLanguages: [],
+  });
+  assert.equal(bothHaveKnownAudio(named, unknown), false);
+  assert.equal(candidateFromVersions("Film (1999)", 1, named, unknown), null);
+  assert.equal(candidateFromVersions("Film (1999)", 1, unknown, named), null);
+  assert.equal(
+    pairCandidates({
+      titleId: 1,
+      label: "Film (1999)",
+      path: named.path,
+      container: "mkv",
+      playableLabel: "video",
+      audioTracks: [],
+      subtitleTracks: [],
+      versions: [
+        {
+          name: named.name,
+          path: named.path,
+          container: "mkv",
+          resolution: "352p",
+          hdr: "none",
+          is3d: false,
+          qualityName: null,
+          bitrateKbps: 1100,
+          playableLabel: "video",
+          edition: null,
+          audioLanguages: ["English"],
+          subtitleLanguages: [],
+          audioTracks: [],
+          subtitleTracks: [],
+          missing: [],
+          flags: [],
+          fileBytes: 200_000_000,
+          durationMinutes: 22,
+        },
+        {
+          name: unknown.name,
+          path: unknown.path,
+          container: "mkv",
+          resolution: "352p",
+          hdr: "none",
+          is3d: false,
+          qualityName: null,
+          bitrateKbps: 1100,
+          playableLabel: "video",
+          edition: null,
+          audioLanguages: [],
+          subtitleLanguages: [],
+          audioTracks: [],
+          subtitleTracks: [],
+          missing: [],
+          flags: [],
+          fileBytes: 200_000_000,
+          durationMinutes: 21,
+        },
+      ],
+    }).length,
+    0,
+  );
 });
 
 test("a worse file that adds no new audio is not a merge candidate", () => {
