@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.182
+
+- Add Fix subtitle timing to the title drawer. It compares each SRT, VTT, ASS or SSA file with the video's real length, flags a subtitle that runs past the end or looks made for a 25 fps copy, and stretches, shrinks or shifts it by a frame rate preset or by where the first and last line should be. The original is kept as .metarr-orig and can be put back.
+
 ## 0.0.181
 
 - Check all runs frame compare on every possible pair, including mismatched frame rates and runtimes over the set limit, then sorts the list so the best matches are first.
