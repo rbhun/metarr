@@ -16,11 +16,14 @@ import {
   formatClock,
   isIdentity,
   judgeTiming,
+  minutesText,
   retime,
   timingFormat,
   timingMapProblem,
+  type CueSpan,
   type TimingMap,
   type TimingStatus,
+  type TimingVerdict,
 } from "@/lib/subtitle-timing";
 
 export type SubtitleTimingRow = {
@@ -130,6 +133,20 @@ async function videoLength(video: Video): Promise<{ seconds: number | null; sour
   return { seconds: null, source: null, fps: null };
 }
 
+/**
+ * Once Metarr has retimed a file, an early last line is the credits, not another 25 fps file,
+ * so no preset is offered again: applying the same stretch twice would undo the fix.
+ */
+export function retimedVerdict(verdict: TimingVerdict, retimed: boolean, span: CueSpan, videoSeconds: number | null): TimingVerdict {
+  if (!retimed || verdict.status === "unknown") return verdict;
+  const note = "Metarr already changed this file's timing. Restore original puts it back.";
+  if (verdict.status === "shorter" && verdict.preset && videoSeconds != null) {
+    const gap = videoSeconds - span.lastEnd;
+    return { status: "fits", message: `The last line is ${minutesText(Math.max(0, gap))} before the video ends. ${note}`, preset: null };
+  }
+  return { ...verdict, message: `${verdict.message} ${note}`, preset: null };
+}
+
 function inspectFile(file: string, video: Video, length: Awaited<ReturnType<typeof videoLength>>): SubtitleTimingRow {
   const format = timingFormat(file)!;
   const base = {
@@ -151,7 +168,7 @@ function inspectFile(file: string, video: Video, length: Awaited<ReturnType<type
   if (!span) {
     return { ...base, cues: 0, firstStart: null, firstText: "", lastEnd: null, lastText: "", status: "unknown", message: "No timed lines were found in this file.", preset: null };
   }
-  const verdict = judgeTiming(span, length.seconds, length.fps);
+  const verdict = retimedVerdict(judgeTiming(span, length.seconds, length.fps), base.hasOriginal, span, length.seconds);
   const rounded = length.source === "runtime" && verdict.status !== "unknown" ? " The video length is the stored runtime, rounded to the minute." : "";
   return { ...base, ...span, status: verdict.status, message: `${verdict.message}${rounded}`, preset: verdict.preset };
 }

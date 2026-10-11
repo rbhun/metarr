@@ -273,7 +273,7 @@ export function parseClock(text: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function minutesText(seconds: number): string {
+export function minutesText(seconds: number): string {
   const minutes = Math.abs(seconds) / 60;
   if (minutes < 1) return `${Math.round(Math.abs(seconds))} s`;
   return `${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} min`;

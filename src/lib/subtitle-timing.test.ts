@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { originalPath, subtitleText } from "@/lib/subtitle-fix";
+import { originalPath, retimedVerdict, subtitleText } from "@/lib/subtitle-fix";
 import {
   cueSpan,
   formatClock,
@@ -113,6 +113,21 @@ test("judgeTiming calls a subtitle for a much shorter cut shorter, with no prese
   const verdict = judgeTiming(span(4000), 6000, 23.976);
   assert.equal(verdict.status, "shorter");
   assert.equal(verdict.preset, null);
+});
+
+test("a file Metarr already retimed is not offered the same stretch again", () => {
+  const video = 6000;
+  const early = span((video - 60) / (25 / (24000 / 1001)));
+  const fresh = judgeTiming(early, video, 23.976);
+  assert.equal(retimedVerdict(fresh, false, early, video), fresh);
+  const again = retimedVerdict(fresh, true, early, video);
+  assert.equal(again.status, "fits");
+  assert.equal(again.preset, null);
+  assert.match(again.message, /already changed/);
+  const long = span(6300);
+  const over = retimedVerdict(judgeTiming(long, video, 25), true, long, video);
+  assert.equal(over.status, "longer");
+  assert.equal(over.preset, null);
 });
 
 test("twoPointMap lines up the first and last line", () => {
