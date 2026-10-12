@@ -6,6 +6,7 @@ import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { languageCode } from "@/lib/media";
 import { joinedTarget, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { killTool } from "@/lib/stuck-tools";
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
@@ -113,7 +114,7 @@ function runTool(
       reject(error);
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, command, args);
       fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
     }, timeoutMs);
     readline.createInterface({ input: child.stdout }).on("line", (line) => {

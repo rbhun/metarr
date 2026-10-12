@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { idle } from "@/lib/idle";
+import { killTool } from "@/lib/stuck-tools";
 
 const FRAME_WIDTH = 160;
 const FRAME_HEIGHT = 90;
@@ -333,7 +334,7 @@ function runTool(command: string, args: string[], timeoutMs: number): Promise<Bu
       reject(error);
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, command, args);
       fail(new Error(`${command} timed out while comparing frames.`));
     }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));

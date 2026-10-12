@@ -15,6 +15,7 @@ import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
 import { throwIfSyncCancelled } from "@/lib/sync-cancel";
 import type Database from "better-sqlite3";
+import { killTool } from "@/lib/stuck-tools";
 
 const ROOTS_KEY = "folder_roots";
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "mov", "webm"]);
@@ -707,7 +708,7 @@ function probeFile(file: string): Promise<unknown> {
     });
     const chunks: Buffer[] = [];
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, "ffprobe", [file]);
       resolve(null);
     }, 20_000);
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
