@@ -13,6 +13,7 @@ import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { markTagChecked, markWritten, reopenForWrite } from "@/lib/detect/store";
 import { languageName } from "@/lib/media";
+import { killTool } from "@/lib/stuck-tools";
 import type Database from "better-sqlite3";
 
 export type WriteResult = {
@@ -34,7 +35,11 @@ type WriteJob = {
 function runTool(command: string, args: string[], timeout: number, allowWarning = false): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const low = idle(command, args);
-    execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    let settled = false;
+    const child = execFile(low.command, low.args, { maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       const code = error ? (error as { code?: string | number }).code : undefined;
@@ -44,11 +49,15 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
       }
       const blob = `${out}\n${err}\n${error?.message ?? ""}`;
       const missing = code === "ENOENT" || /No such file or directory|not found/i.test(blob);
-      const timedOut = Boolean(error && "killed" in error && error.killed);
       if (missing) reject(new Error(`${command} is not installed, so the file was left unchanged.`));
-      else if (timedOut) reject(new Error(`${command} timed out, so the file was left unchanged.`));
       else reject(new Error(commandFailureText(command, out, err)));
     });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      killTool(child, command, args);
+      reject(new Error(`${command} timed out, so the file was left unchanged.`));
+    }, timeout);
   });
 }
 

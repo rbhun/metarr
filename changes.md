@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.184
+
+- Stop waiting for a tool that ran past its time limit even when it does not exit after being killed, and warn at the top of every page while such a process is still alive. A process blocked on a hung NFS share ignores the kill, and the language tag writer used to wait on it forever with no message.
+
 ## 0.0.183
 
 - Check every subtitle file's timing in the background during the language detection hours, show a subtitle that is longer or shorter than its video under a new Subtitle timing filter and preset, and optionally fix the clear cases (the subtitle runs past the video, the video's frame rate matches the fix, and the fixed last line ends within 10 seconds of the video) without asking.

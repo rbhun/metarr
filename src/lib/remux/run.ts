@@ -7,6 +7,7 @@ import { idle } from "@/lib/idle";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { formatBytes } from "@/lib/format";
 import { mainTitle, parseDiscTitles, progressPercent, type DiscTitle } from "@/lib/remux/robot";
+import { killTool } from "@/lib/stuck-tools";
 
 const RIP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -213,7 +214,7 @@ function runMakeMkv(
       reject(error);
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, binary, args);
       fail(new Error("MakeMKV ran longer than 6 hours and was stopped."));
     }, RIP_TIMEOUT_MS);
     const stdout = readline.createInterface({ input: child.stdout });

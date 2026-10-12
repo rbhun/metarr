@@ -19,6 +19,7 @@ import { subtitleSampleIsText } from "@/lib/detect/subtitle-name";
 import { detectTextLanguage } from "@/lib/detect/text-language";
 import { idle } from "@/lib/idle";
 import { languageName } from "@/lib/media";
+import { killTool } from "@/lib/stuck-tools";
 
 export type DetectionOutcome = {
   language: string | null;
@@ -33,23 +34,32 @@ const limitedEnv = { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS:
 function runCommand(command: string, args: string[], timeout = 120_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const low = idle(command, args);
-    execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024, env: limitedEnv }, (error, stdout, stderr) => {
+    let settled = false;
+    const child = execFile(low.command, low.args, { maxBuffer: 2 * 1024 * 1024, env: limitedEnv }, (error, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       if (error) {
         const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-        const timedOut = "killed" in error && error.killed;
         const detail = err
           .split("\n")
           .map((line) => line.trim())
           .filter((line) => line && !line.startsWith("_STATISTICS_"))
           .slice(-4)
           .join(" ");
-        reject(new Error(missing ? `${command} is not installed.` : timedOut ? `${command} timed out.` : detail || error.message));
+        reject(new Error(missing ? `${command} is not installed.` : detail || error.message));
         return;
       }
       resolve({ stdout: out, stderr: err });
     });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      killTool(child, command, args);
+      reject(new Error(`${command} timed out.`));
+    }, timeout);
   });
 }
 
@@ -199,7 +209,7 @@ function ffmpegSlice(file: string, start: number, end: number, args: string[], t
       clearTimeout(timer);
       reader.destroy();
       child.stdin?.destroy();
-      if (child.exitCode == null && !child.killed) child.kill("SIGKILL");
+      if (child.exitCode == null && !child.killed) killTool(child, "ffmpeg", [file]);
       if (error) reject(error);
       else resolve();
     };
