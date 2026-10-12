@@ -9,6 +9,7 @@ import { resolveMediaPath } from "@/lib/detect/paths";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readSidecarNames, sidecarsIn } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
+import { readTimingCheck, saveTimingCheck } from "@/lib/subtitle-check/store";
 import { dryRun } from "@/lib/dry-run";
 import { probeMediaTiming } from "@/lib/merge/compare";
 import {
@@ -82,9 +83,9 @@ function readSubtitle(file: string): Buffer {
   return fs.readFileSync(file);
 }
 
-type Video = { stored: string; local: string; runtimeMinutes: number | null };
+export type Video = { stored: string; local: string; runtimeMinutes: number | null };
 
-function existingFile(candidate: string): boolean {
+export function existingFile(candidate: string): boolean {
   try {
     return fs.statSync(candidate).isFile();
   } catch {
@@ -116,13 +117,15 @@ function selectionVideos(db: Database.Database, catalogId: number, episodeId: nu
   return videos;
 }
 
-function textSidecars(video: Video): string[] {
+export function textSidecars(video: Video): string[] {
   return sidecarsIn(video.local, readSidecarNames(video.local))
     .map((sidecar) => sidecar.file)
     .filter((file) => timingFormat(file) != null);
 }
 
-async function videoLength(video: Video): Promise<{ seconds: number | null; source: SubtitleTimingRow["videoSource"]; fps: number | null }> {
+export type VideoLength = { seconds: number | null; source: SubtitleTimingRow["videoSource"]; fps: number | null };
+
+export async function videoLength(video: Video): Promise<VideoLength> {
   try {
     const timing = await probeMediaTiming(video.local);
     if (timing.durationSeconds != null) return { seconds: timing.durationSeconds, source: "probe", fps: timing.fps };
@@ -147,7 +150,7 @@ export function retimedVerdict(verdict: TimingVerdict, retimed: boolean, span: C
   return { ...verdict, message: `${verdict.message} ${note}`, preset: null };
 }
 
-function inspectFile(file: string, video: Video, length: Awaited<ReturnType<typeof videoLength>>): SubtitleTimingRow {
+export function inspectFile(file: string, video: Video, length: VideoLength): SubtitleTimingRow {
   const format = timingFormat(file)!;
   const base = {
     file,
@@ -180,9 +183,54 @@ export async function inspectSubtitleTiming(db: Database.Database, catalogId: nu
     const files = textSidecars(video);
     if (!files.length) continue;
     const length = await videoLength(video);
-    for (const file of files) rows.push(inspectFile(file, video, length));
+    for (const file of files) {
+      const row = inspectFile(file, video, length);
+      recordInspection(db, video, row, null);
+      rows.push(row);
+    }
   }
   return rows;
+}
+
+function sizeOf(file: string): { size: number | null; mtime: number | null } {
+  try {
+    const stat = fs.statSync(file);
+    return { size: stat.size, mtime: stat.mtimeMs };
+  } catch {
+    return { size: null, mtime: null };
+  }
+}
+
+/** Keep what this check found, so the library list and its filter can show it. */
+export function recordInspection(db: Database.Database, video: Video, row: SubtitleTimingRow, pass: string | null, autoFixedAt: string | null = null): void {
+  const subtitle = sizeOf(row.file);
+  saveTimingCheck(
+    db,
+    {
+      videoPath: video.stored,
+      name: path.relative(path.dirname(video.local), row.file),
+      subSize: subtitle.size,
+      subMtime: subtitle.mtime,
+      videoSize: sizeOf(video.local).size,
+      status: row.status,
+      preset: row.preset,
+      message: row.message,
+      videoSeconds: row.videoSeconds,
+      fps: row.fps,
+      lastEnd: row.lastEnd,
+      retimed: row.hasOriginal,
+      autoFixedAt,
+    },
+    pass,
+  );
+}
+
+/** Whether the stored check still describes these files, so the video does not need probing again. */
+export function checkIsCurrent(db: Database.Database, video: Video, file: string): boolean {
+  const stored = readTimingCheck(db, video.stored, path.relative(path.dirname(video.local), file));
+  if (!stored || stored.status === "unknown") return false;
+  const subtitle = sizeOf(file);
+  return stored.subSize === subtitle.size && stored.subMtime === subtitle.mtime && stored.videoSize === sizeOf(video.local).size;
 }
 
 function ownedSubtitle(db: Database.Database, catalogId: number, episodeId: number | null, file: string): Video {
@@ -203,7 +251,7 @@ function writeInPlace(file: string, bytes: Buffer): void {
   }
 }
 
-async function tellApps(db: Database.Database, video: Video): Promise<string> {
+export async function tellApps(db: Database.Database, video: Video): Promise<string> {
   try {
     return await announceFolder(db, [path.dirname(video.stored)]);
   } catch {
@@ -218,6 +266,34 @@ function describe(map: TimingMap): string {
   return parts.join(" and ");
 }
 
+/** Rewrite the cue times of one subtitle file, keeping the first version beside it. */
+export function retimeFile(file: string, map: TimingMap): { message: string; written: boolean } {
+  const problem = timingMapProblem(map);
+  if (problem) throw new Error(problem);
+  if (isIdentity(map)) throw new Error("Those times are the same as the file's, so there is nothing to change.");
+  const format = timingFormat(file);
+  if (!format) throw new Error("Only SRT, VTT, ASS and SSA files can be retimed.");
+  const source = subtitleText(readSubtitle(file));
+  const next = retime(source.text, format, map);
+  if (next === source.text) throw new Error("No cue times were found to change, so the file was left as it was.");
+  const span = cueSpan(readableText(source.encode(next)), format);
+  const ends = span ? ` The last line now ends at ${formatClock(span.lastEnd)}.` : "";
+  const name = path.basename(file);
+  if (dryRun()) return { message: `Dry run: ${name} would be ${describe(map)}.${ends} Nothing was written.`, written: false };
+  const backup = originalPath(file);
+  if (!fs.existsSync(backup)) fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+  writeInPlace(file, source.encode(next));
+  return { message: `${name} was ${describe(map)}.${ends} The file as it was is kept as ${path.basename(backup)}.`, written: true };
+}
+
+async function recheck(db: Database.Database, video: Video, file: string): Promise<void> {
+  try {
+    recordInspection(db, video, inspectFile(file, video, await videoLength(video)), null);
+  } catch {
+    // The next timing pass checks this file again.
+  }
+}
+
 export async function fixSubtitleTiming(
   db: Database.Database,
   catalogId: number,
@@ -225,24 +301,12 @@ export async function fixSubtitleTiming(
   file: string,
   map: TimingMap,
 ): Promise<{ message: string }> {
-  const problem = timingMapProblem(map);
-  if (problem) throw new Error(problem);
-  if (isIdentity(map)) throw new Error("Those times are the same as the file's, so there is nothing to change.");
   const video = ownedSubtitle(db, catalogId, episodeId, file);
-  const format = timingFormat(file)!;
-  const bytes = readSubtitle(file);
-  const source = subtitleText(bytes);
-  const next = retime(source.text, format, map);
-  if (next === source.text) throw new Error("No cue times were found to change, so the file was left as it was.");
-  const span = cueSpan(readableText(source.encode(next)), format);
-  const ends = span ? ` The last line now ends at ${formatClock(span.lastEnd)}.` : "";
-  const name = path.basename(file);
-  if (dryRun()) return { message: `Dry run: ${name} would be ${describe(map)}.${ends} Nothing was written.` };
-  const backup = originalPath(file);
-  if (!fs.existsSync(backup)) fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
-  writeInPlace(file, source.encode(next));
+  const result = retimeFile(file, map);
+  if (!result.written) return { message: result.message };
+  await recheck(db, video, file);
   const apps = await tellApps(db, video);
-  return { message: `${name} was ${describe(map)}.${ends} The file as it was is kept as ${path.basename(backup)}.${apps ? ` ${apps}` : ""}` };
+  return { message: `${result.message}${apps ? ` ${apps}` : ""}` };
 }
 
 export async function restoreSubtitleTiming(db: Database.Database, catalogId: number, episodeId: number | null, file: string): Promise<{ message: string }> {
@@ -252,6 +316,7 @@ export async function restoreSubtitleTiming(db: Database.Database, catalogId: nu
   const name = path.basename(file);
   if (dryRun()) return { message: `Dry run: ${name} would go back to the original timing. Nothing was written.` };
   fs.renameSync(backup, file);
+  await recheck(db, video, file);
   const apps = await tellApps(db, video);
   return { message: `${name} has its original timing again.${apps ? ` ${apps}` : ""}` };
 }

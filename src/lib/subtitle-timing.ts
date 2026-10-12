@@ -255,6 +255,46 @@ function fpsFamily(fps: number | null): FpsFamily {
   return "other";
 }
 
+/** After an automatic fix the last line has to land this close to the video end. */
+export const CLEAR_FIX_SECONDS = 10;
+
+/** The frame rate a preset says the video has. */
+const PRESET_VIDEO_FPS: Record<string, number> = {
+  "film-to-pal": 25,
+  "24-to-pal": 25,
+  "film-to-24": 24,
+  "pal-to-film": FILM,
+  "pal-to-24": 24,
+  "24-to-film": FILM,
+};
+
+/**
+ * A fix Metarr may apply without asking: the subtitle runs past the video, the video's own frame
+ * rate is the one the preset expects, the length was measured, and after the change the last line
+ * ends within a few seconds of the video. A subtitle that stops early is never fixed on its own,
+ * because long credits look the same.
+ */
+export function isClearFix(input: {
+  status: TimingStatus;
+  preset: string | null;
+  lastEnd: number | null;
+  videoSeconds: number | null;
+  fps: number | null;
+  measured: boolean;
+  retimed: boolean;
+}): boolean {
+  if (input.status !== "longer" || !input.preset || input.retimed || !input.measured) return false;
+  if (input.lastEnd == null || input.videoSeconds == null || input.fps == null) return false;
+  const expected = PRESET_VIDEO_FPS[input.preset];
+  const scale = TIMING_PRESETS.find((item) => item.id === input.preset)?.scale;
+  if (expected == null || scale == null || Math.abs(input.fps - expected) > 0.01) return false;
+  return Math.abs(input.lastEnd * scale - input.videoSeconds) <= CLEAR_FIX_SECONDS;
+}
+
+export function presetScale(id: string | null): number | null {
+  return TIMING_PRESETS.find((item) => item.id === id)?.scale ?? null;
+}
+
 export function formatClock(seconds: number): string {
   const time = split(seconds, 1000);
   return `${time.hours}:${pad(time.minutes)}:${pad(time.seconds)}.${pad(time.part, 3)}`;

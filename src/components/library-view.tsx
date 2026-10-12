@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/table";
 import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes, formatRating, formatRuntime, formatWhen, hdrText, playableText } from "@/lib/format";
 import { multiPartLabel } from "@/lib/media";
-import type { FilterRule } from "@/lib/filters";
+import { parseRules, type FilterRule } from "@/lib/filters";
 import { displayGenres, displayRating } from "@/lib/online";
 import { CONNECTOR_LABEL, type ConnectorId, type FileSources, type HdrLabel, type LibraryEpisode, type LibraryResponse, type LibraryTitle, type MediaVersion, type PlayableLabel, type TitleKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -281,7 +281,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const { epoch, bump, status } = useShell();
   const searchParams = useSearchParams();
   const [kind, setKind] = useState<KindFilter>("all");
-  const [rules, setRules] = useState<FilterRule[]>([]);
+  const [rules, setRules] = useState<FilterRule[]>(() => parseRules(searchParams.get("rules")));
   const [selected, setSelected] = useState<Map<string, SelectedRow>>(() => new Map());
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");

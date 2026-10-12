@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.183
+
+- Check every subtitle file's timing in the background during the language detection hours, show a subtitle that is longer or shorter than its video under a new Subtitle timing filter and preset, and optionally fix the clear cases (the subtitle runs past the video, the video's frame rate matches the fix, and the fixed last line ends within 10 seconds of the video) without asking.
+
 ## 0.0.182
 
 - Add Fix subtitle timing to the title drawer. It compares each SRT, VTT, ASS or SSA file with the video's real length, flags a subtitle that runs past the end or looks made for a 25 fps copy, and stretches, shrinks or shifts it by a frame rate preset or by where the first and last line should be. The original is kept as .metarr-orig and can be put back.

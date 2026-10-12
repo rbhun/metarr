@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import { detectionMap } from "@/lib/detect/store";
+import { TIMING_TABLE_SQL, timingKey, timingMap, type TrackTiming } from "@/lib/subtitle-check/store";
 import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
@@ -275,6 +276,7 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_merge_jobs_status ON merge_jobs(status, id);
   `);
+  db.exec(TIMING_TABLE_SQL);
   db.prepare(
     `UPDATE detect_jobs SET status = 'failed'
      WHERE status = 'done' AND (
@@ -1192,11 +1194,26 @@ type TitleRow = {
   versions_json: string | null;
 };
 
-function subtitles(videoPath: string | null, tracks: SubtitleTrack[], detections: Map<string, StoredDetection>): SubtitleTrack[] {
-  return overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections);
+type Overlays = { detections: Map<string, StoredDetection>; timing: Map<string, TrackTiming> };
+
+function overlays(db: Database.Database): Overlays {
+  return { detections: detectionMap(db), timing: timingMap(db) };
 }
 
-function audio(videoPath: string | null, tracks: AudioTrack[], detections: Map<string, StoredDetection>): AudioTrack[] {
+function withTiming(videoPath: string | null, tracks: SubtitleTrack[], timing: Map<string, TrackTiming>): SubtitleTrack[] {
+  if (!videoPath || timing.size === 0) return tracks;
+  return tracks.map((track) => {
+    if (track.placement !== "external" || !track.file) return track;
+    const found = timing.get(timingKey(videoPath, track.file));
+    return found ? { ...track, timing: found } : track;
+  });
+}
+
+function subtitles(videoPath: string | null, tracks: SubtitleTrack[], { detections, timing }: Overlays): SubtitleTrack[] {
+  return withTiming(videoPath, overlaySubtitles(videoPath, assignSidecars(videoPath, tracks, readSidecarNames(videoPath)), detections), timing);
+}
+
+function audio(videoPath: string | null, tracks: AudioTrack[], { detections }: Overlays): AudioTrack[] {
   return overlayAudio(videoPath, withAudioSidecars(videoPath, tracks), detections);
 }
 
@@ -1205,7 +1222,7 @@ function listedApp(kind: string, inRadarr: boolean, inSonarr: boolean): "radarr"
   return inRadarr ? "radarr" : null;
 }
 
-function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, detections: Map<string, StoredDetection>): LibraryTitle {
+function mapTitle(row: TitleRow, online: OnlineMeta | null, language: string, detections: Overlays): LibraryTitle {
   const path = row.path;
   const app = listedApp(row.kind, row.in_radarr === 1, row.in_sonarr === 1);
   const versions = parseVersions(row.versions_json).map((version) => ({
@@ -1370,7 +1387,7 @@ function libraryTitles(
   language: string,
   db: Database.Database,
 ): LibraryTitle[] {
-  const detections = detectionMap(db);
+  const detections = overlays(db);
   const titles = rows.map((row) => {
     const key = row.match_key || enrichmentKey({
       kind: row.kind === "series" ? "series" : "movie",
@@ -1461,7 +1478,7 @@ type EpisodeRow = {
 };
 
 export function queryEpisodes(catalogId: number, db = getDb()): LibraryEpisode[] {
-  const detections = detectionMap(db);
+  const detections = overlays(db);
   const language = titleLanguage(getMeta(db, "title_language"));
   const series = db.prepare(`SELECT match_key, kind, title, year, imdb_id, tmdb_id, tvdb_id FROM catalog_titles WHERE id = ?`).get(catalogId) as
     | { match_key: string | null; kind: string; title: string; year: number | null; imdb_id: string | null; tmdb_id: string | null; tvdb_id: string | null }

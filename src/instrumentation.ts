@@ -8,9 +8,11 @@ export async function register() {
   const { startRewrapWorker } = await import("@/lib/rewrap/worker");
   const { startMergeWorker } = await import("@/lib/merge/worker");
   const { startSyncWorker } = await import("@/lib/sync-worker");
+  const { startTimingWorker } = await import("@/lib/subtitle-check/worker");
   startDetectWorker();
   startRemuxWorker();
   startRewrapWorker();
   startMergeWorker();
   startSyncWorker();
+  startTimingWorker();
 }
