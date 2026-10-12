@@ -18,6 +18,7 @@ export const FILTER_FIELDS = [
   "playable",
   "stereo",
   "suspect",
+  "timing",
 ] as const;
 
 export type FilterField = (typeof FILTER_FIELDS)[number];
@@ -83,7 +84,9 @@ export function defaultRule(id: string, field: FilterField = "language"): Filter
                           ? "yes"
                           : field === "suspect"
                             ? "either"
-                            : "";
+                            : field === "timing"
+                              ? "off"
+                              : "";
   return { id, field, op, value };
 }
 
@@ -109,6 +112,12 @@ export function parseRules(raw: string | null): FilterRule[] {
     rules.push({ id, field, op, value });
   }
   return rules;
+}
+
+/** A subtitle timing check on the title's file, one of its versions, or one of its episodes. */
+function timingExists(condition: string): string {
+  const onFile = (table: string) => `(t.video_path = ${table}.path OR instr(IFNULL(${table}.versions_json, ''), json_quote(t.video_path)) > 0)`;
+  return `EXISTS (SELECT 1 FROM subtitle_timing t WHERE ${condition} AND (${onFile("catalog_titles")} OR EXISTS (SELECT 1 FROM catalog_episodes e WHERE e.catalog_id = catalog_titles.id AND ${onFile("e")})))`;
 }
 
 function likeToken(value: string): string | null {
@@ -385,6 +394,23 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
     if (rule.value === "either") {
       return { sql: `(${present} LIKE '%,sample,%' OR ${present} LIKE '%,short,%')`, params: [] };
     }
+  }
+
+  if (rule.field === "timing" && rule.op === "eq") {
+    const condition =
+      rule.value === "off"
+        ? "t.status IN ('longer', 'shorter')"
+        : rule.value === "longer"
+          ? "t.status = 'longer'"
+          : rule.value === "shorter"
+            ? "t.status = 'shorter'"
+            : rule.value === "retimed"
+              ? "t.retimed = 1"
+              : rule.value === "auto"
+                ? "t.auto_fixed_at IS NOT NULL"
+                : null;
+    if (!condition) return null;
+    return { sql: timingExists(condition), params: [] };
   }
 
   if (rule.field === "stereo" && rule.op === "eq") {

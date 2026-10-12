@@ -17,6 +17,28 @@ async function detectUnknown(tracks: ReturnType<typeof subtitleTargets>) {
   }
 }
 
+function TimingNote({ track }: { track: SubtitleTrack }) {
+  const timing = track.timing;
+  if (!timing) return null;
+  const off = timing.status === "longer" || timing.status === "shorter";
+  if (!off && !timing.retimed) return null;
+  const label = off
+    ? timing.status === "longer"
+      ? "runs past the video"
+      : "may stop early"
+    : timing.autoFixed
+      ? "retimed automatically"
+      : "retimed";
+  return (
+    <>
+      {" · "}
+      <SourceHover text={timing.message}>
+        <span className={off ? "text-amber-800 dark:text-amber-200" : "text-muted-foreground"}>{label}</span>
+      </SourceHover>
+    </>
+  );
+}
+
 export function SubtitleRows({
   tracks,
   languages,
@@ -55,6 +77,7 @@ export function SubtitleRows({
               </SourceHover>
             )}
             {rest ? ` · ${rest}` : ""}
+            <TimingNote track={track} />
           </p>
         );
       })}

@@ -5,6 +5,7 @@ import { enqueueDetection } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
 import { SubtitleRows } from "@/components/subtitle-rows";
+import { SubtitleTimingDialog } from "@/components/subtitle-timing";
 import { FileBrowserButton } from "@/components/file-browser-button";
 import { VersionDetail } from "@/components/versions";
 import { MediaPills } from "@/components/media-pills";
@@ -17,6 +18,7 @@ import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
 import { rewrapNow } from "@/components/rewrap-actions";
 import { needsRewrap } from "@/lib/rewrap/source";
+import { timingFormat } from "@/lib/subtitle-timing";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
@@ -62,6 +64,7 @@ export function TitleDetail({
   const [rescanBusy, setRescanBusy] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
+  const [timingOpen, setTimingOpen] = useState(false);
   const router = useRouter();
   async function detectNow() {
     if (!title) return;
@@ -180,6 +183,12 @@ export function TitleDetail({
   const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
   const knownPaths = file ? [file.path, ...file.versions.map((version) => version.path)] : [];
   const showRewrap = Boolean(title && (episode || title.kind === "movie") && needsRewrap(knownPaths));
+  const textSidecar = file
+    ? [...(file.subtitleTracks ?? []), ...file.versions.flatMap((version) => version.subtitleTracks)].some(
+        (track) => track.placement === "external" && track.file && timingFormat(track.file),
+      )
+    : false;
+  const showTiming = Boolean(title && (episode || title.kind === "movie") && textSidecar);
   async function rewrapFile() {
     if (!title) return;
     setConvertBusy(true);
@@ -263,6 +272,17 @@ export function TitleDetail({
                     title="Rename a file to Show - S01E07 - English title. The episode name is used even when the season or episode number in the file is wrong"
                   >
                     {renameBusy ? "Renaming…" : "Rename for Sonarr"}
+                  </Button>
+                ) : null}
+                {showTiming ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    onClick={() => setTimingOpen(true)}
+                    title="Compare each subtitle file with the video length, and stretch, shrink or shift one that runs longer or shorter than the video"
+                  >
+                    Fix subtitle timing
                   </Button>
                 ) : null}
                 {canConvert ? (
@@ -517,6 +537,9 @@ export function TitleDetail({
                 </Button>
               </div>
             </div>
+            {showTiming ? (
+              <SubtitleTimingDialog catalogId={title.id} episodeId={episode?.id ?? null} open={timingOpen} onOpenChange={setTimingOpen} />
+            ) : null}
           </>
         ) : null}
       </SheetContent>

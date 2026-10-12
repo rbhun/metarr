@@ -6,6 +6,7 @@ import { FolderScanCard } from "@/components/folder-scan-settings";
 import { MergeSettingsCard } from "@/components/merge-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
 import { RewrapSettingsCard } from "@/components/rewrap-settings";
+import { SubtitleTimingSettingsCard } from "@/components/subtitle-timing-settings";
 import { ScheduleSettings } from "@/components/schedule-settings";
 import { UpdateCard } from "@/components/update-card";
 import { Badge } from "@/components/ui/badge";
@@ -684,6 +685,7 @@ export function SettingsView() {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <DetectSettingsCard />
+          <SubtitleTimingSettingsCard />
           <RemuxSettingsCard />
           <RewrapSettingsCard />
           <MergeSettingsCard />

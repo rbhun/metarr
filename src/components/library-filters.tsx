@@ -34,6 +34,7 @@ const FIELD_LABEL: Record<FilterField, string> = {
   playable: "Playable",
   stereo: "3D",
   suspect: "Sample or short",
+  timing: "Subtitle timing",
 };
 
 const OP_LABEL: Record<FilterOp, string> = {
@@ -60,6 +61,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "Multi-part", rule: { field: "version", op: "eq", value: "split" } },
   { label: "Hungarian", rule: { field: "language", op: "includes", value: "Hungarian" } },
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
+  { label: "Subtitle timing off", rule: { field: "timing", op: "eq", value: "off" } },
 ];
 
 const selectClass =
@@ -198,6 +200,17 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
         <option value="either">sample or short</option>
         <option value="sample">named sample</option>
         <option value="short">suspiciously short</option>
+      </select>
+    );
+  }
+  if (rule.field === "timing") {
+    return (
+      <select className={selectClass} aria-label="Subtitle timing" value={rule.value} onChange={(event) => onChange(event.target.value)}>
+        <option value="off">longer or shorter than the video</option>
+        <option value="longer">runs past the video</option>
+        <option value="shorter">stops well before the end</option>
+        <option value="retimed">retimed by Metarr</option>
+        <option value="auto">fixed automatically</option>
       </select>
     );
   }

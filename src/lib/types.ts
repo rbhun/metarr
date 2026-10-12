@@ -1,3 +1,4 @@
+import type { TrackTiming } from "@/lib/subtitle-check/store";
 export const CONNECTORS = ["plex", "radarr", "sonarr", "bazarr", "files"] as const;
 
 export type ConnectorId = (typeof CONNECTORS)[number];
@@ -94,6 +95,8 @@ export type SubtitleTrack = {
   conflict?: string | null;
   sources?: TrackSources;
   copies?: Array<{ path: string; ordinal: number }>;
+  /** The last subtitle timing check of this file beside the video. */
+  timing?: TrackTiming;
 };
 
 export type MediaFile = {
