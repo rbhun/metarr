@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.184
+
+- Fill in missing packet timestamps when rewrapping a TS, so a broadcast recording with a cut no longer fails with "Can't write packet with unknown timestamp" after copying for a long time.
+
 ## 0.0.183
 
 - Check every subtitle file's timing in the background during the language detection hours, show a subtitle that is longer or shorter than its video under a new Subtitle timing filter and preset, and optionally fix the clear cases (the subtitle runs past the video, the video's frame rate matches the fix, and the fixed last line ends within 10 seconds of the video) without asking.

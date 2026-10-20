@@ -64,6 +64,8 @@ test("the rewrap copies every stream, unpacks Xvid B-frames, and puts the chosen
 
   const h264 = rewrapArgs("in.avi", "out.mkv", { duration: 10, streams: [{ index: 0, codecType: "video", codecName: "h264" }] }, { languages: [], firstLanguage: "Hungarian" });
   assert.doesNotMatch(h264.args.join(" "), /bsf/);
+  const ts = rewrapArgs("in.ts", "out.mkv", { duration: 10, streams: [{ index: 0, codecType: "video", codecName: "h264" }] }, { languages: [], firstLanguage: "", transport: true });
+  for (const kind of ["v", "a", "s"]) assert.ok(ts.args[ts.args.indexOf(`-bsf:${kind}`) + 1].startsWith("setts="), `a transport stream fills missing ${kind} timestamps`);
   assert.throws(() => rewrapArgs("in.avi", "out.mkv", { duration: 1, streams: [] }, { languages: [], firstLanguage: "" }), /no video/);
 });
 
@@ -426,6 +428,58 @@ test("a real M2TS with Blu-ray PCM rewraps into an MKV with languages", { skip: 
         ["ac3", "spa"],
       ],
     );
+    assert.ok(fs.existsSync(source));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** Clears the PTS/DTS of video PES packets `from` to `to`, like a broadcast recording cut. */
+function stripVideoTimestamps(file: string, from: number, to: number): number {
+  const data = fs.readFileSync(file);
+  let pes = 0;
+  let stripped = 0;
+  for (let offset = 0; offset + 188 <= data.length; offset += 188) {
+    if (data[offset] !== 0x47 || !(data[offset + 1] & 0x40)) continue;
+    let payload = offset + 4;
+    if (data[offset + 3] & 0x20) payload += 1 + data[offset + 4];
+    if (data[payload] !== 0 || data[payload + 1] !== 0 || data[payload + 2] !== 1 || (data[payload + 3] & 0xf0) !== 0xe0) continue;
+    if (pes >= from && pes <= to && data[payload + 7] & 0xc0) {
+      data[payload + 7] &= 0x3f;
+      stripped += 1;
+    }
+    pes += 1;
+  }
+  fs.writeFileSync(file, data);
+  return stripped;
+}
+
+const hasX264 = hasFfmpeg && execFileSync("ffmpeg", ["-v", "error", "-encoders"]).toString().includes("libx264");
+
+test("a real TS with packets missing their timestamps still rewraps into a whole MKV", { skip: !hasX264 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-nopts-"));
+  try {
+    const source = path.join(root, "Recording.ts");
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=6",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=6:sample_rate=48000",
+      "-c:v", "libx264", "-preset", "ultrafast", "-bf", "2", "-g", "25", "-c:a", "mp2",
+      source,
+    ]);
+    assert.equal(stripVideoTimestamps(source, 60, 64), 5);
+    const message = await rewrapAvi({
+      source,
+      workDir: path.join(root, "work", "job-1"),
+      languages: [],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    assert.match(message, /Saved Recording\.mkv/);
+    const frames = execFileSync("ffprobe", [
+      "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path.join(root, "Recording.mkv"),
+    ]).toString();
+    assert.equal(Number.parseInt(frames, 10), 150);
     assert.ok(fs.existsSync(source));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

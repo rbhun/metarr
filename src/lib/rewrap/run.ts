@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { languageCode } from "@/lib/media";
-import { joinedTarget, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
@@ -15,6 +15,13 @@ const PROBE_TIMEOUT_MS = 60_000;
  * keeps the whole movie in memory, and a 50 GB file is killed. 10 seconds is ffmpeg's own default.
  */
 const INTERLEAVE_US = 10_000_000;
+/**
+ * Broadcast recordings often hold a few packets with no timestamp at a cut, and Matroska refuses
+ * them ("Can't write packet with unknown timestamp") after hours of copying. This fills a missing
+ * timestamp from the packet before; packets that have one pass through unchanged.
+ */
+const FILL_DTS = "if(eq(DTS,NOPTS),if(eq(PREV_OUTDTS,NOPTS),NOPTS,PREV_OUTDTS+max(max(DURATION,PREV_OUTDURATION),0.001/TB)),DTS)";
+const FILL_TIMESTAMPS = `setts=dts='${FILL_DTS}':pts='if(eq(PTS,NOPTS),${FILL_DTS},PTS)'`;
 /** Subtitle formats Matroska can hold as they are. */
 const MKV_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "dvd_subtitle", "text", "hdmv_pgs_subtitle", "dvb_subtitle"]);
 /** Blu-ray PCM has no Matroska mapping; FLAC keeps it lossless. */
@@ -43,7 +50,14 @@ export function rewrapArgs(
   input: string,
   output: string,
   probe: Probe,
-  options: { languages: Array<string | null>; subtitleLanguages?: Array<string | null>; firstLanguage: string; concat?: boolean },
+  options: {
+    languages: Array<string | null>;
+    subtitleLanguages?: Array<string | null>;
+    firstLanguage: string;
+    concat?: boolean;
+    /** The source is an MPEG transport stream (.ts, .m2ts, .mts). */
+    transport?: boolean;
+  },
 ): { args: string[]; video: number; audio: number; subtitles: number; firstMoved: boolean; converted: number } {
   const video = probe.streams.filter((stream) => stream.codecType === "video");
   const audio = probe.streams
@@ -65,6 +79,7 @@ export function rewrapArgs(
   for (const item of ordered) args.push("-map", `0:${item.stream.index}`);
   for (const item of subtitles) args.push("-map", `0:${item.stream.index}`);
   args.push("-c", "copy", "-map_metadata", "0", "-max_interleave_delta", String(INTERLEAVE_US));
+  if (options.transport) args.push("-bsf:v", FILL_TIMESTAMPS, "-bsf:a", FILL_TIMESTAMPS, "-bsf:s", FILL_TIMESTAMPS);
   video.forEach((stream, position) => {
     // Xvid/DivX "packed B-frames" stutter in Matroska unless they are unpacked.
     if (stream.codecName === "mpeg4") args.push(`-bsf:v:${position}`, "mpeg4_unpack_bframes");
@@ -232,6 +247,7 @@ export async function rewrapAvi(options: {
     subtitleLanguages: options.subtitleLanguages,
     firstLanguage: options.firstLanguage,
     concat: joining,
+    transport: rewrapFamily(source) === "ts",
   });
   const tracks = [plural(plan.video, "video stream"), plural(plan.audio, "audio track"), plan.subtitles ? plural(plan.subtitles, "subtitle") : null]
     .filter(Boolean)
