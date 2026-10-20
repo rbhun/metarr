@@ -4,6 +4,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
+import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { planRemuxFiles, safeBaseName } from "@/lib/remux/place";
 import { formatBytes } from "@/lib/format";
 import { mainTitle, parseDiscTitles, progressPercent, type DiscTitle } from "@/lib/remux/robot";
@@ -216,12 +217,17 @@ function runMakeMkv(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       reject(error);
     };
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       fail(new Error("MakeMKV ran longer than 6 hours and was stopped."));
     }, RIP_TIMEOUT_MS);
+    const unwatch = watchStall(child.pid, "MakeMKV", (error) => {
+      child.kill("SIGKILL");
+      fail(error);
+    });
     const stdout = readline.createInterface({ input: child.stdout });
     stdout.on("line", (line) => {
       if (!PROGRESS.test(line)) keep(`${line}\n`);
@@ -250,6 +256,7 @@ function runMakeMkv(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       if (code === 0) resolve(output);
       else if (code === 127) {
         reject(new Error(`${binary} was not found where Metarr runs. Rebuild the Docker image (it includes MakeMKV), or set the full path in Settings → Disc remux.`));
@@ -291,7 +298,7 @@ export async function ripDisc(options: {
     const others = extras && titles.length > 1 ? ` and ${titles.length - 1} other titles as -other files` : "";
     return `Dry run: would remux ${titleName(main)}, ${clock(main.seconds)}, ${formatBytes(main.bytes)}${others} into ${target}, keeping every audio and subtitle track. Nothing was written.`;
   }
-  fs.rmSync(workDir, { recursive: true, force: true });
+  removeWorkDir(workDir);
   fs.mkdirSync(workDir, { recursive: true });
   try {
     const which = extras ? "all" : String(main.index);
@@ -318,6 +325,6 @@ export async function ripDisc(options: {
     const count = plan.extras.length === 1 ? "1 extra" : `${plan.extras.length} extras`;
     return `Saved ${movie} ${from}, and ${count}. The disc was left in place.`;
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeWorkDir(workDir);
   }
 }

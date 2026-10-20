@@ -22,6 +22,7 @@ import {
   writeRemuxPause,
 } from "@/lib/remux/store";
 import { getDb } from "@/lib/db";
+import { removeWorkDir, stuckTools } from "@/lib/stuck";
 import { startSync } from "@/lib/sync";
 
 /** Plex and Radarr/Sonarr rescan the folder first; the library sync then reads the new MKV. */
@@ -56,6 +57,7 @@ function existsMedia(candidate: string): boolean {
 }
 
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   const settings = readRemuxSettings(db);
   const urgent = hasImmediateRemux(db);
@@ -137,7 +139,7 @@ async function step() {
     finishRemux(db, job.id, "done", [message, told].filter(Boolean).join(" "));
     if (!rehearsal) syncSoon();
   } catch (caught) {
-    if (workDir.current) fs.rmSync(workDir.current, { recursive: true, force: true });
+    if (workDir.current) removeWorkDir(workDir.current);
     finishRemux(db, job.id, "failed", friendlyFsError(caught, "Remux failed."));
   }
 }

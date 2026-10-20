@@ -25,6 +25,7 @@ import {
   writeRewrapPause,
 } from "@/lib/rewrap/store";
 import { scratchRoot } from "@/lib/scratch";
+import { removeWorkDir, stuckTools } from "@/lib/stuck";
 import { startSync } from "@/lib/sync";
 
 const SYNC_AFTER_MS = 2 * 60 * 1000;
@@ -105,6 +106,7 @@ function waiting(db: ReturnType<typeof getDb>): boolean {
 }
 
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   const settings = readRewrapSettings(db);
   const urgent = hasImmediateRewrap(db);
@@ -212,7 +214,7 @@ async function step() {
     finishRewrap(db, job.id, "done", [message, told].filter(Boolean).join(" "));
     if (!rehearsal) syncSoon();
   } catch (caught) {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeWorkDir(workDir);
     finishRewrap(db, job.id, "failed", sourceText(friendlyFsError(caught, "Rewrap failed."), sourceKind(job.path)));
   }
 }

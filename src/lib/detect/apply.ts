@@ -7,6 +7,7 @@ import { deliverFile } from "@/lib/deliver";
 import { dryRun } from "@/lib/dry-run";
 import { idle } from "@/lib/idle";
 import { scratchRoot } from "@/lib/scratch";
+import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { canRewrap } from "@/lib/rewrap/source";
@@ -34,7 +35,11 @@ type WriteJob = {
 function runTool(command: string, args: string[], timeout: number, allowWarning = false): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const low = idle(command, args);
-    execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    let settled = false;
+    const child = execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+      unwatch();
+      if (settled) return;
+      settled = true;
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       const code = error ? (error as { code?: string | number }).code : undefined;
@@ -48,6 +53,12 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
       if (missing) reject(new Error(`${command} is not installed, so the file was left unchanged.`));
       else if (timedOut) reject(new Error(`${command} timed out, so the file was left unchanged.`));
       else reject(new Error(commandFailureText(command, out, err)));
+    });
+    const unwatch = watchStall(child.pid, command, (error) => {
+      child.kill("SIGKILL");
+      if (settled) return;
+      settled = true;
+      reject(error);
     });
   });
 }
@@ -152,7 +163,7 @@ async function deliverCopy(
     deliverFile(temp, target, { replace: target === source, mode: (fs.statSync(source).mode & 0o777) | 0o660 });
     if (removeSource && target !== source) fs.rmSync(source, { force: true });
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    removeWorkDir(scratch);
   }
 }
 

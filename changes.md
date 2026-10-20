@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.186
+
+- Notice a tool stuck waiting on the NAS. When ffmpeg or MakeMKV sits in uninterruptible disk wait for 10 minutes with no bytes moving, the task fails with what to do (restart the NFS server on the NAS or reboot), no new work starts, its scratch files are left alone so Metarr cannot hang on them too, and Tasks says why everything is waiting. Work carries on by itself once the stuck process is gone. Before, a retag stuck this way blocked language checks for days without a word.
+
 ## 0.0.185
 
 - Say plainly when the MakeMKV beta key has expired or no valid key is set: MakeMKV then does not start at all, for DVDs too, and the task links the page where the new beta key is posted.

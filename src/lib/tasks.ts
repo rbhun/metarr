@@ -4,6 +4,7 @@ import { listMergeJobs, mergeTotals, readMergePause, type MergeJobStatus, type M
 import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
 import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
+import { stuckTools, stuckWaiting } from "@/lib/stuck";
 import { titleIdForPath } from "@/lib/title-link";
 
 export type TaskQueue = "language" | "remux" | "rewrap" | "merge";
@@ -39,6 +40,12 @@ const WAITING: Record<RemuxPause | RewrapPause | DetectPause | MergePause, strin
   off: "Waiting: switched off in Settings",
   write: "Waiting: writing a language into a file",
 };
+
+function waitingText(pause: RemuxPause | RewrapPause | DetectPause | MergePause | null): string | null {
+  const stuck = stuckTools();
+  if (stuck.length) return stuckWaiting(stuck);
+  return pause ? WAITING[pause] : null;
+}
 
 export type TaskTotals = {
   pending: number;
@@ -101,7 +108,7 @@ function mapDetect(status: DetectJobStatus | null, page: number, pageSize: numbe
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `language:${job.id}`,
-      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
+      waiting: job.status === "pending" ? waitingText(pause) : null,
       queue: "language" as const,
       id: job.id,
       path: job.path,
@@ -127,7 +134,7 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `remux:${job.id}`,
-      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
+      waiting: job.status === "pending" ? waitingText(pause) : null,
       queue: "remux" as const,
       id: job.id,
       path: job.path,
@@ -151,7 +158,7 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `rewrap:${job.id}`,
-      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
+      waiting: job.status === "pending" ? waitingText(pause) : null,
       queue: "rewrap" as const,
       id: job.id,
       path: job.path,
@@ -175,7 +182,7 @@ function mapMerge(status: MergeJobStatus | null, page: number, pageSize: number,
     total: list.total,
     jobs: list.jobs.map((job) => ({
       key: `merge:${job.id}`,
-      waiting: job.status === "pending" && pause ? WAITING[pause] : null,
+      waiting: job.status === "pending" ? waitingText(pause) : null,
       queue: "merge" as const,
       id: job.id,
       path: job.videoPath,

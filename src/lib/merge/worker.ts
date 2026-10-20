@@ -20,6 +20,7 @@ import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/
 import { remuxIsRunning } from "@/lib/remux/store";
 import { rewrapIsRunning } from "@/lib/rewrap/store";
 import { scratchRoot } from "@/lib/scratch";
+import { removeWorkDir, stuckTools } from "@/lib/stuck";
 import { startSync } from "@/lib/sync";
 
 const SYNC_AFTER_MS = 2 * 60 * 1000;
@@ -72,6 +73,7 @@ function waiting(db: ReturnType<typeof getDb>): boolean {
 }
 
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   const settings = readMergeSettings(db);
   if (!settings.enabled) {
@@ -154,7 +156,7 @@ async function step() {
     finishMerge(db, job.id, "done", [message, told].filter(Boolean).join(" "));
     if (!rehearsal) syncSoon();
   } catch (caught) {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeWorkDir(workDir);
     finishMerge(db, job.id, "failed", friendlyFsError(caught, "Version merge failed."));
   }
 }

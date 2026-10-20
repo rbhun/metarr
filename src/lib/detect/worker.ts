@@ -31,6 +31,7 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { rewrapIsRunning } from "@/lib/rewrap/store";
 import { mergeIsRunning } from "@/lib/merge/store";
 import { getDb } from "@/lib/db";
+import { stuckTools } from "@/lib/stuck";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
 
@@ -53,6 +54,7 @@ async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<t
 }
 
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   applyTimeZone(db);
   const settings = readDetectSettings(db);

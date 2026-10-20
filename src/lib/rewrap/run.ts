@@ -4,6 +4,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
+import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { languageCode } from "@/lib/media";
 import { joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 
@@ -125,12 +126,17 @@ function runTool(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       reject(error);
     };
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
     }, timeoutMs);
+    const unwatch = watchStall(child.pid, command, (error) => {
+      child.kill("SIGKILL");
+      fail(error);
+    });
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       stdout = `${stdout}${line}\n`.slice(-500_000);
       onLine(line);
@@ -146,6 +152,7 @@ function runTool(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       if (code === 0) {
         resolve(stdout);
         return;
@@ -260,7 +267,7 @@ export async function rewrapAvi(options: {
     return `Dry run: would ${action} ${tracks} into ${target} without re-encoding.${moved}${flac} Nothing was written.`;
   }
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the ${kind}.`);
-  fs.rmSync(workDir, { recursive: true, force: true });
+  removeWorkDir(workDir);
   fs.mkdirSync(workDir, { recursive: true });
   try {
     if (joining) fs.writeFileSync(listPath, concatList(sources));
@@ -281,6 +288,6 @@ export async function rewrapAvi(options: {
     const left = joining ? `The ${kind} files were left in place.` : `The ${kind} was left in place.`;
     return `Saved ${name} with ${tracks}.${joined}${moved}${flac} ${left}`;
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeWorkDir(workDir);
   }
 }
