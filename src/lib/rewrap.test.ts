@@ -110,7 +110,7 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.equal(enqueueRewraps(db, [{ path: "/m/Film.avi" }], true).already, 1);
   assert.equal(hasImmediateRewrap(db), true);
   const first = claimNextRewrap(db, true);
-  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [] });
+  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", mode: "rewrap", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [] });
   finishRewrap(db, first!.id, "done", "Saved Film.mkv.");
   const old = claimNextRewrap(db);
   assert.equal(old?.label, "Old.avi");

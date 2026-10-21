@@ -15,7 +15,7 @@ function versionKey(version: MediaVersion, index: number): string {
 }
 
 function versionHeading(version: MediaVersion): string {
-  return [hdrText(version.hdr), version.qualityName, version.bitrateKbps ? formatBitrate(version.bitrateKbps) : null]
+  return [hdrText(version.hdr, version.doviProfile), version.qualityName, version.bitrateKbps ? formatBitrate(version.bitrateKbps) : null]
     .filter(Boolean)
     .join(" · ");
 }
@@ -49,7 +49,7 @@ export function VersionAudio({ versions }: { versions: MediaVersion[] }) {
     <LineScroll className="space-y-1.5">
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
-          <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr), version.edition].filter(Boolean).join(" · ")}</p>
+          <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr, version.doviProfile), version.edition].filter(Boolean).join(" · ")}</p>
           <AudioTracks tracks={version.audioTracks} languages={version.audioLanguages} path={version.path} label={version.name} scroll={false} />
         </div>
       ))}
@@ -62,7 +62,7 @@ export function VersionSubtitles({ versions }: { versions: MediaVersion[] }) {
     <LineScroll className="space-y-1.5">
       {versions.map((version, index) => (
         <div key={versionKey(version, index)}>
-          <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr), version.edition].filter(Boolean).join(" · ")}</p>
+          <p className="text-[10px] text-muted-foreground">{[version.resolution, hdrText(version.hdr, version.doviProfile), version.edition].filter(Boolean).join(" · ")}</p>
           <SubtitleRows tracks={version.subtitleTracks} languages={version.subtitleLanguages} path={version.path} label={version.name} />
         </div>
       ))}

@@ -1,6 +1,6 @@
 import { clampHour } from "@/lib/detect/schedule";
 import { getDb } from "@/lib/db";
-import { libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
+import { doviItemsForSelection, libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
 import { canRewrap, rewrapSplit } from "@/lib/rewrap/source";
 import {
   activeRewrap,
@@ -67,6 +67,12 @@ export async function POST(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
+  if (record.mode === "dovi") {
+    const items = doviItemsForSelection(db, idList(record.titles), idList(record.episodes));
+    const result = enqueueRewraps(db, items, record.immediate === true);
+    kickRewrapWorker();
+    return NextResponse.json({ ...result, skipped: 0, totals: rewrapTotals(db) });
+  }
   const pasted = itemList(record.paths);
   const library = pasted.length ? libraryAvis(db) : new Map<string, RewrapItem>();
   const items: RewrapItem[] = [

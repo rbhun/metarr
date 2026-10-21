@@ -7,7 +7,7 @@ import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { toastRemux } from "@/components/remux-tasks";
-import { rewrapNow } from "@/components/rewrap-actions";
+import { doviNow, rewrapNow } from "@/components/rewrap-actions";
 import { RemuxStatus } from "@/components/remux-status";
 import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
@@ -575,7 +575,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
-  async function rewrapSelected() {
+  async function rewrapSelected(mode: "rewrap" | "dovi" = "rewrap") {
     const titles: number[] = [];
     const episodes: number[] = [];
     for (const row of selected.values()) {
@@ -586,7 +586,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
     setRewrapBusy(true);
     try {
-      toastRemux(await rewrapNow(titles, episodes), "rewrap");
+      toastRemux(await (mode === "dovi" ? doviNow : rewrapNow)(titles, episodes), "rewrap");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
     } finally {
@@ -738,6 +738,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             </Button>
             <Button size="sm" variant="outline" disabled={rewrapBusy} onClick={() => void rewrapSelected()} title="Copy each selected AVI or loose M2TS into an MKV beside it, without re-encoding">
               {rewrapBusy ? "Starting…" : "Rewrap to MKV"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={rewrapBusy}
+              onClick={() => void rewrapSelected("dovi")}
+              title="Write a Dolby Vision 8.1 copy, which the Apple TV plays, beside each selected profile 7 file. The originals stay"
+            >
+              Convert DV7 to 8.1
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear

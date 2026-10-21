@@ -13,8 +13,12 @@ export type RewrapSettings = {
   firstLanguage: string;
 };
 
+/** `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV beside a profile 7 file. */
+export type RewrapMode = "rewrap" | "dovi";
+
 export type RewrapItem = {
   path: string;
+  mode?: RewrapMode;
   label?: string;
   /** Known language per audio track, in file order; null where unknown. */
   languages?: Array<string | null>;
@@ -25,6 +29,7 @@ export type RewrapItem = {
 export type RewrapJob = {
   id: number;
   path: string;
+  mode: RewrapMode;
   label: string;
   languages: Array<string | null>;
   subtitleLanguages: Array<string | null>;
@@ -35,6 +40,7 @@ export type RewrapJobStatus = "pending" | "running" | "done" | "failed";
 export type RewrapJobView = {
   id: number;
   path: string;
+  mode: RewrapMode;
   label: string;
   status: RewrapJobStatus;
   message: string | null;
@@ -49,6 +55,7 @@ export type RewrapTotals = { pending: number; running: number; done: number; fai
 type JobRow = {
   id: number;
   path: string;
+  mode: string | null;
   label: string;
   languages: string;
   immediate: number;
@@ -61,6 +68,10 @@ type JobRow = {
 };
 
 const DEFAULT_FIRST_LANGUAGE = "Hungarian";
+
+function modeOf(value: unknown): RewrapMode {
+  return value === "dovi" ? "dovi" : "rewrap";
+}
 
 function meta(db: Database.Database, key: string): string | null {
   const row = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(key) as { value: string } | undefined;
@@ -118,10 +129,12 @@ export type RewrapEnqueueResult = { added: number; already: number; promoted: nu
 
 /** `immediate` jobs skip the schedule window and the busy pauses; a waiting job for the same file is moved up. */
 export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immediate = false): RewrapEnqueueResult {
-  const existing = db.prepare(`SELECT status, immediate FROM rewrap_jobs WHERE path = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`);
-  const promote = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE path = ? AND status = 'pending'`);
+  const existing = db.prepare(
+    `SELECT status, immediate FROM rewrap_jobs WHERE path = ? AND mode = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`,
+  );
+  const promote = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE path = ? AND mode = ? AND status = 'pending'`);
   const insert = db.prepare(
-    `INSERT INTO rewrap_jobs (path, label, languages, immediate, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
   );
   const now = new Date().toISOString();
   let added = 0;
@@ -131,12 +144,14 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   const write = db.transaction(() => {
     for (const item of items) {
       const filePath = item.path.trim();
-      if (!filePath || seen.has(filePath)) continue;
-      seen.add(filePath);
-      const row = existing.get(filePath) as { status: string; immediate: number } | undefined;
+      const mode = modeOf(item.mode);
+      const key = `${mode}:${filePath}`;
+      if (!filePath || seen.has(key)) continue;
+      seen.add(key);
+      const row = existing.get(filePath, mode) as { status: string; immediate: number } | undefined;
       if (row) {
         if (immediate && row.status === "pending" && row.immediate !== 1) {
-          promote.run(filePath);
+          promote.run(filePath, mode);
           promoted += 1;
         } else {
           already += 1;
@@ -147,7 +162,7 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
       const languages = item.subtitleLanguages?.length
         ? { audio: item.languages ?? [], subtitles: item.subtitleLanguages }
         : (item.languages ?? []);
-      insert.run(filePath, label, JSON.stringify(languages), immediate ? 1 : 0, now);
+      insert.run(filePath, mode, label, JSON.stringify(languages), immediate ? 1 : 0, now);
       added += 1;
     }
   });
@@ -187,7 +202,7 @@ export function claimNextRewrap(db: Database.Database, onlyImmediate = false): R
     .run(new Date().toISOString(), row.id);
   if (changed.changes !== 1) return null;
   const languages = parseLanguages(row.languages);
-  return { id: row.id, path: row.path, label: row.label, languages: languages.audio, subtitleLanguages: languages.subtitles };
+  return { id: row.id, path: row.path, mode: modeOf(row.mode), label: row.label, languages: languages.audio, subtitleLanguages: languages.subtitles };
 }
 
 export function updateRewrapProgress(db: Database.Database, id: number, progress: number, message: string) {
@@ -199,10 +214,10 @@ export function settleSplitRewraps(db: Database.Database, paths: string[], messa
   const wanted = new Set(paths.map((item) => item.toLowerCase()));
   const now = new Date().toISOString();
   const text = message.trim().slice(0, 1000);
-  const pending = db.prepare(`SELECT id, path FROM rewrap_jobs WHERE status = 'pending'`).all() as Array<{ id: number; path: string }>;
+  const pending = db.prepare(`SELECT id, path FROM rewrap_jobs WHERE status = 'pending' AND mode = 'rewrap'`).all() as Array<{ id: number; path: string }>;
   const mark = db.prepare(`UPDATE rewrap_jobs SET status = 'done', message = ?, progress = NULL, finished_at = ? WHERE id = ? AND status = 'pending'`);
   const existing = db.prepare(
-    `SELECT 1 AS ok FROM rewrap_jobs WHERE lower(path) = lower(?) AND status IN ('pending', 'running', 'done') LIMIT 1`,
+    `SELECT 1 AS ok FROM rewrap_jobs WHERE lower(path) = lower(?) AND mode = 'rewrap' AND status IN ('pending', 'running', 'done') LIMIT 1`,
   );
   const insert = db.prepare(
     `INSERT INTO rewrap_jobs (path, label, languages, immediate, status, message, created_at, finished_at) VALUES (?, ?, '[]', 0, 'done', ?, ?, ?)`,
@@ -227,9 +242,11 @@ export function finishRewrap(db: Database.Database, id: number, status: "done" |
 }
 
 export function retryFailedRewrap(db: Database.Database, id: number): "retried" | "missing" | "already" {
-  const row = db.prepare(`SELECT path, status FROM rewrap_jobs WHERE id = ?`).get(id) as { path: string; status: string } | undefined;
+  const row = db.prepare(`SELECT path, mode, status FROM rewrap_jobs WHERE id = ?`).get(id) as { path: string; mode: string; status: string } | undefined;
   if (!row || row.status !== "failed") return "missing";
-  const busy = db.prepare(`SELECT 1 AS ok FROM rewrap_jobs WHERE path = ? AND status IN ('pending', 'running') AND id != ?`).get(row.path, id);
+  const busy = db
+    .prepare(`SELECT 1 AS ok FROM rewrap_jobs WHERE path = ? AND mode = ? AND status IN ('pending', 'running') AND id != ?`)
+    .get(row.path, row.mode, id);
   if (busy) {
     db.prepare(`DELETE FROM rewrap_jobs WHERE id = ? AND status = 'failed'`).run(id);
     return "already";
@@ -246,16 +263,20 @@ export function retryAllFailedRewrap(db: Database.Database): number {
     db.prepare(
       `DELETE FROM rewrap_jobs
        WHERE status = 'failed'
-         AND EXISTS (SELECT 1 FROM rewrap_jobs AS other WHERE other.path = rewrap_jobs.path AND other.status IN ('pending', 'running'))`,
+         AND EXISTS (
+           SELECT 1 FROM rewrap_jobs AS other
+           WHERE other.path = rewrap_jobs.path AND other.mode = rewrap_jobs.mode AND other.status IN ('pending', 'running')
+         )`,
     ).run();
     return db
       .prepare(
         `UPDATE rewrap_jobs
          SET status = 'pending', message = NULL, progress = NULL, started_at = NULL, finished_at = NULL
-         WHERE id IN (SELECT MAX(id) FROM rewrap_jobs WHERE status = 'failed' GROUP BY path)
+         WHERE id IN (SELECT MAX(id) FROM rewrap_jobs WHERE status = 'failed' GROUP BY path, mode)
            AND NOT EXISTS (
              SELECT 1 FROM rewrap_jobs AS other
              WHERE other.path = rewrap_jobs.path
+               AND other.mode = rewrap_jobs.mode
                AND other.status IN ('pending', 'running', 'done')
            )`,
       )
@@ -291,7 +312,7 @@ export function removeRewrapJob(db: Database.Database, id: number): boolean {
 
 export function finishedRewrapPaths(db: Database.Database): Set<string> {
   const rows = db
-    .prepare(`SELECT path FROM rewrap_jobs WHERE status = 'done' AND (message IS NULL OR message NOT LIKE 'Dry run:%')`)
+    .prepare(`SELECT path FROM rewrap_jobs WHERE status = 'done' AND mode = 'rewrap' AND (message IS NULL OR message NOT LIKE 'Dry run:%')`)
     .all() as Array<{ path: string }>;
   return new Set(rows.map((row) => row.path));
 }
@@ -315,6 +336,7 @@ function mapView(row: JobRow): RewrapJobView {
   return {
     id: row.id,
     path: row.path,
+    mode: modeOf(row.mode),
     label: row.label,
     status: row.status as RewrapJobStatus,
     message: row.message,

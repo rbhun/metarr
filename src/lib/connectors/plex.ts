@@ -6,6 +6,7 @@ import {
   knownLanguage,
   languageName,
   detectHdr,
+  doviProfileOf,
   normalizeContentRating,
   formatAspect,
   formatFrameRate,
@@ -233,6 +234,7 @@ function mediaFiles(item: Record<string, unknown>, title: string): MediaFile[] {
           video?.DVProfile ? "Dolby Vision" : "",
           video?.hdr ? "HDR" : "",
         ]),
+        doviProfile: doviProfileOf(video?.DOVIProfile ?? video?.doviProfile ?? video?.DVProfile),
         is3d: detect3d([
           title,
           filePath,

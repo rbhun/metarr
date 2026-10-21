@@ -3,6 +3,7 @@ import { filesForLibrary, filesForSelection } from "@/lib/detect/files";
 import type { ScanFile } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
+import { doviTarget } from "@/lib/dovi/run";
 import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
@@ -142,6 +143,21 @@ export function rewrapItemsForSelection(db: Database.Database, titles: number[],
         continue;
       }
       if (!rewrappedPathFor(lead.path, paths)) items.push(lead);
+    }
+  }
+  return items;
+}
+
+/** Dolby Vision profile 7 files on the chosen titles or episodes that have no `.DV8.mkv` beside them yet. */
+export function doviItemsForSelection(db: Database.Database, titles: number[], episodes: number[]): RewrapItem[] {
+  const items: RewrapItem[] = [];
+  for (const file of filesForSelection(db, titles, episodes)) {
+    const paths = knownPaths(file);
+    for (const version of file.versions) {
+      if (version.doviProfile !== 7 || !version.path) continue;
+      if (items.some((item) => item.path === version.path)) continue;
+      if (paths.some((item) => samePath(item, doviTarget(version.path!)))) continue;
+      items.push({ path: version.path, label: file.label, mode: "dovi" });
     }
   }
   return items;

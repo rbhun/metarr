@@ -105,6 +105,8 @@ export type MediaFile = {
   qualityName: string | null;
   resolution: string | null;
   hdr: HdrLabel;
+  /** Dolby Vision profile (5, 7, 8…) when the file carries Dolby Vision. */
+  doviProfile?: number | null;
   is3d: boolean;
   audioLanguages: string[];
   subtitleLanguages: string[];
@@ -150,6 +152,7 @@ export type MediaVersion = {
   container: string | null;
   resolution: string | null;
   hdr: HdrLabel;
+  doviProfile?: number | null;
   is3d: boolean;
   qualityName: string | null;
   bitrateKbps: number | null;
