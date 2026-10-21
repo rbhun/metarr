@@ -16,7 +16,7 @@ import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes,
 import { isDiscImage, multiPartLabel } from "@/lib/media";
 import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
-import { rewrapNow } from "@/components/rewrap-actions";
+import { doviNow, rewrapNow } from "@/components/rewrap-actions";
 import { needsRewrap } from "@/lib/rewrap/source";
 import { timingFormat } from "@/lib/subtitle-timing";
 import { displayGenres, displayRating } from "@/lib/online";
@@ -183,6 +183,12 @@ export function TitleDetail({
   const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
   const knownPaths = file ? [file.path, ...file.versions.map((version) => version.path)] : [];
   const showRewrap = Boolean(title && (episode || title.kind === "movie") && needsRewrap(knownPaths));
+  const showDovi = Boolean(
+    title &&
+      (episode || title.kind === "movie") &&
+      file?.versions.some((version) => version.doviProfile === 7) &&
+      !file.versions.some((version) => /\.DV8\.mkv$/i.test(version.path ?? "")),
+  );
   const textSidecar = file
     ? [...(file.subtitleTracks ?? []), ...file.versions.flatMap((version) => version.subtitleTracks)].some(
         (track) => track.placement === "external" && track.file && timingFormat(track.file),
@@ -198,6 +204,19 @@ export function TitleDetail({
       });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
+    } finally {
+      setConvertBusy(false);
+    }
+  }
+  async function convertDovi() {
+    if (!title) return;
+    setConvertBusy(true);
+    try {
+      toast.success(await doviNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
+        action: { label: "Tasks", onClick: () => router.push("/tasks?queue=rewrap&status=all") },
+      });
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start the conversion.");
     } finally {
       setConvertBusy(false);
     }
@@ -295,6 +314,17 @@ export function TitleDetail({
                     {convertBusy ? "Starting…" : "Rewrap to MKV"}
                   </Button>
                 ) : null}
+                {showDovi ? (
+                  <Button
+                    size="sm"
+                    className="w-fit"
+                    disabled={convertBusy}
+                    onClick={() => void convertDovi()}
+                    title="Write a copy with Dolby Vision 8.1, which the Apple TV plays, beside the profile 7 file. The picture is not re-encoded and the original stays"
+                  >
+                    {convertBusy ? "Starting…" : "Convert DV7 to 8.1"}
+                  </Button>
+                ) : null}
               </div>
             </SheetHeader>
             <div className="flex gap-4 px-4">
@@ -389,7 +419,7 @@ export function TitleDetail({
                   <dd>
                     {file?.is3d ? "3D · " : ""}
                     {file && file.versions.length > 1
-                      ? [...new Set(file.versions.map((version) => hdrText(version.hdr)))].join(", ")
+                      ? [...new Set(file.versions.map((version) => hdrText(version.hdr, version.doviProfile)))].join(", ")
                       : hdrText(file?.hdr ?? "none")}
                   </dd>
                 </div>

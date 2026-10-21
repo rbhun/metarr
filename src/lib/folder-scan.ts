@@ -9,9 +9,9 @@ import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
 import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
-import { bonusFlag, fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
+import { bonusFlag, doviProfileOf, fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
-import type { AudioTrack, SourceDraft, SubtitleTrack } from "@/lib/types";
+import type { AudioTrack, HdrLabel, SourceDraft, SubtitleTrack } from "@/lib/types";
 import type { ProgressUpdate } from "@/lib/connectors/http";
 import { throwIfSyncCancelled } from "@/lib/sync-cancel";
 import type Database from "better-sqlite3";
@@ -89,6 +89,24 @@ export async function suggestedPlexFolders(db: Database.Database): Promise<PlexL
     local.push({ path: folderPath, library: folder.library, key: folder.key });
   }
   return local;
+}
+
+type Probed = { audio: AudioTrack[]; subtitles: SubtitleTrack[]; video?: ProbedVideo | null };
+type ProbedVideo = { hdr: HdrLabel; doviProfile: number | null };
+
+/** HDR kind and Dolby Vision profile of the first video stream. HDR10+ needs frame data, so Plex reports that one. */
+export function videoFromProbe(payload: unknown): ProbedVideo | null {
+  const record = payload && typeof payload === "object" ? (payload as { streams?: unknown }) : null;
+  if (!Array.isArray(record?.streams)) return null;
+  const stream = record.streams.find((item) => item && typeof item === "object" && (item as { codec_type?: unknown }).codec_type === "video") as
+    | { color_transfer?: unknown; side_data_list?: unknown }
+    | undefined;
+  if (!stream) return null;
+  const sideData = Array.isArray(stream.side_data_list) ? stream.side_data_list : [];
+  const doviProfile = sideData.map((item) => doviProfileOf((item as { dv_profile?: unknown } | null)?.dv_profile)).find((profile) => profile != null) ?? null;
+  const transfer = typeof stream.color_transfer === "string" ? stream.color_transfer : "";
+  const hdr: HdrLabel = doviProfile != null ? "Dolby Vision" : transfer === "smpte2084" ? "HDR10" : transfer === "arib-std-b67" ? "HLG" : "none";
+  return { hdr, doviProfile };
 }
 
 export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } | null {
@@ -248,7 +266,7 @@ export function filesRepresentingFolders(files: string[], known: SourceDraft[]):
 
 export function folderDraft(
   filePath: string,
-  probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] },
+  probed: Probed,
   match: SourceDraft | null,
   options: { underSeries?: boolean; roots?: string[] } = {},
 ): SourceDraft | null {
@@ -302,7 +320,8 @@ export function folderDraft(
       path: filePath,
       qualityName: null,
       resolution: null,
-      hdr: "none",
+      hdr: probed.video?.hdr ?? "none",
+      doviProfile: probed.video?.doviProfile ?? null,
       is3d: false,
       audioLanguages,
       subtitleLanguages,
@@ -343,8 +362,9 @@ export function listVideos(root: string): string[] {
 }
 
 /** The streams inside the file, then the subtitle and separate audio files beside it. */
-function withSidecarFiles(filePath: string, probed: { audio: AudioTrack[]; subtitles: SubtitleTrack[] }): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } {
+function withSidecarFiles(filePath: string, probed: Probed): Probed {
   return {
+    video: probed.video,
     audio: [...probed.audio, ...audioSidecarTracks(filePath)],
     subtitles: [...probed.subtitles, ...sidecarTracks(filePath)],
   };
@@ -356,9 +376,10 @@ export async function scanOneFile(
   match: SourceDraft | null,
   options: { underSeries?: boolean; roots?: string[] } = {},
 ): Promise<SourceDraft | null> {
-  const probed = tracksFromProbe(await probeFile(filePath));
+  const payload = await probeFile(filePath);
+  const probed = tracksFromProbe(payload);
   if (!probed) return null;
-  return folderDraft(filePath, withSidecarFiles(filePath, probed), match, options);
+  return folderDraft(filePath, withSidecarFiles(filePath, { ...probed, video: videoFromProbe(payload) }), match, options);
 }
 
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {
@@ -373,11 +394,12 @@ export async function scanFolders(roots: string[], known: SourceDraft[], onProgr
     const file = files[index]!;
     onProgress({ message: `Files · ${index + 1}/${files.length} ${path.basename(file)}`, fetched: index, total: files.length });
     throwIfSyncCancelled();
-    const probed = tracksFromProbe(await probeFile(file));
+    const payload = await probeFile(file);
+    const probed = tracksFromProbe(payload);
     if (!probed) continue;
     queueUnlabeledTracks(file, probed, recognized);
     const match = pickMatch(indexed, file);
-    const draft = folderDraft(file, withSidecarFiles(file, probed), match, {
+    const draft = folderDraft(file, withSidecarFiles(file, { ...probed, video: videoFromProbe(payload) }), match, {
       underSeries: seriesIdsForPath(indexed, file).length > 0 || seriesTitleClaimsPath(indexed, file),
       roots: present,
     });
@@ -702,7 +724,7 @@ function subtitleFormat(codec: unknown): string | null {
 
 function probeFile(file: string): Promise<unknown> {
   return new Promise((resolve) => {
-    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,profile,channels,channel_layout:stream_tags=language", "-of", "json", file], {
+    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,profile,channels,channel_layout,color_transfer:stream_tags=language:stream_side_data=dv_profile", "-of", "json", file], {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const chunks: Buffer[] = [];

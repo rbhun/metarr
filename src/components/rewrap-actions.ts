@@ -35,3 +35,16 @@ export async function enqueueRewrapPaths(paths: Array<{ path: string; label?: st
 export async function rewrapNow(titles: number[], episodes: number[]): Promise<string> {
   return describe(await postRewrap({ titles, episodes, immediate: true }), true);
 }
+
+/** Writes a Dolby Vision 8.1 MKV beside each profile 7 file on the titles or episodes, starting now. */
+export async function doviNow(titles: number[], episodes: number[]): Promise<string> {
+  const payload = await postRewrap({ titles, episodes, immediate: true, mode: "dovi" });
+  const added = payload.added ?? 0;
+  const promoted = payload.promoted ?? 0;
+  if (added === 0 && promoted === 0) {
+    return (payload.already ?? 0) > 0
+      ? "That file is already converting or waiting to start."
+      : "Nothing to convert: no Dolby Vision 7 file without a .DV8.mkv beside it was found.";
+  }
+  return "Converting Dolby Vision 7 to 8.1 now. The original stays; the new MKV is saved beside it. Follow it in Tasks.";
+}

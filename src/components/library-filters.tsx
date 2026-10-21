@@ -27,6 +27,7 @@ const FIELD_LABEL: Record<FilterField, string> = {
   length: "Length",
   resolution: "Resolution",
   hdr: "HDR",
+  dovi: "Dolby Vision profile",
   container: "File type",
   version: "Versions",
   file: "File",
@@ -62,6 +63,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "Hungarian", rule: { field: "language", op: "includes", value: "Hungarian" } },
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
   { label: "Subtitle timing off", rule: { field: "timing", op: "eq", value: "off" } },
+  { label: "Dolby Vision 7", rule: { field: "dovi", op: "eq", value: "7" } },
 ];
 
 const selectClass =
@@ -125,6 +127,16 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
         ))}
         <option value="sdr">SDR</option>
         {unknownOption()}
+      </select>
+    );
+  }
+  if (rule.field === "dovi") {
+    return (
+      <select className={selectClass} aria-label="Dolby Vision profile" value={rule.value} onChange={(event) => onChange(event.target.value)}>
+        <option value="7">7 (Blu-ray dual layer; Apple TV plays it badly)</option>
+        <option value="8">8</option>
+        <option value="5">5</option>
+        <option value="any">any profile</option>
       </select>
     );
   }
