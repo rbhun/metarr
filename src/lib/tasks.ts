@@ -3,7 +3,7 @@ import { jobTotals as detectTotals, listJobs as listDetectJobs, readDetectPause,
 import { listMergeJobs, mergeTotals, readMergePause, type MergeJobStatus, type MergePause } from "@/lib/merge/store";
 import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
-import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
+import { listRewrapJobs, readRewrapPause, readRewrapSettings, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
 import { stuckTools, stuckWaiting } from "@/lib/stuck";
 import { titleIdForPath } from "@/lib/title-link";
 
@@ -154,6 +154,9 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
 function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: number, db: Database.Database): { jobs: TaskJob[]; total: number } {
   const list = listRewrapJobs(db, { status, page, pageSize });
   const pause = readRewrapPause(db);
+  const copyDetail = readRewrapSettings(db).deinterlace
+    ? "AVI or M2TS to MKV · copied, interlaced AVIs deinterlaced"
+    : "AVI or M2TS to MKV · no re-encoding";
   return {
     total: list.total,
     jobs: list.jobs.map((job) => ({
@@ -166,7 +169,12 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
       status: job.status,
       message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
       priority: null,
-      detail: job.mode === "dovi" ? "Dolby Vision 7 to 8.1 for Apple TV · no re-encoding" : "AVI or M2TS to MKV · no re-encoding",
+      detail:
+        job.mode === "dovi"
+          ? "Dolby Vision 7 to 8.1 for Apple TV · no re-encoding"
+          : job.mode === "deinterlace"
+            ? "AVI to MKV · deinterlaced, picture re-encoded"
+            : copyDetail,
       progress: job.progress,
       createdAt: job.createdAt,
       startedAt: job.startedAt,

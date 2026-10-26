@@ -48,3 +48,17 @@ export async function doviNow(titles: number[], episodes: number[]): Promise<str
   }
   return "Converting Dolby Vision 7 to 8.1 now. The original stays; the new MKV is saved beside it. Follow it in Tasks.";
 }
+
+/** Deinterlaces each AVI on the titles or episodes into an MKV, starting now. */
+export async function deinterlaceNow(titles: number[], episodes: number[]): Promise<string> {
+  const payload = await postRewrap({ titles, episodes, immediate: true, mode: "deinterlace" });
+  const added = payload.added ?? 0;
+  const promoted = payload.promoted ?? 0;
+  if (added === 0 && promoted === 0) {
+    return (payload.already ?? 0) > 0
+      ? "That file is already deinterlacing or waiting to start."
+      : "Nothing to deinterlace: no AVI that has not been deinterlaced yet was found.";
+  }
+  const files = added + promoted === 1 ? "the AVI" : `${added + promoted} AVIs`;
+  return `Deinterlacing ${files} now. The picture is re-encoded, so this takes a while; the original stays. Follow it in Tasks.`;
+}

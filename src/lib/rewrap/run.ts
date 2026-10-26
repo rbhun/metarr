@@ -1,14 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
-import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
-import { idle } from "@/lib/idle";
-import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { languageCode } from "@/lib/media";
-import { joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { describeInterlace, detectInterlace, interlaceFilter, type Interlace } from "@/lib/rewrap/interlace";
+import { deinterlacedTarget, joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
+import { runTool } from "@/lib/rewrap/tool";
+import { removeWorkDir } from "@/lib/stuck";
+
+export { rewrapStop } from "@/lib/rewrap/tool";
+
+const UNCHECKED: Interlace = { kind: "unclear", order: null, counts: { tff: 0, bff: 0, progressive: 0, undetermined: 0, repeated: 0 } };
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+/** Re-encoding runs at idle priority behind everything else on the server. */
+const ENCODE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
 /**
  * How long ffmpeg may hold packets so the streams line up, in microseconds.
@@ -58,6 +63,8 @@ export function rewrapArgs(
     concat?: boolean;
     /** The source is an MPEG transport stream (.ts, .m2ts, .mts). */
     transport?: boolean;
+    /** Re-encode the first video stream through this filter (deinterlacing); everything else is copied. */
+    videoFilter?: string | null;
   },
 ): { args: string[]; video: number; audio: number; subtitles: number; firstMoved: boolean; converted: number } {
   const video = probe.streams.filter((stream) => stream.codecType === "video");
@@ -82,6 +89,10 @@ export function rewrapArgs(
   args.push("-c", "copy", "-map_metadata", "0", "-max_interleave_delta", String(INTERLEAVE_US));
   if (options.transport) args.push("-bsf:v", FILL_TIMESTAMPS, "-bsf:a", FILL_TIMESTAMPS, "-bsf:s", FILL_TIMESTAMPS);
   video.forEach((stream, position) => {
+    if (position === 0 && options.videoFilter) {
+      args.push("-filter:v:0", options.videoFilter, "-c:v:0", "libx264", "-crf", "18", "-preset", "medium");
+      return;
+    }
     // Xvid/DivX "packed B-frames" stutter in Matroska unless they are unpacked.
     if (stream.codecName === "mpeg4") args.push(`-bsf:v:${position}`, "mpeg4_unpack_bframes");
   });
@@ -100,81 +111,6 @@ export function rewrapArgs(
   });
   args.push("-progress", "pipe:1", "-nostats", "-f", "matroska", output);
   return { args, video: video.length, audio: ordered.length, subtitles: subtitles.length, firstMoved, converted };
-}
-
-/** What to say when ffmpeg or ffprobe does not exit 0. A signal kill has no exit code. */
-export function rewrapStop(command: string, code: number | null, signal: NodeJS.Signals | null): string {
-  if (code != null) return `${command} exited with code ${code}.`;
-  if (signal === "SIGKILL") return `${command} was killed (SIGKILL), usually because the machine ran out of memory.`;
-  if (signal) return `${command} was stopped by ${signal}.`;
-  return `${command} stopped without an exit code.`;
-}
-
-function runTool(
-  command: string,
-  args: string[],
-  timeoutMs: number,
-  onLine: (line: string) => void = () => undefined,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const wrapped = idle(command, args);
-    const child = spawn(wrapped.command, wrapped.args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const fail = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      unwatch();
-      reject(error);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
-    }, timeoutMs);
-    const unwatch = watchStall(child.pid, command, (error) => {
-      child.kill("SIGKILL");
-      fail(error);
-    });
-    readline.createInterface({ input: child.stdout }).on("line", (line) => {
-      stdout = `${stdout}${line}\n`.slice(-500_000);
-      onLine(line);
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = `${stderr}${chunk.toString()}`.slice(-20_000);
-    });
-    child.on("error", (error) => {
-      const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-      fail(new Error(missing ? `${command} is not installed where Metarr runs. Rebuild the Docker image, which includes ffmpeg.` : error.message));
-    });
-    child.on("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      unwatch();
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      if (code === 127) {
-        reject(new Error(`${command} was not found where Metarr runs. Rebuild the Docker image, which includes ffmpeg.`));
-        return;
-      }
-      const said = stderr
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(-3)
-        .join(" ");
-      const exit = rewrapStop(command, code, signal);
-      if (said && code != null) {
-        reject(new Error(said));
-        return;
-      }
-      reject(new Error(said ? `${said} (${exit})` : exit));
-    });
-  });
 }
 
 async function probe(file: string): Promise<Probe> {
@@ -211,6 +147,22 @@ export function checkRewrap(source: Probe, result: Probe, expected: { video: num
   return null;
 }
 
+/** The video filter for this rewrap and the sentence that says what happened to the picture. */
+export function deinterlacePlan(mode: "off" | "auto" | "force", found: Interlace | "failed" | null): { filter: string | null; note: string } {
+  if (mode === "off" || found == null) return { filter: null, note: "" };
+  const encoded = "was deinterlaced and re-encoded as H.264; audio and subtitles were copied.";
+  if (found === "failed") {
+    return mode === "force"
+      ? { filter: interlaceFilter(UNCHECKED, true), note: ` Interlacing could not be checked, so the picture was deinterlaced top field first and re-encoded as H.264; audio and subtitles were copied.` }
+      : { filter: null, note: " Interlacing could not be checked, so the picture was copied." };
+  }
+  const filter = interlaceFilter(found, mode === "force");
+  if (!filter) return { filter: null, note: ` The picture is ${describeInterlace(found)}, so it was copied.` };
+  if (found.kind === "interlaced" || found.kind === "telecined") return { filter, note: ` The picture is ${describeInterlace(found)}, so it ${encoded}` };
+  const looked = found.kind === "progressive" ? "progressive" : "only partly interlaced";
+  return { filter, note: ` The picture looked ${looked}, but it ${encoded.replace("was deinterlaced", "was deinterlaced as asked")}` };
+}
+
 function streamSignature(probe: Probe): string {
   return probe.streams.map((stream) => `${stream.codecType}:${stream.codecName ?? ""}`).join("|");
 }
@@ -227,6 +179,11 @@ export async function rewrapAvi(options: {
   languages: Array<string | null>;
   subtitleLanguages?: Array<string | null>;
   firstLanguage: string;
+  /**
+   * `auto` checks an AVI for interlacing and deinterlaces only when it is found; `force` always
+   * deinterlaces, into `Film.deinterlaced.mkv` when `Film.mkv` is already there.
+   */
+  deinterlace?: "off" | "auto" | "force";
   dryRun?: boolean;
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
@@ -234,13 +191,21 @@ export async function rewrapAvi(options: {
   const sources = options.sources && options.sources.length > 1 ? options.sources : [source];
   const joining = sources.length > 1;
   const kind = sourceKind(source);
-  const target = (joining ? joinedTarget(sources[0] ?? source) : null) ?? rewrapTarget(source);
+  const mode = kind === "AVI" ? (options.deinterlace ?? "off") : "off";
+  const plainTarget = (joining ? joinedTarget(sources[0] ?? source) : null) ?? rewrapTarget(source);
+  const target = mode === "force" && fs.existsSync(plainTarget) ? deinterlacedTarget(plainTarget) : plainTarget;
   const name = path.basename(target);
   onProgress(0, joining ? `Reading ${sources.length} parts` : `Reading the ${kind}`);
   const probed = [];
   for (const file of sources) probed.push(await probe(file));
   const first = probed[0];
   if (!first) throw new Error("ffprobe found no video stream in this file.");
+  let found: Interlace | "failed" | null = null;
+  if (mode !== "off") {
+    onProgress(0, "Checking for interlacing");
+    found = await detectInterlace(sources[0] ?? source, first.duration).catch(() => "failed" as const);
+  }
+  const { filter: videoFilter, note: picture } = deinterlacePlan(mode, found);
   const signature = streamSignature(first);
   if (probed.some((item) => streamSignature(item) !== signature)) {
     throw new Error("The parts do not share the same video and audio, so they were not joined.");
@@ -255,6 +220,7 @@ export async function rewrapAvi(options: {
     firstLanguage: options.firstLanguage,
     concat: joining,
     transport: rewrapFamily(source) === "ts",
+    videoFilter,
   });
   const tracks = [plural(plan.video, "video stream"), plural(plan.audio, "audio track"), plan.subtitles ? plural(plan.subtitles, "subtitle") : null]
     .filter(Boolean)
@@ -264,7 +230,8 @@ export async function rewrapAvi(options: {
   const joined = joining ? ` Joined from ${sources.length} parts.` : "";
   if (options.dryRun) {
     const action = joining ? `join ${sources.length} parts and copy` : "copy";
-    return `Dry run: would ${action} ${tracks} into ${target} without re-encoding.${moved}${flac} Nothing was written.`;
+    const how = videoFilter ? "deinterlacing the picture" : "without re-encoding";
+    return `Dry run: would ${action} ${tracks} into ${target} ${how}.${picture}${moved}${flac} Nothing was written.`;
   }
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the ${kind}.`);
   removeWorkDir(workDir);
@@ -272,13 +239,13 @@ export async function rewrapAvi(options: {
   try {
     if (joining) fs.writeFileSync(listPath, concatList(sources));
     let lastWrite = 0;
-    await runTool("ffmpeg", plan.args, REWRAP_TIMEOUT_MS, (line) => {
+    await runTool("ffmpeg", plan.args, videoFilter ? ENCODE_TIMEOUT_MS : REWRAP_TIMEOUT_MS, (line) => {
       const percent = progressFromLine(line, input.duration);
       if (percent == null) return;
       const now = Date.now();
       if (now - lastWrite < 2_000) return;
       lastWrite = now;
-      onProgress(percent, `Rewrapping ${percent}%`);
+      onProgress(percent, `${videoFilter ? "Deinterlacing" : "Rewrapping"} ${percent}%`);
     });
     onProgress(99, "Checking the MKV");
     const problem = checkRewrap(input, await probe(temp), plan, joining ? "parts" : kind);
@@ -286,7 +253,7 @@ export async function rewrapAvi(options: {
     onProgress(100, "Saving the MKV");
     deliverFile(temp, target);
     const left = joining ? `The ${kind} files were left in place.` : `The ${kind} was left in place.`;
-    return `Saved ${name} with ${tracks}.${joined}${moved}${flac} ${left}`;
+    return `Saved ${name} with ${tracks}.${joined}${picture}${moved}${flac} ${left}`;
   } finally {
     removeWorkDir(workDir);
   }

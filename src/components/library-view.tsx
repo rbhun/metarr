@@ -7,7 +7,7 @@ import { toastDetection } from "@/components/detect-tasks";
 import { DetectStatus } from "@/components/detect-status";
 import { enqueueRemux } from "@/components/remux-actions";
 import { toastRemux } from "@/components/remux-tasks";
-import { doviNow, rewrapNow } from "@/components/rewrap-actions";
+import { deinterlaceNow, doviNow, rewrapNow } from "@/components/rewrap-actions";
 import { RemuxStatus } from "@/components/remux-status";
 import { CellScroll } from "@/components/line-scroll";
 import { MediaPills } from "@/components/media-pills";
@@ -575,7 +575,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
-  async function rewrapSelected(mode: "rewrap" | "dovi" = "rewrap") {
+  async function rewrapSelected(mode: "rewrap" | "dovi" | "deinterlace" = "rewrap") {
     const titles: number[] = [];
     const episodes: number[] = [];
     for (const row of selected.values()) {
@@ -586,7 +586,8 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
     setRewrapBusy(true);
     try {
-      toastRemux(await (mode === "dovi" ? doviNow : rewrapNow)(titles, episodes), "rewrap");
+      const run = mode === "dovi" ? doviNow : mode === "deinterlace" ? deinterlaceNow : rewrapNow;
+      toastRemux(await run(titles, episodes), "rewrap");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
     } finally {
@@ -747,6 +748,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               title="Write a Dolby Vision 8.1 copy, which the Apple TV plays, beside each selected profile 7 file. The originals stay"
             >
               Convert DV7 to 8.1
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={rewrapBusy}
+              onClick={() => void rewrapSelected("deinterlace")}
+              title="Re-encode the picture of each selected AVI without interlacing combs into an MKV. Audio and subtitles are copied and the AVIs stay"
+            >
+              Deinterlace AVI
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear

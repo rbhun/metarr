@@ -11,10 +11,15 @@ export type RewrapSettings = {
   endHour: number;
   /** Audio in this language moves to the front and becomes the default track. Empty keeps the file order. */
   firstLanguage: string;
+  /** Check each AVI for interlacing and deinterlace it in the MKV when it is found. */
+  deinterlace: boolean;
 };
 
-/** `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV beside a profile 7 file. */
-export type RewrapMode = "rewrap" | "dovi";
+/**
+ * `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV beside a profile 7 file;
+ * `deinterlace` re-encodes an AVI's picture without combing.
+ */
+export type RewrapMode = "rewrap" | "dovi" | "deinterlace";
 
 export type RewrapItem = {
   path: string;
@@ -70,7 +75,7 @@ type JobRow = {
 const DEFAULT_FIRST_LANGUAGE = "Hungarian";
 
 function modeOf(value: unknown): RewrapMode {
-  return value === "dovi" ? "dovi" : "rewrap";
+  return value === "dovi" || value === "deinterlace" ? value : "rewrap";
 }
 
 function meta(db: Database.Database, key: string): string | null {
@@ -89,6 +94,7 @@ export function readRewrapSettings(db: Database.Database): RewrapSettings {
     startHour: clampHour(meta(db, "rewrap_schedule_start"), 1),
     endHour: clampHour(meta(db, "rewrap_schedule_end"), 7),
     firstLanguage: first == null ? DEFAULT_FIRST_LANGUAGE : first,
+    deinterlace: meta(db, "rewrap_deinterlace") !== "0",
   };
 }
 
@@ -103,12 +109,13 @@ export function parseFirstLanguage(value: unknown): string | null {
 
 export function writeRewrapSettings(
   db: Database.Database,
-  settings: { enabled?: boolean; startHour?: number; endHour?: number; firstLanguage?: string },
+  settings: { enabled?: boolean; startHour?: number; endHour?: number; firstLanguage?: string; deinterlace?: boolean },
 ) {
   if (settings.enabled != null) setMetaValue(db, "rewrap_schedule_enabled", settings.enabled ? "1" : "0");
   if (settings.startHour != null) setMetaValue(db, "rewrap_schedule_start", String(settings.startHour));
   if (settings.endHour != null) setMetaValue(db, "rewrap_schedule_end", String(settings.endHour));
   if (settings.firstLanguage != null) setMetaValue(db, "rewrap_first_language", settings.firstLanguage);
+  if (settings.deinterlace != null) setMetaValue(db, "rewrap_deinterlace", settings.deinterlace ? "1" : "0");
 }
 
 export function readRewrapPause(db: Database.Database): RewrapPause | null {
@@ -310,10 +317,10 @@ export function removeRewrapJob(db: Database.Database, id: number): boolean {
   return db.prepare(`DELETE FROM rewrap_jobs WHERE id = ? AND status IN ('pending', 'failed')`).run(id).changes === 1;
 }
 
-export function finishedRewrapPaths(db: Database.Database): Set<string> {
+export function finishedRewrapPaths(db: Database.Database, mode: RewrapMode = "rewrap"): Set<string> {
   const rows = db
-    .prepare(`SELECT path FROM rewrap_jobs WHERE status = 'done' AND mode = 'rewrap' AND (message IS NULL OR message NOT LIKE 'Dry run:%')`)
-    .all() as Array<{ path: string }>;
+    .prepare(`SELECT path FROM rewrap_jobs WHERE status = 'done' AND mode = ? AND (message IS NULL OR message NOT LIKE 'Dry run:%')`)
+    .all(mode) as Array<{ path: string }>;
   return new Set(rows.map((row) => row.path));
 }
 
