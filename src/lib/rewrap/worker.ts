@@ -13,7 +13,7 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { mergeIsRunning } from "@/lib/merge/store";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { rewrapAvi } from "@/lib/rewrap/run";
-import { canRewrap, joinedTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
+import { canRewrap, isAvi, joinedTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
   finishRewrap,
@@ -196,6 +196,10 @@ async function step() {
       return;
     }
     const sources = splitSourcesOnDisk(local) ?? [local];
+    if (job.mode === "deinterlace" && !isAvi(null, local)) {
+      finishRewrap(db, job.id, "failed", "Deinterlacing is for AVI files, and this is not one.");
+      return;
+    }
     if (!canRewrap(null, local) && sources.length < 2) {
       finishRewrap(db, job.id, "failed", "This file is not an AVI or a loose M2TS or TS file, and it is not a complete multi-part film.");
       return;
@@ -219,7 +223,9 @@ async function step() {
       } catch {
         bytes = 0;
       }
-      if (bytes > 0 && !roomFor(bytes, [path.dirname(workDir), outputDir])) {
+      // A deinterlaced H.264 picture can come out larger than the Xvid it replaces.
+      const growth = job.mode === "deinterlace" ? 3 : settings.deinterlace && kind === "AVI" ? 2 : 1;
+      if (bytes > 0 && !roomFor(bytes * growth, [path.dirname(workDir), outputDir])) {
         const space = sources.length > 1 ? "to join these parts" : `for a copy of this ${kind}`;
         finishRewrap(db, job.id, "failed", `There is not enough free space ${space}, so nothing was written.`);
         return;
@@ -232,10 +238,11 @@ async function step() {
       languages: known?.languages ?? job.languages,
       subtitleLanguages: known?.subtitleLanguages ?? job.subtitleLanguages,
       firstLanguage: settings.firstLanguage,
+      deinterlace: job.mode === "deinterlace" ? "force" : settings.deinterlace ? "auto" : "off",
       dryRun: rehearsal,
       onProgress: (percent, text) => updateRewrapProgress(db, job.id, percent, text),
     });
-    if (!rehearsal && sources.length > 1) {
+    if (!rehearsal && sources.length > 1 && job.mode === "rewrap") {
       const maps = readDetectSettings(db).pathMaps;
       const partners = new Set<string>(sources);
       for (const file of sources) partners.add(pathOnPlex(file, maps));
@@ -257,7 +264,7 @@ async function step() {
     if (!rehearsal) syncSoon();
   } catch (caught) {
     removeWorkDir(workDir);
-    const fallback = job.mode === "dovi" ? "Dolby Vision conversion failed." : "Rewrap failed.";
+    const fallback = job.mode === "dovi" ? "Dolby Vision conversion failed." : job.mode === "deinterlace" ? "Deinterlacing failed." : "Rewrap failed.";
     finishRewrap(db, job.id, "failed", sourceText(friendlyFsError(caught, fallback), job.mode === "dovi" ? "file" : sourceKind(job.path)));
   }
 }

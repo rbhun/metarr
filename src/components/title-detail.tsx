@@ -16,8 +16,8 @@ import { arrPresence, episodeCode, fileHoverSources, formatBitrate, formatBytes,
 import { isDiscImage, multiPartLabel } from "@/lib/media";
 import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
-import { doviNow, rewrapNow } from "@/components/rewrap-actions";
-import { needsRewrap } from "@/lib/rewrap/source";
+import { deinterlaceNow, doviNow, rewrapNow } from "@/components/rewrap-actions";
+import { isAvi, needsRewrap } from "@/lib/rewrap/source";
 import { timingFormat } from "@/lib/subtitle-timing";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
@@ -189,6 +189,12 @@ export function TitleDetail({
       file?.versions.some((version) => version.doviProfile === 7) &&
       !file.versions.some((version) => /\.DV8\.mkv$/i.test(version.path ?? "")),
   );
+  const showDeinterlace = Boolean(
+    title &&
+      (episode || title.kind === "movie") &&
+      knownPaths.some((item) => isAvi(null, item)) &&
+      !knownPaths.some((item) => /\.deinterlaced\.mkv$/i.test(item ?? "")),
+  );
   const textSidecar = file
     ? [...(file.subtitleTracks ?? []), ...file.versions.flatMap((version) => version.subtitleTracks)].some(
         (track) => track.placement === "external" && track.file && timingFormat(track.file),
@@ -204,6 +210,19 @@ export function TitleDetail({
       });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
+    } finally {
+      setConvertBusy(false);
+    }
+  }
+  async function deinterlaceFile() {
+    if (!title) return;
+    setConvertBusy(true);
+    try {
+      toast.success(await deinterlaceNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
+        action: { label: "Tasks", onClick: () => router.push("/tasks?queue=rewrap&status=all") },
+      });
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not start deinterlacing.");
     } finally {
       setConvertBusy(false);
     }
@@ -312,6 +331,18 @@ export function TitleDetail({
                 {showRewrap ? (
                   <Button size="sm" className="w-fit" disabled={convertBusy} onClick={() => void rewrapFile()} title="Copy an AVI or loose transport stream into an MKV, or join a multi-part film into one MKV, without re-encoding">
                     {convertBusy ? "Starting…" : "Rewrap to MKV"}
+                  </Button>
+                ) : null}
+                {showDeinterlace ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    disabled={convertBusy}
+                    onClick={() => void deinterlaceFile()}
+                    title="Re-encode the AVI's picture without interlacing combs into an MKV. Audio and subtitles are copied and the AVI stays. Use it when the picture shows comb lines on movement"
+                  >
+                    {convertBusy ? "Starting…" : "Deinterlace to MKV"}
                   </Button>
                 ) : null}
                 {showDovi ? (

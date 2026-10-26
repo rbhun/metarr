@@ -135,6 +135,11 @@ export function rewrapTarget(filePath: string): string {
   return `${stem}.mkv`;
 }
 
+/** A deinterlaced copy when the plain MKV is already there: `Film.avi` becomes `Film.deinterlaced.mkv`. */
+export function deinterlacedTarget(filePath: string): string {
+  return rewrapTarget(filePath).replace(/\.mkv$/, ".deinterlaced.mkv");
+}
+
 /** True when this title still has an AVI or loose transport stream to copy, or a complete multi-part film that is not already one MKV. */
 export function needsRewrap(paths: Array<string | null | undefined>): boolean {
   const files = paths.filter((item): item is string => Boolean(item));

@@ -1,6 +1,6 @@
 import { clampHour } from "@/lib/detect/schedule";
 import { getDb } from "@/lib/db";
-import { doviItemsForSelection, libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
+import { deinterlaceItemsForSelection, doviItemsForSelection, libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
 import { canRewrap, rewrapSplit } from "@/lib/rewrap/source";
 import {
   activeRewrap,
@@ -67,8 +67,9 @@ export async function POST(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
-  if (record.mode === "dovi") {
-    const items = doviItemsForSelection(db, idList(record.titles), idList(record.episodes));
+  if (record.mode === "dovi" || record.mode === "deinterlace") {
+    const pick = record.mode === "dovi" ? doviItemsForSelection : deinterlaceItemsForSelection;
+    const items = pick(db, idList(record.titles), idList(record.episodes));
     const result = enqueueRewraps(db, items, record.immediate === true);
     kickRewrapWorker();
     return NextResponse.json({ ...result, skipped: 0, totals: rewrapTotals(db) });
@@ -111,6 +112,7 @@ export async function PUT(request: Request) {
     startHour,
     endHour,
     firstLanguage,
+    deinterlace: typeof record.deinterlace === "boolean" ? record.deinterlace : current.deinterlace,
   });
   kickRewrapWorker();
   return NextResponse.json({ settings: readRewrapSettings(db) });

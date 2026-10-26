@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.188
+
+- Deinterlace AVIs. Before an AVI is rewrapped, ffmpeg's idet filter checks a few hundred frames in three places; an interlaced or telecined picture is deinterlaced (bwdif, or field matching for 3:2 pulldown) and re-encoded as H.264, while audio and subtitles are still copied and progressive AVIs are copied as before. It can be turned off in the MKV rewrap settings. A "Deinterlace to MKV" button on the title and "Deinterlace AVI" in the library force it for an AVI that was already rewrapped, saving `Film.deinterlaced.mkv` next to it. The AVI is never removed.
+
 ## 0.0.187
 
 - Find and fix Dolby Vision profile 7 files for the Apple TV, which drops frames on them. The profile comes from Plex and from the file scan, shows on the title as "Dolby Vision 7", and the library has a "Dolby Vision 7" filter. "Convert DV7 to 8.1" writes a new `.DV8.mkv` beside the file with dovi_tool: the HDR10 picture is copied without re-encoding, every audio and subtitle track is kept, and the copy is checked for profile 8, length, and audio sync before it is saved. The original stays. Run a sync first so existing titles get their profile.

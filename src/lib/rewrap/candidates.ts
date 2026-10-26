@@ -4,7 +4,7 @@ import type { ScanFile } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
 import { doviTarget } from "@/lib/dovi/run";
-import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
+import { canRewrap, deinterlacedTarget, isAvi, joinedTarget, rewrapTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
   path: string;
@@ -158,6 +158,23 @@ export function doviItemsForSelection(db: Database.Database, titles: number[], e
       if (items.some((item) => item.path === version.path)) continue;
       if (paths.some((item) => samePath(item, doviTarget(version.path!)))) continue;
       items.push({ path: version.path, label: file.label, mode: "dovi" });
+    }
+  }
+  return items;
+}
+
+/** AVIs on the chosen titles or episodes that have not been deinterlaced yet, whether or not they already have an MKV. */
+export function deinterlaceItemsForSelection(db: Database.Database, titles: number[], episodes: number[]): RewrapItem[] {
+  const done = finishedRewrapPaths(db, "deinterlace");
+  const items: RewrapItem[] = [];
+  for (const file of filesForSelection(db, titles, episodes)) {
+    const paths = knownPaths(file);
+    for (const group of bundleRewraps(avisFromFile(file))) {
+      const lead = group[0];
+      if (!lead || !isAvi(null, lead.path) || done.has(lead.path)) continue;
+      const plain = (group.length > 1 ? joinedTarget(lead.path) : null) ?? rewrapTarget(lead.path);
+      if (paths.some((item) => samePath(item, deinterlacedTarget(plain)))) continue;
+      items.push({ ...lead, mode: "deinterlace" });
     }
   }
   return items;
