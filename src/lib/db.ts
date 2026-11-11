@@ -7,7 +7,7 @@ import { overlayAudio, overlaySubtitles } from "@/lib/detect/overlay";
 import { assignSidecars, readSidecarNames, withAudioSidecars } from "@/lib/detect/sidecars";
 import { rulesWhere, type FilterRule } from "@/lib/filters";
 import { rollupAudio, rollupSubtitles } from "@/lib/detect/rollup";
-import { ensureListedSource, normalizeTitle } from "@/lib/media";
+import { doviProfileOf, ensureListedSource, normalizeTitle } from "@/lib/media";
 import { displayEpisodeTitle, displayLocalTitle, enrichmentKey, recognizeEpisode, type RecognizedEpisode } from "@/lib/online";
 import { titleLanguage } from "@/lib/title-language";
 import type { StoredDetection } from "@/lib/detect/store";
@@ -780,6 +780,7 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         container: typeof version.container === "string" ? version.container : null,
         resolution: typeof version.resolution === "string" ? version.resolution : null,
         hdr: asHdr(typeof version.hdr === "string" ? version.hdr : null),
+        ...(doviProfileOf(version.doviProfile) != null ? { doviProfile: doviProfileOf(version.doviProfile) } : {}),
         is3d: version.is3d === true,
         qualityName: typeof version.qualityName === "string" ? version.qualityName : null,
         bitrateKbps: typeof version.bitrateKbps === "number" ? version.bitrateKbps : null,
@@ -913,6 +914,7 @@ function parseFiles(value: string | null | undefined): MediaFile[] {
         qualityName: typeof file.qualityName === "string" ? file.qualityName : null,
         resolution: typeof file.resolution === "string" ? file.resolution : null,
         hdr: asHdr(typeof file.hdr === "string" ? file.hdr : null),
+        ...(doviProfileOf(file.doviProfile) != null ? { doviProfile: doviProfileOf(file.doviProfile) } : {}),
         is3d: Boolean(file.is3d),
         audioLanguages: Array.isArray(file.audioLanguages)
           ? file.audioLanguages.filter((lang): lang is string => typeof lang === "string")

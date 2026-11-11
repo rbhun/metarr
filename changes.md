@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.188
+
+- Show the Dolby Vision profile in the title sidebar, so a profile 7 file that an Apple TV cannot play is not labeled the same as one it can.
+
 ## 0.0.187
 
 - Tag a deinterlace on its own, and tag the Dolby Vision 7 to 8.1 reconvert as Dolby Vision instead of a plain rewrap.

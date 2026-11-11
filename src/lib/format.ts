@@ -148,7 +148,8 @@ export function playableText(label: PlayableLabel): string {
   return playableName(label);
 }
 
-export function hdrText(label: HdrLabel): string {
+export function hdrText(label: HdrLabel, doviProfile?: number | null): string {
+  if (doviProfile) return `Dolby Vision ${doviProfile}`;
   return label === "none" ? "SDR" : label;
 }
 

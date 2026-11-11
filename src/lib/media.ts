@@ -297,6 +297,12 @@ export function hdrRank(value: HdrLabel): number {
   return HDR_RANK[value] ?? 0;
 }
 
+/** A Dolby Vision profile number from Plex (`DOVIProfile`) or ffprobe (`dv_profile`). */
+export function doviProfileOf(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && /^\s*\d{1,2}\s*$/.test(value) ? Number(value) : NaN;
+  return Number.isInteger(number) && number > 0 && number <= 10 ? number : null;
+}
+
 export function normalizeResolution(value: unknown, height?: unknown): string | null {
   const numericHeight = typeof height === "number" ? height : typeof height === "string" ? Number(height) : NaN;
   if (Number.isFinite(numericHeight) && numericHeight > 0) {
@@ -1399,6 +1405,7 @@ export function versionsFrom(files: MediaFile[]): MediaVersion[] {
       container: normalizeContainer(file.container, file.path),
       resolution: resolvedResolution(file),
       hdr: file.hdr,
+      doviProfile: file.doviProfile ?? null,
       is3d: file.is3d,
       qualityName: file.qualityName,
       bitrateKbps: file.bitrateKbps ?? null,

@@ -185,6 +185,7 @@ function mergeMediaFiles(left: MediaFile, right: MediaFile): MediaFile {
     qualityName: filledText(primary.qualityName) ?? filledText(extra.qualityName),
     resolution: leftRank >= rightRank ? left.resolution ?? right.resolution : right.resolution ?? left.resolution,
     hdr: primary.hdr !== "none" ? primary.hdr : extra.hdr,
+    doviProfile: (primary.hdr !== "none" ? primary.hdr : extra.hdr) === "Dolby Vision" ? (primary.doviProfile ?? extra.doviProfile ?? null) : null,
     is3d: primary.is3d || extra.is3d,
     audioLanguages,
     subtitleLanguages: mergeLanguages(primary.subtitleLanguages, extra.subtitleLanguages),

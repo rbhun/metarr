@@ -109,6 +109,8 @@ export type MediaFile = {
   qualityName: string | null;
   resolution: string | null;
   hdr: HdrLabel;
+  /** Dolby Vision profile, such as 7, which an Apple TV cannot play. */
+  doviProfile?: number | null;
   is3d: boolean;
   audioLanguages: string[];
   subtitleLanguages: string[];
@@ -154,6 +156,8 @@ export type MediaVersion = {
   container: string | null;
   resolution: string | null;
   hdr: HdrLabel;
+  /** Dolby Vision profile, such as 7, which an Apple TV cannot play. */
+  doviProfile?: number | null;
   is3d: boolean;
   qualityName: string | null;
   bitrateKbps: number | null;

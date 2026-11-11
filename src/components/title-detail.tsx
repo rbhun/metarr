@@ -390,8 +390,8 @@ export function TitleDetail({
                   <dd>
                     {file?.is3d ? "3D · " : ""}
                     {file && file.versions.length > 1
-                      ? [...new Set(file.versions.map((version) => hdrText(version.hdr)))].join(", ")
-                      : hdrText(file?.hdr ?? "none")}
+                      ? [...new Set(file.versions.map((version) => hdrText(version.hdr, version.doviProfile)))].join(", ")
+                      : hdrText(file?.versions[0]?.hdr ?? file?.hdr ?? "none", file?.versions[0]?.doviProfile)}
                   </dd>
                 </div>
                 {file && file.versions.length > 1 ? null : (
