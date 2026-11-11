@@ -1,5 +1,10 @@
 # Changes
 
+## 0.0.194
+
+- A Dolby Vision 7 conversion now takes the original's place: the original is renamed to `<name>.DV7`, which Plex and Radarr ignore, and the new MKV gets the original's name, so Plex keeps the title, its history and its watched state. When either name is taken, both files stay as they are. Nothing is ever overwritten or removed.
+- Converted files now carry the film's exact frame rate. mkvmerge had written 42 ms per frame, so Plex showed 23.81 fps instead of 23.976 and the Apple TV kept loading.
+
 ## 0.0.193
 
 - Fix Dolby Vision 7 conversions of damaged TS files being refused with a length like "9223372014 seconds instead of 6751". ffmpeg marks a damaged frame that has no time with the smallest 64-bit number, and Metarr used it as a real time, which put the other frames billions of seconds later. Such a frame now takes its decode time, or follows the frame before it. A file whose frame times still jump far past the film's length is refused before the slow MKV step, and the original is never touched.

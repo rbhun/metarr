@@ -10,6 +10,10 @@ import { migrate } from "@/lib/db";
 import {
   checkDoviOutput,
   convertDolbyVision,
+  doviFinalName,
+  doviOriginalName,
+  frameDurationNs,
+  swapIntoPlace,
   damagedRpuMessage,
   doviTarget,
   doviTool,
@@ -43,6 +47,10 @@ test("the Dolby Vision copy is saved beside the source with a DV8 name", () => {
   assert.equal(doviTarget("/movies/Basic Instinct (1992)/Basic Instinct.ts"), "/movies/Basic Instinct (1992)/Basic Instinct.DV8.mkv");
   assert.equal(doviTarget("/movies/Film/Film.mkv"), "/movies/Film/Film.DV8.mkv");
   assert.equal(doviTarget("/movies/Film/Film.DV8.mkv"), "/movies/Film/Film.DV8.mkv");
+  assert.equal(doviOriginalName("/movies/Patriot Games (1992)/Patriot Games (1992).mkv"), "/movies/Patriot Games (1992)/Patriot Games (1992).DV7");
+  assert.equal(doviFinalName("/movies/Basic Instinct (1992)/Basic Instinct.ts"), "/movies/Basic Instinct (1992)/Basic Instinct.mkv");
+  assert.equal(frameDurationNs("24000/1001"), 41708333);
+  assert.equal(frameDurationNs(null), null);
 });
 
 test("ffprobe side data gives the Dolby Vision profile, the start, and the frame rate", () => {
@@ -218,7 +226,7 @@ function profile(file: string): string {
   return execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream_side_data=dv_profile", "-of", "csv=p=0", file]).toString().trim();
 }
 
-test("a Dolby Vision 7 transport stream becomes an 8.1 MKV beside it with the audio in sync", { skip: !hasTools() && "needs dovi_tool, mkvmerge, and ffmpeg with libx265" }, async () => {
+test("a Dolby Vision 7 transport stream becomes an 8.1 MKV under its name with the audio in sync", { skip: !hasTools() && "needs dovi_tool, mkvmerge, and ffmpeg with libx265" }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi-"));
   try {
     const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: root, stdio: "pipe" });
@@ -243,14 +251,19 @@ test("a Dolby Vision 7 transport stream becomes an 8.1 MKV beside it with the au
     const steps: number[] = [];
     const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: (percent) => steps.push(percent) });
     assert.match(message, /Saved Film\.DV8\.mkv/);
-    const target = path.join(root, "Film.DV8.mkv");
+    assert.match(message, /It now has the original's name, Film\.mkv, and the original was renamed to Film\.DV7\./);
+    const target = path.join(root, "Film.mkv");
     assert.equal(profile(target), "8");
-    assert.ok(fs.existsSync(source), "the source stays");
+    assert.ok(!fs.existsSync(source) && fs.existsSync(path.join(root, "Film.DV7")), "the source is kept under a new name");
+    assert.ok(!fs.existsSync(path.join(root, "Film.DV8.mkv")));
     assert.ok(!fs.existsSync(path.join(root, "work")), "scratch is cleaned up");
     assert.ok(steps.includes(96));
 
-    await assert.rejects(convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined }), /already exists/);
     assert.match(await convertDolbyVision({ source: target, workDir: path.join(root, "work"), onProgress: () => undefined }), /Nothing to convert/);
+
+    await convertDolbyVision({ source: path.join(root, "p7.mkv"), workDir: path.join(root, "work"), onProgress: () => undefined });
+    const rate = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "default=nw=1:nk=1", path.join(root, "p7.mkv")]);
+    assert.equal(rate.toString().trim(), "24000/1001", "an MKV source keeps its frame rate although it stores times in whole milliseconds");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -292,10 +305,11 @@ test("a TS with lost packets still converts, leaving the damaged frames out with
     const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
     assert.match(message, /Saved Film\.DV8\.mkv/);
     assert.match(message, /\d+ damaged frames in the file were left out/);
-    const target = path.join(root, "Film.DV8.mkv");
+    const target = path.join(root, "Film.mkv");
     assert.equal(profile(target), "8");
     assert.ok(Math.abs(videoSpan(target) - videoSpan(path.join(root, "clean.ts"))) < 0.05, "the last frame plays at the same moment as in the source");
-    assert.ok(fs.existsSync(source), "the source stays");
+    assert.equal(execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "default=nw=1:nk=1", target]).toString().trim(), "24000/1001");
+    assert.ok(fs.existsSync(path.join(root, "Film.DV7")), "the source stays, renamed");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -328,7 +342,34 @@ test("a Dolby Vision packet damaged inside the video is replaced so the file sti
     run("ffmpeg", ["-v", "error", "-i", "p7.mkv", "-f", "lavfi", "-i", "sine=d=4", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "ac3", "-f", "mpegts", source]);
     const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
     assert.match(message, /1 unreadable Dolby Vision packet was replaced with the one from the frame before/);
-    assert.equal(profile(path.join(root, "Film.DV8.mkv")), "8");
+    assert.equal(profile(path.join(root, "Film.mkv")), "8");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the converted copy takes the original's name only when nothing would be overwritten", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi-swap-"));
+  try {
+    const source = path.join(root, "Film.mkv");
+    const converted = path.join(root, "Film.DV8.mkv");
+    fs.writeFileSync(source, "seven");
+    fs.writeFileSync(converted, "eight");
+    fs.writeFileSync(path.join(root, "Film.DV7"), "older");
+    assert.equal(swapIntoPlace(source, converted), null);
+    assert.equal(fs.readFileSync(source, "utf8"), "seven");
+    assert.equal(fs.readFileSync(path.join(root, "Film.DV7"), "utf8"), "older");
+    fs.rmSync(path.join(root, "Film.DV7"));
+    assert.deepEqual(swapIntoPlace(source, converted), { final: source, original: path.join(root, "Film.DV7") });
+    assert.equal(fs.readFileSync(source, "utf8"), "eight");
+    assert.equal(fs.readFileSync(path.join(root, "Film.DV7"), "utf8"), "seven");
+
+    const ts = path.join(root, "Other.ts");
+    fs.writeFileSync(ts, "seven");
+    fs.writeFileSync(path.join(root, "Other.DV8.mkv"), "eight");
+    fs.writeFileSync(path.join(root, "Other.mkv"), "another version");
+    assert.equal(swapIntoPlace(ts, path.join(root, "Other.DV8.mkv")), null);
+    assert.equal(fs.readFileSync(path.join(root, "Other.mkv"), "utf8"), "another version");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

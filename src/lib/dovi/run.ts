@@ -17,12 +17,52 @@ export function doviTool(): string {
   return process.env.DOVI_TOOL?.trim() || "dovi_tool";
 }
 
-/** `Film.mkv` becomes `Film.DV8.mkv` beside it; the source stays. */
+/** `Film.mkv` is converted to `Film.DV8.mkv` beside it before the two swap names. */
 export function doviTarget(filePath: string): string {
   const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   const dot = filePath.lastIndexOf(".");
   const stem = dot > slash ? filePath.slice(0, dot) : filePath;
   return `${stem.replace(/\.DV8$/i, "")}.DV8.mkv`;
+}
+
+/** `Film.mkv` or `Film.ts` keeps its name as `Film.DV7` once the converted copy takes its place. */
+export function doviOriginalName(filePath: string): string {
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const dot = filePath.lastIndexOf(".");
+  const stem = dot > slash ? filePath.slice(0, dot) : filePath;
+  return `${stem}.DV7`;
+}
+
+/** The converted copy takes the source's name, as an MKV. */
+export function doviFinalName(filePath: string): string {
+  return doviTarget(filePath).replace(/\.DV8\.mkv$/i, ".mkv");
+}
+
+/** One frame at this rate in nanoseconds, for the MKV header. */
+export function frameDurationNs(frameRate: string | null): number | null {
+  const [num, den] = (frameRate ?? "").split("/").map(Number);
+  if (!num || !den) return null;
+  return Math.round((den / num) * 1e9);
+}
+
+/**
+ * Rename the source to `<stem>.DV7` and the finished `<stem>.DV8.mkv` to the source's name (as `.mkv`),
+ * so Plex keeps the title, its history and its watched state. Nothing is overwritten or removed:
+ * when either name is taken, both files stay where they are.
+ */
+export function swapIntoPlace(source: string, converted: string): { final: string; original: string } | null {
+  const original = doviOriginalName(source);
+  const final = doviFinalName(source);
+  if (fs.existsSync(original)) return null;
+  if (final !== source && fs.existsSync(final)) return null;
+  fs.renameSync(source, original);
+  try {
+    fs.renameSync(converted, final);
+  } catch (caught) {
+    fs.renameSync(original, source);
+    throw caught;
+  }
+  return { final, original };
 }
 
 export type DoviStream = {
@@ -275,7 +315,7 @@ async function probe(file: string): Promise<DoviProbe> {
 }
 
 /**
- * Rewrite Dolby Vision profile 7 (Blu-ray dual layer) as profile 8.1 in a new MKV beside the source.
+ * Rewrite Dolby Vision profile 7 (Blu-ray dual layer) as profile 8.1 in a new MKV that takes the source's name.
  * The HDR10 picture is copied untouched; dovi_tool converts the Dolby Vision data and drops the
  * enhancement layer, which the Apple TV cannot use. Audio, subtitles, and chapters come from the source.
  */
@@ -383,19 +423,37 @@ export async function convertDolbyVision(options: {
     });
     await mux.done;
     fs.rmSync(video, { force: true });
+    const frameNs = frameDurationNs(main.frameRate);
+    if (times && frameNs) {
+      // mkvmerge takes the commonest gap between timestamps as the frame length; from a millisecond
+      // source that is 42 ms, which Plex then reports as 23.81 fps.
+      await start("mkvpropedit", [muxed, "--edit", "track:v1", "--set", `default-duration=${frameNs}`], { label: "mkvpropedit", okCodes: [1], timeoutMs: 10 * 60 * 1000 }).done;
+    }
 
     onProgress(96, "Checking the MKV");
     const problem = checkDoviOutput(input, await probe(muxed));
     if (problem) throw new Error(problem);
     onProgress(99, "Moving the MKV beside the file");
     deliverFile(muxed, target);
+    let placed: { final: string; original: string } | "taken" | "failed";
+    try {
+      placed = swapIntoPlace(source, target) ?? "taken";
+    } catch {
+      placed = "failed";
+    }
     const borrowed = repair.replaced
       ? ` ${repair.replaced === 1 ? "1 unreadable Dolby Vision packet was" : `${repair.replaced} unreadable Dolby Vision packets were`} replaced with the one from the frame before.`
       : "";
     const skipped = missing
       ? ` ${missing === 1 ? "1 damaged frame" : `${missing} damaged frames`} in the file ${missing === 1 ? "was" : "were"} left out; the picture holds still there for a moment and the audio stays in sync.`
       : "";
-    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${borrowed}${skipped} The original was left in place.`;
+    const kept =
+      placed === "taken"
+        ? ` Both files were left as they are, because ${path.basename(doviOriginalName(source))} or ${path.basename(doviFinalName(source))} already exists.`
+        : placed === "failed"
+          ? " The files could not be renamed, so both were left as they are."
+          : ` It now has the original's name, ${path.basename(placed.final)}, and the original was renamed to ${path.basename(placed.original)}.`;
+    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${borrowed}${skipped}${kept}`;
   } finally {
     removeWorkDir(workDir);
   }
