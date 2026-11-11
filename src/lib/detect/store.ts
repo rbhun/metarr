@@ -260,8 +260,21 @@ export function markWritten(db: Database.Database, from: { path: string; kind: s
   db.prepare(`UPDATE detect_results SET written_at = ? WHERE path = ? AND kind = ? AND ordinal = ?`).run(now, from.path, from.kind, from.ordinal);
 }
 
+/**
+ * The write hung on the NAS. A restart forgets the stuck tool but not the file, so without this mark
+ * the next start would open the same file again and hang the same way.
+ */
+export function markWriteStuck(db: Database.Database, row: { path: string; kind: string; ordinal: number }) {
+  db.prepare(`UPDATE detect_results SET write_stuck_at = ? WHERE path = ? AND kind = ? AND ordinal = ?`).run(
+    new Date().toISOString(),
+    row.path,
+    row.kind,
+    row.ordinal,
+  );
+}
+
 export function hasUnwritten(db: Database.Database): boolean {
-  const row = db.prepare(`SELECT 1 AS ok FROM detect_results WHERE language IS NOT NULL AND written_at IS NULL LIMIT 1`).get() as { ok: number } | undefined;
+  const row = db.prepare(`SELECT 1 AS ok FROM detect_results WHERE language IS NOT NULL AND written_at IS NULL AND write_stuck_at IS NULL LIMIT 1`).get() as { ok: number } | undefined;
   return Boolean(row);
 }
 

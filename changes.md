@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.190
+
+- Stop retrying a language write that hung on the NAS. The A-Team retag hung the NAS, and every restart opened the same file again and hung again, taking the UI down with it. Metarr now remembers such a file, and on start it also skips any file an earlier run left half-copied in the retag folder. The original is never touched.
+
 ## 0.0.189
 
 - Convert Dolby Vision 7 files whose Dolby Vision data is damaged inside the video, such as Cliffhanger's "Invalid RPU last byte: 200". Each unreadable Dolby Vision packet is replaced with the one from the frame before, so that frame borrows its neighbour's brightness data; the picture itself is untouched. The job says how many were replaced, and a file with more than a few damaged packets is still refused. The original is never touched.

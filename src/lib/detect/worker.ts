@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { applyTimeZone } from "@/lib/clock";
-import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
+import { applyNextSaved, confirmNextSaved, markInterruptedWrites, writeFinding } from "@/lib/detect/apply";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
 import { listSiblingSubtitles, mediaPathCandidates, resolveMediaPath, siblingSubtitlePath, unresolvedMediaMessage } from "@/lib/detect/paths";
@@ -46,7 +46,11 @@ function state() {
   return globalForDetect.__metarrDetect;
 }
 
+const globalForLeftovers = globalThis as { __metarrRetagLeftovers?: Promise<unknown> };
+
 async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<typeof readDetectSettings>["pathMaps"]): Promise<boolean> {
+  globalForLeftovers.__metarrRetagLeftovers ??= markInterruptedWrites(db).catch(() => 0);
+  await globalForLeftovers.__metarrRetagLeftovers;
   if (await applyNextSaved(db, pathMaps)) return true;
   if (await confirmNextSaved(db, pathMaps)) return true;
   if (await refreshNextFormat(db)) return true;
