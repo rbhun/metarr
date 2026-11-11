@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.188
+
+- Convert Dolby Vision 7 files with a few damaged TS packets instead of stopping with "Invalid RPU last byte". ffmpeg leaves the damaged frames out and every frame keeps its own time, so the picture holds still for a moment there and the audio stays in sync; the job says how many frames were left out. Damage that cannot be skipped now says so plainly and suggests a fresh MakeMKV remux. The original is never touched.
+
 ## 0.0.187
 
 - Find and fix Dolby Vision profile 7 files for the Apple TV, which drops frames on them. The profile comes from Plex and from the file scan, shows on the title as "Dolby Vision 7", and the library has a "Dolby Vision 7" filter. "Convert DV7 to 8.1" writes a new `.DV8.mkv` beside the file with dovi_tool: the HDR10 picture is copied without re-encoding, every audio and subtitle track is kept, and the copy is checked for profile 8, length, and audio sync before it is saved. The original stays. Run a sync first so existing titles get their profile.

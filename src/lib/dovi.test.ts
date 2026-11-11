@@ -7,7 +7,19 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { parsePlexItem } from "@/lib/connectors/plex";
 import { migrate } from "@/lib/db";
-import { checkDoviOutput, convertDolbyVision, doviTarget, doviTool, parseDoviProbe, videoDelayMs, type DoviProbe } from "@/lib/dovi/run";
+import {
+  checkDoviOutput,
+  convertDolbyVision,
+  damagedRpuMessage,
+  doviTarget,
+  doviTool,
+  missingFrames,
+  parseDoviProbe,
+  parseFrameTimes,
+  timestampFile,
+  videoDelayMs,
+  type DoviProbe,
+} from "@/lib/dovi/run";
 import { rulesWhere } from "@/lib/filters";
 import { videoFromProbe } from "@/lib/folder-scan";
 import { hdrText } from "@/lib/format";
@@ -120,6 +132,30 @@ test("a Dolby Vision job and an MKV rewrap of the same file queue separately", (
   assert.deepEqual([...finishedRewrapPaths(db)], []);
 });
 
+test("frame times from ffmpeg become mkvmerge timestamps that keep a gap where frames were damaged", () => {
+  const text = [
+    "#tb 0: 1/90000",
+    "#media_type 0: video",
+    "0,      -7470,          0,     3753,    12312, 0x36efced7, S=1,        1",
+    "0,      -3717,      11261,     3753,      500, 0x00000001",
+    "0,          36,       3754,     3753,      400, 0x00000002",
+    "0,       3789,       7507,     3753,      400, 0x00000003",
+    "0,      11295,      26276,     3753,      400, 0x00000004",
+  ].join("\n");
+  const times = parseFrameTimes(text);
+  assert.deepEqual(times, { tickSeconds: 1 / 90000, pts: [0, 11261, 3754, 7507, 26276] });
+  assert.equal(timestampFile(times!), "# timestamp format v2\n0.000\n41.711\n83.411\n125.122\n291.956\n");
+  assert.match(timestampFile(times!, 500), /^# timestamp format v2\n500\.000\n541\.711\n/);
+  assert.equal(missingFrames(times!, "24000/1001"), 3);
+  assert.equal(missingFrames(times!, null), 0);
+  assert.equal(parseFrameTimes("#tb 0: 1/90000\n"), null);
+});
+
+test("a Dolby Vision packet dovi_tool cannot read is explained, and other errors are left alone", () => {
+  assert.match(damagedRpuMessage(new Error("Error: Invalid RPU last byte: 200 (dovi_tool exited with code 1.)")) ?? "", /damaged in a way Metarr cannot skip.*MakeMKV/);
+  assert.equal(damagedRpuMessage(new Error("No space left on device")), null);
+});
+
 function hasTools(): boolean {
   const ok = (command: string, args: string[]) => spawnSync(command, args, { stdio: "ignore" }).status === 0;
   return ok(doviTool(), ["--version"]) && ok("mkvmerge", ["--version"]) && ok("ffmpeg", ["-hide_banner", "-h", "encoder=libx265"]);
@@ -162,6 +198,51 @@ test("a Dolby Vision 7 transport stream becomes an 8.1 MKV beside it with the au
 
     await assert.rejects(convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined }), /already exists/);
     assert.match(await convertDolbyVision({ source: target, workDir: path.join(root, "work"), onProgress: () => undefined }), /Nothing to convert/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function videoSpan(file: string): number {
+  const times = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", file])
+    .toString()
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => Number.parseFloat(line));
+  return Math.max(...times) - Math.min(...times);
+}
+
+test("a TS with lost packets still converts, leaving the damaged frames out with the picture in sync", { skip: !hasTools() && "needs dovi_tool, mkvmerge, and ffmpeg with libx265" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi-damaged-"));
+  try {
+    const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: root, stdio: "pipe" });
+    fs.writeFileSync(path.join(root, "rpu.bin"), Buffer.from(PROFILE7_RPU, "base64"));
+    run("ffmpeg", [
+      "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=24000/1001:d=10", "-pix_fmt", "yuv420p10le", "-c:v", "libx265",
+      "-x265-params", "log-level=error:hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", "bl.hevc",
+    ]);
+    run(doviTool(), ["inject-rpu", "-i", "bl.hevc", "--rpu-in", "rpu.bin", "-o", "p7.hevc"]);
+    run("mkvmerge", ["-q", "-o", "p7.mkv", "--default-duration", "0:24000/1001p", "p7.hevc"]);
+    run("ffmpeg", ["-v", "error", "-i", "p7.mkv", "-f", "lavfi", "-i", "sine=d=10", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "ac3", "-f", "mpegts", "clean.ts"]);
+
+    const packets = fs.readFileSync(path.join(root, "clean.ts"));
+    const video: number[] = [];
+    for (let at = 0; at + 188 <= packets.length; at += 188) {
+      if ((((packets[at + 1]! & 0x1f) << 8) | packets[at + 2]!) === 0x100) video.push(at);
+    }
+    const lost = new Set(Array.from({ length: 30 }, (_, step) => video[Math.floor(video.length / 3) + step * 7]));
+    const kept: Buffer[] = [];
+    for (let at = 0; at + 188 <= packets.length; at += 188) if (!lost.has(at)) kept.push(packets.subarray(at, at + 188));
+    const source = path.join(root, "Film.ts");
+    fs.writeFileSync(source, Buffer.concat(kept));
+
+    const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
+    assert.match(message, /Saved Film\.DV8\.mkv/);
+    assert.match(message, /\d+ damaged frames in the file were left out/);
+    const target = path.join(root, "Film.DV8.mkv");
+    assert.equal(profile(target), "8");
+    assert.ok(Math.abs(videoSpan(target) - videoSpan(path.join(root, "clean.ts"))) < 0.05, "the last frame plays at the same moment as in the source");
+    assert.ok(fs.existsSync(source), "the source stays");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

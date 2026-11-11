@@ -104,6 +104,61 @@ export function checkDoviOutput(source: DoviProbe, output: DoviProbe): string | 
   return null;
 }
 
+export type FrameTimes = { tickSeconds: number; pts: number[] };
+
+/** Packet times from ffmpeg's `framecrc` output: a `#tb 0: 1/90000` header, then `stream, dts, pts, …` per packet. */
+export function parseFrameTimes(text: string): FrameTimes | null {
+  let tickSeconds = 0;
+  const pts: number[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const base = /^#tb 0: (\d+)\/(\d+)$/.exec(line.trim());
+    if (base) {
+      tickSeconds = Number(base[1]) / Number(base[2]);
+      continue;
+    }
+    if (line.startsWith("#")) continue;
+    const value = Number(line.split(",")[2]);
+    if (Number.isFinite(value)) pts.push(value);
+  }
+  if (!tickSeconds || pts.length < 2) return null;
+  return { tickSeconds, pts };
+}
+
+/**
+ * An mkvmerge v2 timestamp file, one presentation time per frame from `delayMs`. Frames ffmpeg left out
+ * because their packets were damaged leave a gap, so the picture after them stays in sync with the audio.
+ * mkvmerge ignores `--sync` on a track with a timestamp file, so the delay is written into the times.
+ */
+export function timestampFile(times: FrameTimes, delayMs = 0): string {
+  const sorted = [...times.pts].sort((a, b) => a - b);
+  const first = sorted[0] ?? 0;
+  return `# timestamp format v2\n${sorted.map((value) => `${(delayMs + (value - first) * times.tickSeconds * 1000).toFixed(3)}\n`).join("")}`;
+}
+
+/** How many frames are missing between the timestamps, at the stream's frame rate. */
+export function missingFrames(times: FrameTimes, frameRate: string | null): number {
+  const [num, den] = (frameRate ?? "").split("/").map(Number);
+  if (!num || !den) return 0;
+  const frame = den / num / times.tickSeconds;
+  const sorted = [...times.pts].sort((a, b) => a - b);
+  let missing = 0;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const gap = sorted[index]! - sorted[index - 1]!;
+    if (gap > frame * 1.5) missing += Math.round(gap / frame) - 1;
+  }
+  return missing;
+}
+
+/** dovi_tool stops at the first Dolby Vision packet it cannot read. */
+export function damagedRpuMessage(error: unknown): string | null {
+  const text = error instanceof Error ? error.message : String(error);
+  if (!/Invalid RPU|RPU CRC32|Failed (?:parsing|to parse) RPU/i.test(text)) return null;
+  return (
+    `The Dolby Vision data in this file is damaged in a way Metarr cannot skip (${text}). Nothing was written and the file was left as it is. ` +
+    "Remuxing the disc again with MakeMKV, or getting another copy, gives clean Dolby Vision data."
+  );
+}
+
 function lastLines(text: string): string {
   return text
     .split(/\r?\n/)
@@ -220,13 +275,23 @@ export async function convertDolbyVision(options: {
   removeWorkDir(workDir);
   fs.mkdirSync(workDir, { recursive: true });
   const video = path.join(workDir, "video.hevc");
+  const frameList = path.join(workDir, "frames.txt");
+  const timestamps = path.join(workDir, "timestamps.txt");
   const muxed = path.join(workDir, name);
   try {
     onProgress(0, "Converting Dolby Vision");
     let lastWrite = 0;
     const extract = start(
       "ffmpeg",
-      ["-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:2", "-i", source, "-map", `0:${main.index}`, "-c:v", "copy", "-bsf:v", "hevc_mp4toannexb", "-f", "hevc", "pipe:1"],
+      [
+        "-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:2",
+        // A TS packet lost in transit glues two frames together, and dovi_tool stops at the broken
+        // Dolby Vision packet. ffmpeg knows these packets are damaged and can leave them out.
+        "-fflags", "+discardcorrupt",
+        "-i", source,
+        "-map", `0:${main.index}`, "-c:v", "copy", "-bsf:v", "hevc_mp4toannexb", "-f", "hevc", "pipe:1",
+        "-map", `0:${main.index}`, "-c:v", "copy", "-f", "framecrc", frameList,
+      ],
       {
         label: "ffmpeg",
         stdout: true,
@@ -249,18 +314,21 @@ export async function convertDolbyVision(options: {
     } catch (caught) {
       extract.child.kill("SIGKILL");
       convert.child.kill("SIGKILL");
-      throw caught;
+      throw new Error(damagedRpuMessage(caught) ?? (caught instanceof Error ? caught.message : String(caught)));
     }
+    const delay = videoDelayMs(input);
+    const times = parseFrameTimes(fs.readFileSync(frameList, "utf8"));
+    if (times) fs.writeFileSync(timestamps, timestampFile(times, delay));
+    const missing = times ? missingFrames(times, main.frameRate) : 0;
 
     onProgress(70, "Saving the MKV");
-    const delay = videoDelayMs(input);
     const mux = start(
       "mkvmerge",
       [
         "--gui-mode",
         "-o", muxed,
-        ...(delay ? ["--sync", `0:${delay}`] : []),
-        ...(main.frameRate ? ["--default-duration", `0:${main.frameRate}p`] : []),
+        ...(delay && !times ? ["--sync", `0:${delay}`] : []),
+        ...(times ? ["--timestamps", `0:${timestamps}`] : main.frameRate ? ["--default-duration", `0:${main.frameRate}p`] : []),
         video,
         "--no-video", source,
       ],
@@ -278,7 +346,10 @@ export async function convertDolbyVision(options: {
     if (problem) throw new Error(problem);
     onProgress(99, "Moving the MKV beside the file");
     deliverFile(muxed, target);
-    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept. The original was left in place.`;
+    const skipped = missing
+      ? ` ${missing === 1 ? "1 damaged frame" : `${missing} damaged frames`} in the file ${missing === 1 ? "was" : "were"} left out; the picture holds still there for a moment and the audio stays in sync.`
+      : "";
+    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${skipped} The original was left in place.`;
   } finally {
     removeWorkDir(workDir);
   }
