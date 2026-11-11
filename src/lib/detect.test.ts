@@ -750,7 +750,9 @@ test("unknown audio and subtitles are scanned, labeled tracks and discs are not"
 });
 
 test("detected languages replace unknown on the matching stream", () => {
-  const detections = new Map<string, StoredDetection>([["/movies/Dune.mkv\0audio\0" + "1", { language: "Hungarian", role: "commentary" }]]);
+  const detections = new Map<string, StoredDetection>([
+    ["/movies/Dune.mkv\0audio\0" + "1", { language: "Hungarian", role: "commentary", confidence: null, message: null, log: null, writtenAt: null }],
+  ]);
   const [first, second] = overlayAudio("/movies/Dune.mkv", [
     { language: "English", layout: "5.1", codec: "DTS", streamIndex: 0 },
     { language: null, layout: "2.0", codec: "AAC", streamIndex: 1 },
@@ -760,18 +762,18 @@ test("detected languages replace unknown on the matching stream", () => {
   assert.equal(second?.detectedRole, "commentary");
   const [named] = overlayAudio("/movies/Adjustment.m2ts", [
     { language: null, layout: "2.0", codec: "AC3", streamIndex: 1 },
-  ], new Map([["/movies/Adjustment.m2ts\0audio\0" + "1", { language: "Portuguese", role: "short", source: "file" }]]));
+  ], new Map([["/movies/Adjustment.m2ts\0audio\0" + "1", { language: "Portuguese", role: "short", source: "file", confidence: null, message: null, log: null, writtenAt: null }]]));
   assert.equal(named?.detectedLanguage, "Portuguese");
   assert.equal(named?.detectedRole, "short");
   assert.equal(named?.fromFile, true);
   const [subtitle] = overlaySubtitles("/movies/Dune.mkv", [
     { language: null, placement: "external", format: "SRT", forced: false, file: "/movies/Dune.hu.srt" },
-  ], new Map([[`/movies/Dune.hu.srt\0subtitle\0${0}`, { language: "Hungarian", role: null }]]));
+  ], new Map([[`/movies/Dune.hu.srt\0subtitle\0${0}`, { language: "Hungarian", role: null, confidence: null, message: null, log: null, writtenAt: null }]]));
   assert.equal(subtitle?.detectedLanguage, "Hungarian");
   assert.equal(subtitle?.forced, false);
   const [signs] = overlaySubtitles("/movies/Backrooms.mkv", [
     { language: null, placement: "internal", format: "PGS", forced: false, streamIndex: 0 },
-  ], new Map([["/movies/Backrooms.mkv\0subtitle\0" + "0", { language: "French", role: "forced" }]]));
+  ], new Map([["/movies/Backrooms.mkv\0subtitle\0" + "0", { language: "French", role: "forced", confidence: null, message: null, log: null, writtenAt: null }]]));
   assert.equal(signs?.detectedLanguage, "French");
   assert.equal(signs?.forced, true);
   assert.equal(subtitleNote(signs!), "PGS · forced");

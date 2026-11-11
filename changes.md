@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.192
+
+- Fix the Docker image build. TypeScript rejected detection tests whose saved language was missing fields, so `npm run build` stopped.
+
 ## 0.0.191
 
 - Open a language check from the file path or a track: where it listened, how sure it was, and whether the language was kept. A recognized language on an AVI or loose transport stream is copied to an MKV with the language on the audio stream, which is what Plex reads, and the original is kept as .metarr-orig so Plex plays the MKV. Each task is tagged with what it is, including a deinterlace and a Dolby Vision reconvert.
