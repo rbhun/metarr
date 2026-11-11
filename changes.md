@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.189
+
+- Convert Dolby Vision 7 files whose Dolby Vision data is damaged inside the video, such as Cliffhanger's "Invalid RPU last byte: 200". Each unreadable Dolby Vision packet is replaced with the one from the frame before, so that frame borrows its neighbour's brightness data; the picture itself is untouched. The job says how many were replaced, and a file with more than a few damaged packets is still refused. The original is never touched.
+
 ## 0.0.188
 
 - Convert Dolby Vision 7 files with a few damaged TS packets instead of stopping with "Invalid RPU last byte". ffmpeg leaves the damaged frames out and every frame keeps its own time, so the picture holds still for a moment there and the audio stays in sync; the job says how many frames were left out. Damage that cannot be skipped now says so plainly and suggests a fresh MakeMKV remux. The original is never touched.

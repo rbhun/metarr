@@ -4,6 +4,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
+import { RpuRepair } from "@/lib/dovi/rpu-repair";
 import { doviProfileOf } from "@/lib/media";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
 
@@ -307,7 +308,8 @@ export async function convertDolbyVision(options: {
       },
     );
     const convert = start(doviTool(), ["-m", "2", "convert", "--discard", "-", "-o", video], { label: "dovi_tool", stdin: true });
-    extract.child.stdout!.pipe(convert.child.stdin!);
+    const repair = new RpuRepair();
+    extract.child.stdout!.pipe(repair).pipe(convert.child.stdin!);
     convert.child.stdin!.on("error", () => undefined);
     try {
       await Promise.all([extract.done, convert.done]);
@@ -315,6 +317,11 @@ export async function convertDolbyVision(options: {
       extract.child.kill("SIGKILL");
       convert.child.kill("SIGKILL");
       throw new Error(damagedRpuMessage(caught) ?? (caught instanceof Error ? caught.message : String(caught)));
+    }
+    if (repair.replaced > Math.max(24, repair.total * 0.01)) {
+      throw new Error(
+        `${repair.replaced} of ${repair.total} Dolby Vision packets could not be read. That is more than a few damaged frames, so nothing was saved and the file was left as it is.`,
+      );
     }
     const delay = videoDelayMs(input);
     const times = parseFrameTimes(fs.readFileSync(frameList, "utf8"));
@@ -346,10 +353,13 @@ export async function convertDolbyVision(options: {
     if (problem) throw new Error(problem);
     onProgress(99, "Moving the MKV beside the file");
     deliverFile(muxed, target);
+    const borrowed = repair.replaced
+      ? ` ${repair.replaced === 1 ? "1 unreadable Dolby Vision packet was" : `${repair.replaced} unreadable Dolby Vision packets were`} replaced with the one from the frame before.`
+      : "";
     const skipped = missing
       ? ` ${missing === 1 ? "1 damaged frame" : `${missing} damaged frames`} in the file ${missing === 1 ? "was" : "were"} left out; the picture holds still there for a moment and the audio stays in sync.`
       : "";
-    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${skipped} The original was left in place.`;
+    return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${borrowed}${skipped} The original was left in place.`;
   } finally {
     removeWorkDir(workDir);
   }

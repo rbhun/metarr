@@ -20,6 +20,7 @@ import {
   videoDelayMs,
   type DoviProbe,
 } from "@/lib/dovi/run";
+import { RpuRepair, crc32Mpeg2, rpuIsValid, unescapeNal } from "@/lib/dovi/rpu-repair";
 import { rulesWhere } from "@/lib/filters";
 import { videoFromProbe } from "@/lib/folder-scan";
 import { hdrText } from "@/lib/format";
@@ -156,6 +157,43 @@ test("a Dolby Vision packet dovi_tool cannot read is explained, and other errors
   assert.equal(damagedRpuMessage(new Error("No space left on device")), null);
 });
 
+test("an RPU is valid when it ends in 0x80 after a matching CRC-32/MPEG-2", () => {
+  assert.equal(crc32Mpeg2(Buffer.from("123456789")), 0x0376e6e7);
+  assert.deepEqual([...unescapeNal(Buffer.from([1, 0, 0, 3, 1, 0, 0, 3]))], [1, 0, 0, 1, 0, 0]);
+  const rpu = Buffer.from(PROFILE7_RPU, "base64").subarray(4);
+  const nal = Buffer.concat([Buffer.from([0x7c, 0x01]), rpu]);
+  assert.ok(rpuIsValid(nal));
+  const broken = Buffer.from(nal);
+  broken[broken.length - 1] = 200;
+  assert.ok(!rpuIsValid(broken));
+});
+
+function repairAll(input: Buffer, chunk: number): { output: Buffer; repair: RpuRepair } {
+  const repair = new RpuRepair();
+  const parts: Buffer[] = [];
+  repair.on("data", (part: Buffer) => parts.push(part));
+  for (let at = 0; at < input.length; at += chunk) repair.write(input.subarray(at, at + chunk));
+  repair.end();
+  return { output: Buffer.concat(parts), repair };
+}
+
+test("an unreadable RPU borrows the one before it, and everything else passes through byte for byte", () => {
+  const rpu = Buffer.concat([Buffer.from([0x7c, 0x01]), Buffer.from(PROFILE7_RPU, "base64").subarray(4)]);
+  const broken = Buffer.from(rpu);
+  broken[broken.length - 1] = 200;
+  const slice = (fill: number) => Buffer.concat([Buffer.from([0x02, 0x01]), Buffer.alloc(300, fill)]);
+  const unit = (nal: Buffer, four = false) => Buffer.concat([Buffer.from(four ? [0, 0, 0, 1] : [0, 0, 1]), nal]);
+  const stream = Buffer.concat([unit(slice(7), true), unit(rpu), unit(slice(8), true), unit(broken), unit(slice(9), true), unit(rpu)]);
+  const expected = Buffer.concat([unit(slice(7), true), unit(rpu), unit(slice(8), true), unit(rpu), unit(slice(9), true), unit(rpu)]);
+  for (const size of [1, 2, 3, 5, 64, 100_000]) {
+    const { output, repair } = repairAll(stream, size);
+    assert.ok(output.equals(expected), `chunks of ${size}`);
+    assert.deepEqual([repair.total, repair.replaced, repair.unrepaired], [3, 1, 0]);
+  }
+  const clean = Buffer.concat([Buffer.from([9, 9]), unit(slice(1)), unit(rpu)]);
+  assert.ok(repairAll(clean, 7).output.equals(clean));
+});
+
 function hasTools(): boolean {
   const ok = (command: string, args: string[]) => spawnSync(command, args, { stdio: "ignore" }).status === 0;
   return ok(doviTool(), ["--version"]) && ok("mkvmerge", ["--version"]) && ok("ffmpeg", ["-hide_banner", "-h", "encoder=libx265"]);
@@ -243,6 +281,39 @@ test("a TS with lost packets still converts, leaving the damaged frames out with
     assert.equal(profile(target), "8");
     assert.ok(Math.abs(videoSpan(target) - videoSpan(path.join(root, "clean.ts"))) < 0.05, "the last frame plays at the same moment as in the source");
     assert.ok(fs.existsSync(source), "the source stays");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a Dolby Vision packet damaged inside the video is replaced so the file still converts", { skip: !hasTools() && "needs dovi_tool, mkvmerge, and ffmpeg with libx265" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi-rpu-"));
+  try {
+    const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: root, stdio: "pipe" });
+    fs.writeFileSync(path.join(root, "rpu.bin"), Buffer.from(PROFILE7_RPU, "base64"));
+    run("ffmpeg", [
+      "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24000/1001:d=4", "-pix_fmt", "yuv420p10le", "-c:v", "libx265",
+      "-x265-params", "log-level=error:hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", "bl.hevc",
+    ]);
+    run(doviTool(), ["inject-rpu", "-i", "bl.hevc", "--rpu-in", "rpu.bin", "-o", "p7.hevc"]);
+    const stream = fs.readFileSync(path.join(root, "p7.hevc"));
+    const marker = Buffer.from([0, 0, 1, 0x7c, 0x01]);
+    let at = -1;
+    for (let count = 0; count < 40; count += 1) at = stream.indexOf(marker, at + 1);
+    const next = stream.indexOf(Buffer.from([0, 0, 1]), at + 3);
+    let last = next - 1;
+    while (stream[last] === 0) last -= 1;
+    stream[last] = 200;
+    fs.writeFileSync(path.join(root, "p7.hevc"), stream);
+    const broken = spawnSync(doviTool(), ["-m", "2", "convert", "--discard", "p7.hevc", "-o", "plain.hevc"], { cwd: root });
+    assert.match(broken.stderr.toString() + broken.stdout.toString(), /Invalid RPU last byte: 200/);
+
+    run("mkvmerge", ["-q", "-o", "p7.mkv", "--default-duration", "0:24000/1001p", "p7.hevc"]);
+    const source = path.join(root, "Film.ts");
+    run("ffmpeg", ["-v", "error", "-i", "p7.mkv", "-f", "lavfi", "-i", "sine=d=4", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "ac3", "-f", "mpegts", source]);
+    const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
+    assert.match(message, /1 unreadable Dolby Vision packet was replaced with the one from the frame before/);
+    assert.equal(profile(path.join(root, "Film.DV8.mkv")), "8");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
