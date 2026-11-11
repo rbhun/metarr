@@ -247,6 +247,7 @@ test("paths and library discs feed the remux queue and history list", () => {
   assert.equal(failed.jobs[0]?.message, "Remux failed with no further detail from MakeMKV.");
   const tasks = listTaskJobs(db, { queue: "remux", status: "failed", page: 1, pageSize: 10 });
   assert.equal(tasks.total, 1);
+  assert.equal(tasks.jobs[0]?.tag, "Rip");
   assert.match(tasks.jobs[0]?.detail ?? "", /Disc remux/);
   assert.equal(taskTotalsFor(db, "remux").failed, 1);
   const pending = enqueuePaths(db, [{ path: "/movies/Wait.iso", label: "Wait (2000)" }], false);

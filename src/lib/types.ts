@@ -72,6 +72,8 @@ export type AudioTrack = {
   folderOnly?: boolean;
   detectedLanguage?: string | null;
   detectedRole?: "commentary" | "short" | null;
+  /** What the language check heard, and whether it was written where Plex can read it. */
+  detectionLog?: string | null;
   fromFile?: boolean;
   omittedByPlex?: boolean;
   conflict?: string | null;
@@ -91,6 +93,8 @@ export type SubtitleTrack = {
   /** A subtitle file in the video's folder that Plex does not list. */
   folderOnly?: boolean;
   detectedLanguage?: string | null;
+  /** What the language check read, and whether it was written where Plex can read it. */
+  detectionLog?: string | null;
   fromFile?: boolean;
   conflict?: string | null;
   sources?: TrackSources;
@@ -152,6 +156,7 @@ export type MediaVersion = {
   container: string | null;
   resolution: string | null;
   hdr: HdrLabel;
+  /** Dolby Vision profile (5, 7, 8…) when the file carries Dolby Vision. */
   doviProfile?: number | null;
   is3d: boolean;
   qualityName: string | null;

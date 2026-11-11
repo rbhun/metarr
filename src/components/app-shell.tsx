@@ -3,6 +3,7 @@
 import { CpuReadout } from "@/components/cpu-readout";
 import { TaskCount } from "@/components/detect-tasks";
 import { RemuxCount } from "@/components/remux-tasks";
+import { StuckToolsWarning } from "@/components/stuck-tools-warning";
 import { VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import {
@@ -238,6 +239,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             </Button>
           </header>
+          <StuckToolsWarning />
           <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </div>
       </div>

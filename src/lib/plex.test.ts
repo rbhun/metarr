@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyDetailedItems, externalSubtitleLacksFile, parsePlexItem, streamLanguageMissing } from "@/lib/connectors/plex";
+import { hdrText } from "@/lib/format";
+import { doviProfileOf } from "@/lib/media";
 
 const movie = {
   ratingKey: "10",
@@ -50,6 +52,29 @@ test("plex movie streams become audio and subtitle languages", () => {
   assert.equal(parsed.files[0]?.videoCodec, "HEVC");
   assert.equal(parsed.files[0]?.bitDepth, 8);
   assert.equal(parsed.files[0]?.aspectRatio, "1.78:1");
+});
+
+test("Plex reports the Dolby Vision profile on the video stream", () => {
+  const parsed = parsePlexItem({
+    ratingKey: "30",
+    type: "movie",
+    title: "Basic Instinct",
+    year: 1992,
+    Media: {
+      videoResolution: "4k",
+      Part: {
+        file: "/movies/Basic Instinct (1992)/Basic Instinct.ts",
+        Stream: [{ streamType: 1, codec: "hevc", profile: "main 10", DOVIPresent: true, DOVIProfile: 7, colorTrc: "smpte2084" }],
+      },
+    },
+  });
+  assert.equal(parsed?.files[0]?.hdr, "Dolby Vision");
+  assert.equal(parsed?.files[0]?.doviProfile, 7);
+  assert.equal(parsed?.files[0]?.videoProfile, "main 10");
+  assert.equal(doviProfileOf("8"), 8);
+  assert.equal(doviProfileOf("dv"), null);
+  assert.equal(hdrText("Dolby Vision", 7), "Dolby Vision 7");
+  assert.equal(hdrText("Dolby Vision", null), "Dolby Vision");
 });
 
 test("plex writes channel layout as x.y and leaves a missing language blank", () => {

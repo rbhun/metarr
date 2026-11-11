@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.191
+
+- Open a language check from the file path or a track: where it listened, how sure it was, and whether the language was kept. A recognized language on an AVI or loose transport stream is copied to an MKV with the language on the audio stream, which is what Plex reads, and the original is kept as .metarr-orig so Plex plays the MKV. Each task is tagged with what it is, including a deinterlace and a Dolby Vision reconvert.
+
 ## 0.0.190
 
 - Stop retrying a language write that hung on the NAS. The A-Team retag hung the NAS, and every restart opened the same file again and hung again, taking the UI down with it. Metarr now remembers such a file, and on start it also skips any file an earlier run left half-copied in the retag folder. The original is never touched.

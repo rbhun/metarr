@@ -1,4 +1,5 @@
-const MIN_PROBABILITY = 0.8;
+/** Whisper has to be at least this sure before a heard language is kept. */
+export const MIN_LANGUAGE_PROBABILITY = 0.8;
 
 export function agreeLanguage(samples: Array<{ language: string; probability: number }>): { language: string | null; confidence: number } {
   const usable = samples.filter((sample) => sample.language && sample.probability > 0);
@@ -17,6 +18,6 @@ export function agreeLanguage(samples: Array<{ language: string; probability: nu
   const [language, stats] = top;
   // A 1–1 split is not a majority. One sample can still decide when it is the only vote.
   const majority = stats.count * 2 > usable.length;
-  if (!majority || stats.probability < MIN_PROBABILITY) return { language: null, confidence: stats.probability };
+  if (!majority || stats.probability < MIN_LANGUAGE_PROBABILITY) return { language: null, confidence: stats.probability };
   return { language, confidence: stats.probability };
 }

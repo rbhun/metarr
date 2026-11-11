@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { DetectionDialog } from "@/components/detection-log";
 import { enqueueTracks } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
@@ -96,6 +98,7 @@ export function AudioTracks({
   className?: string;
   scroll?: boolean;
 }) {
+  const [log, setLog] = useState<{ title: string; body: string; detect: (() => void) | null } | null>(null);
   const rows = tracks.length
     ? tracks
         .map((track, index) => ({
@@ -109,19 +112,30 @@ export function AudioTracks({
           conflict: track.conflict ?? null,
           sources: track.sources,
           detected: track.detectedLanguage ?? null,
+          detectionLog: track.detectionLog ?? null,
           layout: formatLayout(track.layout),
           codec: track.codec,
           targets: audioTargets(path, track, index, label),
           note: audioNote(track),
         }))
         .filter((row) => row.language || row.layout || row.codec || row.file)
-    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, folderOnly: false, file: null, omittedByPlex: false, conflict: null, sources: undefined, detected: null, layout: null, codec: null, targets: [], note: "" }));
+    : languages.map((language) => ({ language, commentary: false, short: false, fromFile: false, folderOnly: false, file: null, omittedByPlex: false, conflict: null, sources: undefined, detected: null, detectionLog: null, layout: null, codec: null, targets: [], note: "" }));
 
   if (rows.length === 0) return <p>—</p>;
 
   const items = rows.map((row, index) => {
         const note = languageHover(row.sources, row.language, row.conflict, row.detected);
-        const hover = note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
+        const hover = row.detectionLog
+          ? "Show what was probed"
+          : note || (row.targets.length ? (row.language ? "Listen again" : "Detect this language now") : undefined);
+        const openLog = row.detectionLog
+          ? () =>
+              setLog({
+                title: `${label} · ${row.language ?? "Unknown"}`,
+                body: row.detectionLog ?? "",
+                detect: row.targets.length ? () => void detectUnknown(row.targets) : null,
+              })
+          : null;
         const formatConflict = row.conflict?.includes("The file is ") ?? false;
         const tone = formatConflict
           ? formatConflictClass
@@ -134,11 +148,11 @@ export function AudioTracks({
         return (
         <p key={`${row.language ?? ""}-${row.layout ?? ""}-${row.codec ?? ""}-${row.file ?? ""}-${index}`} className="flex flex-wrap items-center gap-1">
           {row.language ? (
-            row.targets.length ? (
+            row.targets.length || openLog ? (
               <SourceHover text={hover}>
                 <button
                   type="button"
-                  onClick={() => void detectUnknown(row.targets)}
+                  onClick={() => (openLog ? openLog() : void detectUnknown(row.targets))}
                   className={`cursor-pointer border-0 bg-transparent p-0 font-inherit underline decoration-dotted underline-offset-2 hover:decoration-solid ${tone ?? ""}`}
                 >
                   {text}
@@ -152,7 +166,7 @@ export function AudioTracks({
           ) : (
             <SourceHover text={hover}>
               <span>
-                <UnknownLabel onClick={row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
+                <UnknownLabel onClick={openLog ? () => openLog() : row.targets.length ? () => void detectUnknown(row.targets) : undefined} />
               </span>
             </SourceHover>
           )}
@@ -163,5 +177,26 @@ export function AudioTracks({
         </p>
         );
       });
-  return scroll ? <LineScroll className={className}>{items}</LineScroll> : <div className={className}>{items}</div>;
+  const list = scroll ? <LineScroll className={className}>{items}</LineScroll> : <div className={className}>{items}</div>;
+  return (
+    <>
+      {list}
+      <DetectionDialog
+        open={log != null}
+        onOpenChange={(open) => {
+          if (!open) setLog(null);
+        }}
+        title={log?.title ?? "Language check"}
+        entries={log ? [{ heading: "Language check", body: log.body }] : []}
+        onDetect={
+          log?.detect
+            ? () => {
+                log.detect?.();
+                setLog(null);
+              }
+            : undefined
+        }
+      />
+    </>
+  );
 }

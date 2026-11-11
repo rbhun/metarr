@@ -8,6 +8,7 @@ import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { languageCode } from "@/lib/media";
+import { killTool } from "@/lib/stuck-tools";
 
 const MERGE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 60_000;
@@ -111,7 +112,7 @@ function runTool(
       reject(error);
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, command, args);
       fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
     }, timeoutMs);
     const unwatch = watchStall(child.pid, command, (error) => {

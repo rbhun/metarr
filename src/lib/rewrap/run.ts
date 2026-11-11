@@ -6,6 +6,7 @@ import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { languageCode } from "@/lib/media";
+import { killTool } from "@/lib/stuck-tools";
 import { joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
 
 const REWRAP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
@@ -130,7 +131,7 @@ function runTool(
       reject(error);
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTool(child, command, args);
       fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
     }, timeoutMs);
     const unwatch = watchStall(child.pid, command, (error) => {
@@ -217,6 +218,19 @@ function streamSignature(probe: Probe): string {
 
 function concatList(files: string[]): string {
   return `${files.map((file) => `file '${file.replace(/'/g, `'\\''`)}'`).join("\n")}\n`;
+}
+
+/** Write recognized languages onto audio streams already stored in an MKV. Returns how many streams were tagged. */
+export async function tagMkvLanguages(file: string, languages: Array<string | null>): Promise<number> {
+  const args = [file];
+  languages.forEach((language, ordinal) => {
+    const code = language ? languageCode(language) : null;
+    if (!code) return;
+    args.push("--edit", `track:a${ordinal + 1}`, "--set", `language=${code}`);
+  });
+  if (args.length === 1) return 0;
+  await runTool("mkvpropedit", args, 60_000);
+  return languages.filter((language) => (language ? languageCode(language) : null)).length;
 }
 
 export async function rewrapAvi(options: {

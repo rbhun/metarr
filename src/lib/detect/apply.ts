@@ -10,10 +10,12 @@ import { scratchRoot } from "@/lib/scratch";
 import { removeWorkDir, StuckToolError, watchStall } from "@/lib/stuck";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { queueLanguageCopy } from "@/lib/detect/plex-copy";
 import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { markTagChecked, markWriteStuck, markWritten, reopenForWrite } from "@/lib/detect/store";
 import { languageName } from "@/lib/media";
+import { killTool } from "@/lib/stuck-tools";
 import type Database from "better-sqlite3";
 
 export type WriteResult = {
@@ -22,6 +24,8 @@ export type WriteResult = {
   changed: boolean;
   settled: boolean;
   videoPaths: string[];
+  /** An MKV copy was just queued so Plex can read the language. */
+  queuedRewrap?: boolean;
   stuck?: boolean;
 };
 
@@ -37,10 +41,11 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
   return new Promise((resolve, reject) => {
     const low = idle(command, args);
     let settled = false;
-    const child = execFile(low.command, low.args, { timeout, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const child = execFile(low.command, low.args, { maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
       unwatch();
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       const out = stdout?.toString() ?? "";
       const err = stderr?.toString() ?? "";
       const code = error ? (error as { code?: string | number }).code : undefined;
@@ -55,10 +60,18 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
       else if (timedOut) reject(new Error(`${command} timed out, so the file was left unchanged.`));
       else reject(new Error(commandFailureText(command, out, err)));
     });
+    const timer = setTimeout(() => {
+      killTool(child, command, args);
+      if (settled) return;
+      settled = true;
+      unwatch();
+      reject(new Error(`${command} timed out, so the file was left unchanged.`));
+    }, timeout);
     const unwatch = watchStall(child.pid, command, (error) => {
       child.kill("SIGKILL");
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       reject(error);
     });
   });
@@ -243,6 +256,17 @@ export async function writeFinding(
   role: "commentary" | "forced" | "short" | null,
 ): Promise<WriteResult> {
   const plan = planTag(localFile, job.kind, job.ordinal, language, role);
+  if (canRewrap(null, job.path) && (plan.action === "riff" || (plan.action === "skip" && plan.reason === "container"))) {
+    if (dryRun()) {
+      return unchanged(
+        job,
+        `Dry run: would copy this file to an MKV with ${language} on the audio stream, which is what Plex reads. Nothing was written.`,
+        false,
+      );
+    }
+    const copy = queueLanguageCopy(db, job.path);
+    return { storedPath: job.path, sentence: copy.sentence, changed: false, settled: true, videoPaths: [], queuedRewrap: copy.queued };
+  }
   if (plan.action === "skip") {
     if (plan.reason === "container") {
       const existing = await existingLanguage(localFile, job.kind, job.ordinal);
@@ -451,6 +475,10 @@ export async function confirmNextSaved(db: Database.Database, maps: PathMap[]): 
   });
   if (!local) {
     deferredChecks.add(key);
+    return true;
+  }
+  if (canRewrap(null, local)) {
+    markTagChecked(db, row);
     return true;
   }
   const plan = planTag(local, kind, row.ordinal, row.language, role);

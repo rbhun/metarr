@@ -1,6 +1,7 @@
 "use client";
 
 import { AudioTracks } from "@/components/audio-tracks";
+import { FilePathLog } from "@/components/detection-log";
 import { enqueueDetection } from "@/components/detect-actions";
 import { toastDetection } from "@/components/detect-tasks";
 import { LineScroll } from "@/components/line-scroll";
@@ -420,7 +421,7 @@ export function TitleDetail({
                     {file?.is3d ? "3D · " : ""}
                     {file && file.versions.length > 1
                       ? [...new Set(file.versions.map((version) => hdrText(version.hdr, version.doviProfile)))].join(", ")
-                      : hdrText(file?.hdr ?? "none")}
+                      : hdrText(file?.versions[0]?.hdr ?? file?.hdr ?? "none", file?.versions[0]?.doviProfile)}
                   </dd>
                 </div>
                 {file && file.versions.length > 1 ? null : (
@@ -510,7 +511,13 @@ export function TitleDetail({
                 ) : (
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Path</dt>
-                  <dd className="break-all">{file?.path ?? "No file"}</dd>
+                  <dd className="break-all">
+                    {file?.path ? (
+                      <FilePathLog path={file.path} audio={file.audioTracks} subtitles={file.subtitleTracks} />
+                    ) : (
+                      "No file"
+                    )}
+                  </dd>
                   {file?.versions[0]?.missing.length ? (
                     <dd className="text-amber-800 dark:text-amber-200">Missing {file.versions[0].missing.join(", ")}</dd>
                   ) : null}

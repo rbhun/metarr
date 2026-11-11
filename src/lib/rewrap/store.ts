@@ -33,6 +33,8 @@ export type RewrapJob = {
   label: string;
   languages: Array<string | null>;
   subtitleLanguages: Array<string | null>;
+  /** Move the original aside after the MKV is saved, so Plex plays the copy that carries the language. */
+  replaceSource: boolean;
 };
 
 export type RewrapJobStatus = "pending" | "running" | "done" | "failed";
@@ -40,8 +42,8 @@ export type RewrapJobStatus = "pending" | "running" | "done" | "failed";
 export type RewrapJobView = {
   id: number;
   path: string;
-  mode: RewrapMode;
   label: string;
+  mode: "rewrap" | "dovi" | "deinterlace";
   status: RewrapJobStatus;
   message: string | null;
   progress: number | null;
@@ -65,6 +67,7 @@ type JobRow = {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  replace_source?: number;
 };
 
 const DEFAULT_FIRST_LANGUAGE = "Hungarian";
@@ -134,7 +137,7 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   );
   const promote = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE path = ? AND mode = ? AND status = 'pending'`);
   const insert = db.prepare(
-    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at, replace_source) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0)`,
   );
   const now = new Date().toISOString();
   let added = 0;
@@ -170,6 +173,30 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   return { added, already, promoted };
 }
 
+/**
+ * Queue an MKV that replaces the original in Plex. A job already waiting for this
+ * file is left waiting. `again` queues another pass after a running or finished copy,
+ * so a language found later is written onto that MKV.
+ */
+export function enqueueLanguageRewrap(db: Database.Database, item: RewrapItem, again: boolean): "queued" | "waiting" {
+  const filePath = item.path.trim();
+  if (!filePath) return "waiting";
+  const pending = db.prepare(`SELECT id FROM rewrap_jobs WHERE path = ? AND status = 'pending' LIMIT 1`).get(filePath);
+  if (pending) return "waiting";
+  if (!again) {
+    const existing = db.prepare(`SELECT 1 AS ok FROM rewrap_jobs WHERE path = ? LIMIT 1`).get(filePath);
+    if (existing) return "waiting";
+  }
+  const label = item.label?.trim() || path.basename(filePath) || filePath;
+  const languages = item.subtitleLanguages?.length
+    ? { audio: item.languages ?? [], subtitles: item.subtitleLanguages }
+    : (item.languages ?? []);
+  db.prepare(
+    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at, replace_source) VALUES (?, 'rewrap', ?, ?, 0, 'pending', ?, 1)`,
+  ).run(filePath, label, JSON.stringify(languages), new Date().toISOString());
+  return "queued";
+}
+
 function languageList(value: unknown): Array<string | null> {
   if (!Array.isArray(value)) return [];
   return value.map((item) => (typeof item === "string" && item.trim() ? item.trim() : null));
@@ -202,7 +229,15 @@ export function claimNextRewrap(db: Database.Database, onlyImmediate = false): R
     .run(new Date().toISOString(), row.id);
   if (changed.changes !== 1) return null;
   const languages = parseLanguages(row.languages);
-  return { id: row.id, path: row.path, mode: modeOf(row.mode), label: row.label, languages: languages.audio, subtitleLanguages: languages.subtitles };
+  return {
+    id: row.id,
+    path: row.path,
+    mode: modeOf(row.mode),
+    label: row.label,
+    languages: languages.audio,
+    subtitleLanguages: languages.subtitles,
+    replaceSource: row.replace_source === 1,
+  };
 }
 
 export function updateRewrapProgress(db: Database.Database, id: number, progress: number, message: string) {
@@ -336,8 +371,8 @@ function mapView(row: JobRow): RewrapJobView {
   return {
     id: row.id,
     path: row.path,
-    mode: modeOf(row.mode),
     label: row.label,
+    mode: row.mode === "dovi" || row.mode === "deinterlace" ? row.mode : "rewrap",
     status: row.status as RewrapJobStatus,
     message: row.message,
     progress: row.progress,

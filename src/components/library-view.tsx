@@ -186,6 +186,7 @@ function VideoSummary({
   resolution,
   is3d,
   hdr,
+  doviProfile,
   qualityName,
   bitrateKbps,
   playableLabel,
@@ -201,6 +202,7 @@ function VideoSummary({
   resolution: string | null;
   is3d: boolean;
   hdr: HdrLabel;
+  doviProfile?: number | null;
   qualityName: string | null;
   bitrateKbps: number | null;
   playableLabel?: PlayableLabel | null;
@@ -219,7 +221,7 @@ function VideoSummary({
       ) : null}
       <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
         <MediaPills container={container} resolution={resolution} threeD={is3d} part={part} edition={edition} flags={flags} sources={sources} />
-        {hdr !== "none" ? <span>{hdrText(hdr)}</span> : null}
+        {hdr !== "none" ? <span>{hdrText(hdr, doviProfile)}</span> : null}
         {[qualityName, bitrateKbps ? formatBitrate(bitrateKbps) : null].filter(Boolean).join(" · ")}
       </p>
       {length ? <p className="text-[11px] text-muted-foreground">{length}</p> : null}
@@ -247,6 +249,7 @@ function VersionBands({
             resolution={version.resolution}
             is3d={version.is3d}
             hdr={version.hdr}
+            doviProfile={version.doviProfile}
             qualityName={version.qualityName}
             bitrateKbps={version.bitrateKbps}
             playableLabel={version.playableLabel}
@@ -891,6 +894,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   resolution={version.resolution}
                                   is3d={version.is3d}
                                   hdr={version.hdr}
+                                  doviProfile={version.doviProfile}
                                   qualityName={version.qualityName}
                                   bitrateKbps={version.bitrateKbps}
                                   playableLabel={version.playableLabel}
@@ -921,6 +925,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                   resolution={title.resolution}
                                   is3d={title.is3d}
                                   hdr={title.hdr}
+                                  doviProfile={title.versions[0]?.doviProfile}
                                   qualityName={title.qualityName}
                                   bitrateKbps={title.bitrateKbps}
                                   playableLabel={title.playableLabel}
@@ -1033,6 +1038,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                                 resolution={title.resolution}
                                 is3d={title.is3d}
                                 hdr={title.hdr}
+                                doviProfile={title.versions[0]?.doviProfile}
                                 qualityName={title.qualityName}
                                 bitrateKbps={title.bitrateKbps}
                                 playableLabel={title.playableLabel}
@@ -1244,6 +1250,7 @@ function EpisodeRows({
                                 resolution={version.resolution}
                                 is3d={version.is3d}
                                 hdr={version.hdr}
+                                doviProfile={version.doviProfile}
                                 qualityName={version.qualityName}
                                 bitrateKbps={version.bitrateKbps}
                                 playableLabel={version.playableLabel}
@@ -1278,6 +1285,7 @@ function EpisodeRows({
                                 resolution={episode.resolution}
                                 is3d={episode.is3d}
                                 hdr={episode.hdr}
+                                doviProfile={episode.versions[0]?.doviProfile}
                                 qualityName={episode.qualityName}
                                 bitrateKbps={null}
                                 playableLabel={episode.playableLabel}

@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -36,6 +37,7 @@ type TaskJob = {
   id: number;
   path: string;
   label: string;
+  tag?: string;
   status: JobStatus;
   message: string | null;
   priority: "immediate" | "window" | null;
@@ -320,7 +322,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Language checks, disc remuxes, and MKV rewraps share this list. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
+                Each task is tagged with what it is: a rip, a rewrap, a deinterlace, a Dolby Vision reconvert, text recognition, soundtrack recognition, or a version merge. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -373,19 +375,23 @@ export function TasksView() {
               <article key={job.key} className={cn("space-y-1.5 rounded-lg border px-3 py-3", rowTone(job.status))}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="min-w-0 text-sm font-medium">
-                      {job.titleId ? (
-                        <Link href={`/?file=${encodeURIComponent(job.path)}`} className="hover:underline underline-offset-2">
-                          {job.label}
-                        </Link>
-                      ) : (
-                        job.label
-                      )}
-                    </h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {job.queue === "remux" ? "Rip" : job.queue === "rewrap" ? "MKV rewrap" : "Language"}
-                      {job.detail ? ` · ${job.detail}` : ""}
-                    </p>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      {job.tag ? (
+                        <Badge variant="outline" className="shrink-0">
+                          {job.tag}
+                        </Badge>
+                      ) : null}
+                      <h2 className="min-w-0 text-sm font-medium">
+                        {job.titleId ? (
+                          <Link href={`/?file=${encodeURIComponent(job.path)}`} className="hover:underline underline-offset-2">
+                            {job.label}
+                          </Link>
+                        ) : (
+                          job.label
+                        )}
+                      </h2>
+                    </div>
+                    {job.detail ? <p className="mt-0.5 text-xs text-muted-foreground">{job.detail}</p> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {job.status === "failed" ? (

@@ -11,12 +11,17 @@ export type TaskQueue = "language" | "remux" | "rewrap" | "merge";
 export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type TaskStatusFilter = TaskStatus | "all";
 
+/** Short name for what a task does, shown as a tag on the Tasks page. */
+export type TaskTag = "Rip" | "Rewrap" | "Deinterlace" | "Dolby Vision" | "Text recognition" | "Soundtrack recognition" | "Merge";
+
 export type TaskJob = {
   key: string;
   queue: TaskQueue;
   id: number;
   path: string;
   label: string;
+  /** What this task is: a rip, a rewrap, text or soundtrack recognition, or a merge. */
+  tag: TaskTag;
   status: TaskStatus;
   message: string | null;
   priority: "immediate" | "window" | null;
@@ -113,6 +118,7 @@ function mapDetect(status: DetectJobStatus | null, page: number, pageSize: numbe
       id: job.id,
       path: job.path,
       label: job.label,
+      tag: job.kind === "audio" ? "Soundtrack recognition" : "Text recognition",
       status: job.status,
       message: job.message,
       priority: job.priority,
@@ -139,6 +145,7 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
       id: job.id,
       path: job.path,
       label: job.label,
+      tag: "Rip",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Remux failed with no further detail from MakeMKV." : job.message,
       priority: null,
@@ -163,10 +170,16 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
       id: job.id,
       path: job.path,
       label: job.label,
+      tag: job.mode === "deinterlace" ? "Deinterlace" : job.mode === "dovi" ? "Dolby Vision" : "Rewrap",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
       priority: null,
-      detail: job.mode === "dovi" ? "Dolby Vision 7 to 8.1 for Apple TV · no re-encoding" : "AVI or M2TS to MKV · no re-encoding",
+      detail:
+        job.mode === "deinterlace"
+          ? "AVI to MKV · deinterlaced, picture re-encoded"
+          : job.mode === "dovi"
+            ? "Dolby Vision 7 to 8.1 for Apple TV · no re-encoding"
+            : "AVI or M2TS to MKV · no re-encoding",
       progress: job.progress,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
@@ -187,6 +200,7 @@ function mapMerge(status: MergeJobStatus | null, page: number, pageSize: number,
       id: job.id,
       path: job.videoPath,
       label: job.label,
+      tag: "Merge",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Version merge failed with no further detail from ffmpeg." : job.message,
       priority: "immediate" as const,
