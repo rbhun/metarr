@@ -1,5 +1,17 @@
 # Changes
 
+## 0.0.187
+
+- Tag a deinterlace on its own, and tag the Dolby Vision 7 to 8.1 reconvert as Dolby Vision instead of a plain rewrap.
+
+## 0.0.186
+
+- Tag each task with what it is: a rip, a rewrap, text recognition, soundtrack recognition, or a version merge.
+
+## 0.0.185
+
+- Open a language check from the file path or a track: where it listened, how sure it was, and whether the language was kept. A recognized language on an AVI or loose transport stream is copied to an MKV with the language on the audio stream, which is what Plex reads, and the original is kept as .metarr-orig so Plex plays the MKV.
+
 ## 0.0.184
 
 - Stop waiting for a tool that ran past its time limit even when it does not exit after being killed, and warn at the top of every page while such a process is still alive. A process blocked on a hung NFS share ignores the kill, and the language tag writer used to wait on it forever with no message.

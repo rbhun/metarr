@@ -198,6 +198,19 @@ function concatList(files: string[]): string {
   return `${files.map((file) => `file '${file.replace(/'/g, `'\\''`)}'`).join("\n")}\n`;
 }
 
+/** Write recognized languages onto audio streams already stored in an MKV. Returns how many streams were tagged. */
+export async function tagMkvLanguages(file: string, languages: Array<string | null>): Promise<number> {
+  const args = [file];
+  languages.forEach((language, ordinal) => {
+    const code = language ? languageCode(language) : null;
+    if (!code) return;
+    args.push("--edit", `track:a${ordinal + 1}`, "--set", `language=${code}`);
+  });
+  if (args.length === 1) return 0;
+  await runTool("mkvpropedit", args, 60_000);
+  return languages.filter((language) => (language ? languageCode(language) : null)).length;
+}
+
 export async function rewrapAvi(options: {
   source: string;
   /** Ordered parts of one labeled split. A single source is copied under its own name. */

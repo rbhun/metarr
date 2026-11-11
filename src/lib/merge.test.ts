@@ -43,6 +43,7 @@ import {
 import { pickVideoSource, qualityScore } from "@/lib/merge/quality";
 import { checkMerge, mergeArgs, parseMergeProbe, progressFromLine, type Probe } from "@/lib/merge/run";
 import { canMergeVersion, mergeTarget } from "@/lib/merge/source";
+import { listTaskJobs } from "@/lib/tasks";
 import { frameMatchRank, sortMergeCandidates } from "@/lib/merge/sort";
 import {
   claimNextMerge,
@@ -759,6 +760,8 @@ test("merge queue is manual and can be turned off", () => {
     ]),
     { added: 1, already: 1 },
   );
+  const shown = listTaskJobs(db, { queue: "merge", status: "pending", page: 1, pageSize: 10 });
+  assert.equal(shown.jobs[0]?.tag, "Merge");
   const job = claimNextMerge(db);
   assert.ok(job);
   assert.equal(job!.videoPath, "/m/a.mkv");

@@ -6,6 +6,7 @@ import readline from "node:readline";
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { audioClipArgs, audioCopyArgs, audioDecodeArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, isTransportStream, languageFromProbeTags, markerWindow, openingWindow, packetBytes, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
 import { agreeLanguage } from "@/lib/detect/agree";
+import { formatProbeLog, type ProbeSample } from "@/lib/detect/log";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
@@ -27,6 +28,7 @@ export type DetectionOutcome = {
   confidence: number;
   message: string | null;
   source?: "file" | null;
+  log?: string | null;
 };
 
 const limitedEnv = { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", MKL_NUM_THREADS: "1" };
@@ -294,12 +296,15 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
   const heard = await probeAudio(file, job.ordinal, transport);
   const short = trackIsShort(file, heard);
   if (heard.language || short) {
+    const language = heard.language;
+    const message = language ? null : "This track is only a moment long.";
     return {
-      language: heard.language,
+      language,
       role: short ? "short" : null,
-      confidence: heard.language ? 1 : 0,
-      message: heard.language ? null : "This track is only a moment long.",
-      source: heard.language ? "file" : null,
+      confidence: language ? 1 : 0,
+      message,
+      source: language ? "file" : null,
+      log: formatProbeLog({ samples: [], language, confidence: language ? 1 : 0, message, fromFile: Boolean(language) }),
     };
   }
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-audio-"));
@@ -307,13 +312,14 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
     const mix = dialogueMix(heard.layout, heard.channels);
     const fileSize = transport ? fs.statSync(file).size : 0;
     const samples: Array<{ language: string; probability: number }> = [];
+    const notes: ProbeSample[] = [];
     const transcript: string[] = [];
     let agreed = { language: null as string | null, confidence: 0 };
     let readSample = false;
     let silent = false;
     let shortClip = false;
     const present = (target: string, minimum: number) => fs.existsSync(target) && fs.statSync(target).size >= minimum;
-    const hearFile = async (wav: string): Promise<"timeout" | "heard"> => {
+    const hearFile = async (wav: string, offsetSeconds: number | null): Promise<"timeout" | "heard"> => {
       if (!present(wav, 8_000)) return "heard";
       const audio = fs.readFileSync(wav);
       if (isExceptionallyShortClip(wavSeconds(audio))) {
@@ -326,6 +332,12 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
       }
       readSample = true;
       const speech = await transcribe(wav);
+      notes.push({
+        offsetSeconds,
+        language: speech.language,
+        probability: speech.probability,
+        text: speech.text.replace(/\s+/g, " ").trim().slice(0, 160),
+      });
       if (speech.language) samples.push({ language: speech.language, probability: speech.probability });
       if (speech.text) transcript.push(speech.text);
       agreed = agreeLanguage(samples);
@@ -347,7 +359,7 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
         }
       }
       if (!present(wav, 8_000) && sawTimeout) return "timeout";
-      return hearFile(wav);
+      return hearFile(wav, null);
     };
     const listen = async (offset: number, index: number): Promise<"timeout" | "heard"> => {
       const copied = path.join(directory, `clip-${index}.mka`);
@@ -373,7 +385,7 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
           }
         }
       }
-      return hearFile(wav);
+      return hearFile(wav, offset);
     };
     let timedOut = false;
     for (const [index, offset] of sampleOffsets(heard.duration).entries()) {
@@ -398,15 +410,23 @@ async function detectAudio(job: DetectJob, file: string): Promise<DetectionOutco
             : timedOut
               ? "The audio sample could not be read in time."
               : "This track has no audio to hear.";
-      return { language: null, role: shortClip ? "short" : null, confidence: 0, message };
+      return {
+        language: null,
+        role: shortClip ? "short" : null,
+        confidence: 0,
+        message,
+        log: formatProbeLog({ samples: notes, language: null, confidence: 0, message }),
+      };
     }
     const language = agreed.language ? languageName(agreed.language) : null;
     const role = commentaryRole(job.streamLabel, transcript.join(" "));
+    const message = language ? null : "This language cannot be reliably recognized.";
     return {
       language,
       role,
       confidence: agreed.confidence,
-      message: language ? null : "This language cannot be reliably recognized.",
+      message,
+      log: formatProbeLog({ samples: notes, language, confidence: agreed.confidence, message }),
     };
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

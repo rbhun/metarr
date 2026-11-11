@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
+import { listTaskJobs } from "@/lib/tasks";
 import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
 import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, type Probe } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
@@ -108,15 +109,34 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.equal(enqueueRewraps(db, [{ path: "/m/Film.avi" }], true).already, 1);
   assert.equal(hasImmediateRewrap(db), true);
   const first = claimNextRewrap(db, true);
-  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [] });
+  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [], replaceSource: false });
   finishRewrap(db, first!.id, "done", "Saved Film.mkv.");
   const old = claimNextRewrap(db);
   assert.equal(old?.label, "Old.avi");
   finishRewrap(db, old!.id, "failed", "");
   assert.deepEqual(rewrapTotals(db), { pending: 0, running: 0, done: 1, failed: 1 });
+  const shown = listTaskJobs(db, { queue: "rewrap", status: "all", page: 1, pageSize: 10 });
+  assert.ok(shown.jobs.length > 0);
+  assert.ok(shown.jobs.every((job) => job.tag === "Rewrap"));
   assert.deepEqual([...finishedRewrapPaths(db)], ["/m/Film.avi"]);
   assert.equal(retryFailedRewrap(db, old!.id), "retried");
   assert.equal(rewrapTotals(db).pending, 1);
+  db.close();
+});
+
+test("deinterlace and Dolby Vision reconvert are tagged apart from a rewrap", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const now = new Date().toISOString();
+  const insert = db.prepare(`INSERT INTO rewrap_jobs (path, label, languages, status, created_at, finished_at, mode) VALUES (?, ?, '[]', 'done', ?, ?, ?)`);
+  insert.run("/m/Old.avi", "Old", now, now, "deinterlace");
+  insert.run("/m/Vision.ts", "Vision", now, now, "dovi");
+  insert.run("/m/Copy.avi", "Copy", now, now, "rewrap");
+  const shown = listTaskJobs(db, { queue: "rewrap", status: "done", page: 1, pageSize: 10 });
+  const tags = Object.fromEntries(shown.jobs.map((job) => [job.label, job.tag]));
+  assert.deepEqual(tags, { Old: "Deinterlace", Vision: "Dolby Vision", Copy: "Rewrap" });
+  assert.match(shown.jobs.find((job) => job.label === "Vision")?.detail ?? "", /Dolby Vision 7 to 8\.1/);
+  assert.match(shown.jobs.find((job) => job.label === "Old")?.detail ?? "", /deinterlaced/);
   db.close();
 });
 

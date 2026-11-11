@@ -9,6 +9,7 @@ import { idle } from "@/lib/idle";
 import { scratchRoot } from "@/lib/scratch";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
+import { queueLanguageCopy } from "@/lib/detect/plex-copy";
 import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { markTagChecked, markWritten, reopenForWrite } from "@/lib/detect/store";
@@ -22,6 +23,8 @@ export type WriteResult = {
   changed: boolean;
   settled: boolean;
   videoPaths: string[];
+  /** An MKV copy was just queued so Plex can read the language. */
+  queuedRewrap?: boolean;
 };
 
 type WriteJob = {
@@ -210,6 +213,17 @@ export async function writeFinding(
   role: "commentary" | "forced" | "short" | null,
 ): Promise<WriteResult> {
   const plan = planTag(localFile, job.kind, job.ordinal, language, role);
+  if (canRewrap(null, job.path) && (plan.action === "riff" || (plan.action === "skip" && plan.reason === "container"))) {
+    if (dryRun()) {
+      return unchanged(
+        job,
+        `Dry run: would copy this file to an MKV with ${language} on the audio stream, which is what Plex reads. Nothing was written.`,
+        false,
+      );
+    }
+    const copy = queueLanguageCopy(db, job.path);
+    return { storedPath: job.path, sentence: copy.sentence, changed: false, settled: true, videoPaths: [], queuedRewrap: copy.queued };
+  }
   if (plan.action === "skip") {
     if (plan.reason === "container") {
       const existing = await existingLanguage(localFile, job.kind, job.ordinal);
@@ -417,6 +431,10 @@ export async function confirmNextSaved(db: Database.Database, maps: PathMap[]): 
   });
   if (!local) {
     deferredChecks.add(key);
+    return true;
+  }
+  if (canRewrap(null, local)) {
+    markTagChecked(db, row);
     return true;
   }
   const plan = planTag(local, kind, row.ordinal, row.language, role);

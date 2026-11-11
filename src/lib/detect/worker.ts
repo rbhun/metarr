@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyTimeZone } from "@/lib/clock";
 import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
+import { queueRecognizedCopies } from "@/lib/detect/plex-copy";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
 import { listSiblingSubtitles, mediaPathCandidates, resolveMediaPath, siblingSubtitlePath, unresolvedMediaMessage } from "@/lib/detect/paths";
@@ -47,6 +48,7 @@ function state() {
 
 async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<typeof readDetectSettings>["pathMaps"]): Promise<boolean> {
   if (await applyNextSaved(db, pathMaps)) return true;
+  if (queueRecognizedCopies(db)) return true;
   if (await confirmNextSaved(db, pathMaps)) return true;
   if (await refreshNextFormat(db)) return true;
   return false;
@@ -150,7 +152,7 @@ async function step() {
     }
     const outcome = await detectTrack(job, local);
     const named = job.placement === "named";
-    const finding = named ? { ...outcome, source: null } : outcome;
+    let finding = named ? { ...outcome, source: null } : outcome;
     let stored = job;
     let note = finding.language ? [finding.language, finding.role].filter(Boolean).join(" ") : finding.message;
     let settled = false;
@@ -158,6 +160,7 @@ async function step() {
       const written = await writeFinding(db, job, local, finding.language, finding.role);
       stored = { ...job, path: written.storedPath };
       settled = written.settled;
+      if (written.sentence) finding = { ...finding, log: [finding.log, written.sentence].filter(Boolean).join("\n\n") };
       let players = "";
       if (written.changed) {
         try {

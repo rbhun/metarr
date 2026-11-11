@@ -235,19 +235,83 @@ export function finishJob(db: Database.Database, id: number, status: "done" | "f
 export function saveDetection(
   db: Database.Database,
   job: DetectJob,
-  result: { language: string | null; role: "commentary" | "forced" | "short" | null; confidence: number; message: string | null; source?: "file" | null },
+  result: {
+    language: string | null;
+    role: "commentary" | "forced" | "short" | null;
+    confidence: number;
+    message: string | null;
+    source?: "file" | null;
+    log?: string | null;
+  },
 ) {
   db.prepare(
-    `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, source, scanned_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, source, log, scanned_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(path, kind, ordinal) DO UPDATE SET
        language = excluded.language,
        role = excluded.role,
        confidence = excluded.confidence,
        message = excluded.message,
        source = excluded.source,
+       log = COALESCE(excluded.log, detect_results.log),
        scanned_at = excluded.scanned_at`,
-  ).run(job.path, job.kind, job.ordinal, result.language, result.role, result.confidence, result.message, result.source === "file" ? "file" : null, new Date().toISOString());
+  ).run(
+    job.path,
+    job.kind,
+    job.ordinal,
+    result.language,
+    result.role,
+    result.confidence,
+    result.message,
+    result.source === "file" ? "file" : null,
+    result.log ?? null,
+    new Date().toISOString(),
+  );
+}
+
+const COPIED =
+  "Copied to an MKV with this language on the audio stream, which is what Plex reads. The original was kept as .metarr-orig.";
+
+/** The episode Plex plays is now the MKV, so the language check follows that path. */
+export function moveDetections(db: Database.Database, fromPath: string, toPath: string) {
+  if (!fromPath || !toPath || fromPath === toPath) return;
+  const rows = db.prepare(`SELECT * FROM detect_results WHERE path = ?`).all(fromPath) as Array<Record<string, unknown>>;
+  if (rows.length === 0) return;
+  const write = db.prepare(
+    `INSERT INTO detect_results (path, kind, ordinal, language, role, confidence, message, source, log, scanned_at, written_at, tag_checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(path, kind, ordinal) DO UPDATE SET
+       language = COALESCE(excluded.language, detect_results.language),
+       role = COALESCE(excluded.role, detect_results.role),
+       confidence = COALESCE(excluded.confidence, detect_results.confidence),
+       message = COALESCE(excluded.message, detect_results.message),
+       source = COALESCE(excluded.source, detect_results.source),
+       log = COALESCE(excluded.log, detect_results.log),
+       written_at = COALESCE(detect_results.written_at, excluded.written_at),
+       tag_checked_at = COALESCE(detect_results.tag_checked_at, excluded.tag_checked_at)`,
+  );
+  const now = new Date().toISOString();
+  const move = db.transaction(() => {
+    for (const row of rows) {
+      const previous = typeof row.log === "string" && row.log.trim() ? row.log : "";
+      write.run(
+        toPath,
+        row.kind,
+        row.ordinal,
+        row.language ?? null,
+        row.role ?? null,
+        row.confidence ?? null,
+        row.message ?? null,
+        row.source ?? null,
+        previous ? `${previous}\n${COPIED}` : COPIED,
+        row.scanned_at,
+        row.written_at ?? now,
+        row.tag_checked_at ?? null,
+      );
+    }
+    db.prepare(`DELETE FROM detect_results WHERE path = ?`).run(fromPath);
+  });
+  move();
 }
 
 export function markWritten(db: Database.Database, from: { path: string; kind: string; ordinal: number }, storedPath: string) {
@@ -370,16 +434,28 @@ export function activeJob(db: Database.Database): { label: string; kind: "audio"
   return { label: row.label, kind: row.kind === "subtitle" ? "subtitle" : "audio" };
 }
 
-export type StoredDetection = { language: string | null; role: "commentary" | "forced" | "short" | null; source?: "file" | null };
+export type StoredDetection = {
+  language: string | null;
+  role: "commentary" | "forced" | "short" | null;
+  source?: "file" | null;
+  confidence: number | null;
+  message: string | null;
+  log: string | null;
+  writtenAt: string | null;
+};
 
 export function detectionMap(db: Database.Database): Map<string, StoredDetection> {
-  const rows = db.prepare(`SELECT path, kind, ordinal, language, role, source FROM detect_results`).all() as Array<{
+  const rows = db.prepare(`SELECT path, kind, ordinal, language, role, source, confidence, message, log, written_at FROM detect_results`).all() as Array<{
     path: string;
     kind: string;
     ordinal: number;
     language: string | null;
     role: string | null;
     source: string | null;
+    confidence: number | null;
+    message: string | null;
+    log: string | null;
+    written_at: string | null;
   }>;
   const map = new Map<string, StoredDetection>();
   for (const row of rows) {
@@ -387,6 +463,10 @@ export function detectionMap(db: Database.Database): Map<string, StoredDetection
       language: row.language,
       role: row.role === "commentary" || row.role === "forced" || row.role === "short" ? row.role : null,
       source: row.source === "file" ? "file" : null,
+      confidence: row.confidence,
+      message: row.message,
+      log: row.log,
+      writtenAt: row.written_at,
     });
   }
   return map;

@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { agreeLanguage } from "@/lib/detect/agree";
+import { describeStoredDetection, formatProbeLog } from "@/lib/detect/log";
+import { queueLanguageCopy, queueRecognizedCopies } from "@/lib/detect/plex-copy";
 import { commentaryRole } from "@/lib/detect/commentary";
 import { cueCount, cueText } from "@/lib/detect/cues";
 import { isForcedCueCount } from "@/lib/detect/forced";
@@ -14,7 +16,8 @@ import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, moveDetections, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
+import { claimNextRewrap } from "@/lib/rewrap/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
 import { audioCodecFromName, languageFromAudioName } from "@/lib/detect/audio-name";
@@ -59,6 +62,7 @@ test("a language pause reason is shown on waiting window jobs", () => {
   writeDetectPause(db, "window");
   assert.equal(readDetectPause(db), "window");
   const listed = listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 });
+  assert.equal(listed.jobs[0]?.tag, "Text recognition");
   assert.equal(listed.jobs[0]?.waiting, "Waiting for the window");
   writeDetectPause(db, "plex");
   assert.equal(listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 50 }).jobs[0]?.waiting, "Waiting: Plex is busy");
@@ -115,6 +119,64 @@ test("language votes need a confident majority", () => {
     { language: "hu", probability: 0.84 },
   ]).language, null);
   assert.deepEqual(agreeLanguage([{ language: "hu", probability: 0.91 }]), { language: "hu", confidence: 0.91 });
+});
+
+test("a probe log names each sample and why a low agreement was dropped", () => {
+  const log = formatProbeLog({
+    samples: [
+      { offsetSeconds: 216, language: "hu", probability: 0.263, text: "A lényitottálinket" },
+      { offsetSeconds: 1, language: "hu", probability: 0.482, text: "Csokuládi" },
+    ],
+    language: null,
+    confidence: 0.482,
+    message: "This language cannot be reliably recognized.",
+  });
+  assert.match(log, /3:36: Hungarian, 26%/);
+  assert.match(log, /0:01: Hungarian, 48%/);
+  assert.match(log, /Every sample said Hungarian/);
+  assert.match(log, /80%/);
+  const kept = formatProbeLog({
+    samples: [{ offsetSeconds: 1, language: "hu", probability: 0.874, text: "Laboratórium" }],
+    language: "Hungarian",
+    confidence: 0.874,
+    message: null,
+  });
+  assert.match(kept, /Kept Hungarian at 87%/);
+});
+
+test("an older check still explains a language Plex cannot read from an AVI", () => {
+  const text = describeStoredDetection(
+    { language: "Hungarian", role: null, confidence: 0.87, message: null, log: null, writtenAt: "2026-01-01", source: null },
+    "/tv/Dexter.avi",
+  );
+  assert.match(text ?? "", /best sample was 87%/);
+  assert.match(text ?? "", /Plex does not read a language stored in this file/);
+});
+
+test("a recognized AVI language is queued as an MKV Plex can read", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueTargets(db, [
+    { path: "/tv/Show.avi", kind: "audio", ordinal: 0, label: "Show", format: "MP3", placement: null, streamLabel: "stereo" },
+  ], "immediate");
+  const job = claimNextJob(db, true);
+  assert.ok(job);
+  saveDetection(db, job!, { language: "Hungarian", role: null, confidence: 0.87, message: null, log: "Probed one sample." });
+  assert.equal(queueRecognizedCopies(db), true);
+  const queued = claimNextRewrap(db);
+  assert.equal(queued?.path, "/tv/Show.avi");
+  assert.equal(queued?.replaceSource, true);
+  assert.equal(queueRecognizedCopies(db), false);
+  const again = queueLanguageCopy(db, "/tv/Show.avi");
+  assert.equal(again.queued, true);
+  assert.match(again.sentence, /MKV copy was queued/);
+  moveDetections(db, "/tv/Show.avi", "/tv/Show.mkv");
+  const moved = db.prepare(`SELECT path, log, written_at FROM detect_results WHERE kind = 'audio'`).get() as { path: string; log: string; written_at: string };
+  assert.equal(moved.path, "/tv/Show.mkv");
+  assert.match(moved.log, /Probed one sample/);
+  assert.match(moved.log, /Copied to an MKV/);
+  assert.ok(moved.written_at);
+  db.close();
 });
 
 test("subtitle cues drop timestamps and ass styling", () => {
@@ -741,6 +803,8 @@ test("immediate jobs run before queued ones, and a result is stored", () => {
   enqueueTargets(db, [
     { path: "/b.mkv", kind: "subtitle", ordinal: 0, label: "Now", format: "SRT", placement: "internal", streamLabel: null },
   ], "immediate");
+  const tagged = listTaskJobs(db, { queue: "language", status: "pending", page: 1, pageSize: 10 });
+  assert.deepEqual(tagged.jobs.map((job) => `${job.label}:${job.tag}`).sort(), ["Now:Text recognition", "Queued:Soundtrack recognition"]);
   const closed = claimNextJob(db, false);
   assert.equal(closed?.path, "/b.mkv");
   assert.equal(claimNextJob(db, false), null);

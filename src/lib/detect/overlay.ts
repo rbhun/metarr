@@ -1,5 +1,6 @@
-import type { AudioTrack, SubtitleTrack } from "@/lib/types";
+import { describeStoredDetection } from "@/lib/detect/log";
 import type { StoredDetection } from "@/lib/detect/store";
+import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 
 export function detectionKey(path: string, kind: "audio" | "subtitle", ordinal: number): string {
   return `${path}\0${kind}\0${ordinal}`;
@@ -13,11 +14,13 @@ export function overlayAudio(path: string | null, tracks: AudioTrack[], detectio
     const found = detections.get(detectionKey(mediaPath, "audio", ordinal));
     if (!found) return track;
     const role = found.role === "commentary" || found.role === "short" ? found.role : null;
+    const detectionLog = describeStoredDetection(found, mediaPath);
     return {
       ...track,
       ...(found.language ? { detectedLanguage: found.language } : {}),
       ...(role ? { detectedRole: role } : {}),
       ...(found.source === "file" ? { fromFile: true } : {}),
+      ...(detectionLog ? { detectionLog } : {}),
     };
   });
 }
@@ -29,7 +32,14 @@ export function overlaySubtitles(path: string | null, tracks: SubtitleTrack[], d
     if (!mediaPath) return track;
     const ordinal = external ? 0 : (track.streamIndex ?? index);
     const found = detections.get(detectionKey(mediaPath, "subtitle", ordinal));
-    if (!found?.language) return track;
-    return { ...track, detectedLanguage: found.language, ...(found.role === "forced" ? { forced: true } : {}) };
+    if (!found) return track;
+    const detectionLog = describeStoredDetection(found, mediaPath);
+    if (!found.language && !detectionLog) return track;
+    return {
+      ...track,
+      ...(found.language ? { detectedLanguage: found.language } : {}),
+      ...(found.role === "forced" ? { forced: true } : {}),
+      ...(detectionLog ? { detectionLog } : {}),
+    };
   });
 }
