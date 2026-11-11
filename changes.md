@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.193
+
+- Fix Dolby Vision 7 conversions of damaged TS files being refused with a length like "9223372014 seconds instead of 6751". ffmpeg marks a damaged frame that has no time with the smallest 64-bit number, and Metarr used it as a real time, which put the other frames billions of seconds later. Such a frame now takes its decode time, or follows the frame before it. A file whose frame times still jump far past the film's length is refused before the slow MKV step, and the original is never touched.
+
 ## 0.0.192
 
 - Fix the Docker image build. TypeScript rejected detection tests whose saved language was missing fields, so `npm run build` stopped.

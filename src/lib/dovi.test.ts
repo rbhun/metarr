@@ -13,6 +13,7 @@ import {
   damagedRpuMessage,
   doviTarget,
   doviTool,
+  frameSpan,
   missingFrames,
   parseDoviProbe,
   parseFrameTimes,
@@ -150,6 +151,20 @@ test("frame times from ffmpeg become mkvmerge timestamps that keep a gap where f
   assert.equal(missingFrames(times!, "24000/1001"), 3);
   assert.equal(missingFrames(times!, null), 0);
   assert.equal(parseFrameTimes("#tb 0: 1/90000\n"), null);
+});
+
+test("a frame ffmpeg could not time takes its decode time or follows the frame before, never the smallest 64-bit number", () => {
+  const text = [
+    "#tb 0: 1/90000",
+    "0,          0,          0,     3753,    12312, 0x36efced7",
+    "0,       3753, -9223372036854775808,  3753,  500, 0x00000001",
+    "0, -9223372036854775808, -9223372036854775808, 3753, 400, 0x00000002",
+    "0,      11259,      11259,     3753,      400, 0x00000003",
+  ].join("\n");
+  const times = parseFrameTimes(text);
+  assert.deepEqual(times?.pts, [0, 3753, 7506, 11259]);
+  assert.ok(Math.abs(frameSpan(times!) - 11259 / 90000) < 1e-9);
+  assert.equal(timestampFile(times!), "# timestamp format v2\n0.000\n41.700\n83.400\n125.100\n");
 });
 
 test("a Dolby Vision packet dovi_tool cannot read is explained, and other errors are left alone", () => {

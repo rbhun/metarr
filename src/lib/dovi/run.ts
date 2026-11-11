@@ -107,22 +107,53 @@ export function checkDoviOutput(source: DoviProbe, output: DoviProbe): string | 
 
 export type FrameTimes = { tickSeconds: number; pts: number[] };
 
-/** Packet times from ffmpeg's `framecrc` output: a `#tb 0: 1/90000` header, then `stream, dts, pts, …` per packet. */
+const NO_TIME = -(2 ** 62);
+
+/**
+ * Packet times from ffmpeg's `framecrc` output: a `#tb 0: 1/90000` header, then `stream, dts, pts, duration, …`
+ * per packet. A damaged TS packet can leave a frame without a time, which ffmpeg prints as the smallest
+ * 64-bit number; such a frame takes its decode time, or follows the frame before it.
+ */
 export function parseFrameTimes(text: string): FrameTimes | null {
   let tickSeconds = 0;
   const pts: number[] = [];
+  const used = new Set<number>();
+  let previous: number | null = null;
+  let step = 0;
   for (const line of text.split(/\r?\n/)) {
     const base = /^#tb 0: (\d+)\/(\d+)$/.exec(line.trim());
     if (base) {
       tickSeconds = Number(base[1]) / Number(base[2]);
       continue;
     }
-    if (line.startsWith("#")) continue;
-    const value = Number(line.split(",")[2]);
-    if (Number.isFinite(value)) pts.push(value);
+    if (line.startsWith("#") || !line.trim()) continue;
+    const fields = line.split(",").map((field) => Number(field));
+    const known = (value: number | undefined): value is number => value != null && Number.isFinite(value) && value > NO_TIME;
+    const duration = known(fields[3]) && fields[3] > 0 ? fields[3] : step;
+    if (duration) step = duration;
+    let value: number;
+    if (known(fields[2])) value = fields[2];
+    else if (known(fields[1]) && !used.has(fields[1])) value = fields[1];
+    else if (previous != null) value = previous + (duration || 1);
+    else continue;
+    while (used.has(value)) value += 1;
+    used.add(value);
+    pts.push(value);
+    previous = value;
   }
   if (!tickSeconds || pts.length < 2) return null;
   return { tickSeconds, pts };
+}
+
+/** Seconds from the first frame time to the last. */
+export function frameSpan(times: FrameTimes): number {
+  let low = Infinity;
+  let high = -Infinity;
+  for (const value of times.pts) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  return (high - low) * times.tickSeconds;
 }
 
 /**
@@ -325,6 +356,11 @@ export async function convertDolbyVision(options: {
     }
     const delay = videoDelayMs(input);
     const times = parseFrameTimes(fs.readFileSync(frameList, "utf8"));
+    if (times && input.duration && frameSpan(times) > input.duration * 1.01 + 2) {
+      throw new Error(
+        `The frame times in this file jump to ${Math.round(frameSpan(times))} seconds in a ${Math.round(input.duration)}-second film, so nothing was saved and the file was left as it is.`,
+      );
+    }
     if (times) fs.writeFileSync(timestamps, timestampFile(times, delay));
     const missing = times ? missingFrames(times, main.frameRate) : 0;
 
