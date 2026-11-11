@@ -1,24 +1,36 @@
 # Changes
 
+## 0.0.191
+
+- Open a language check from the file path or a track: where it listened, how sure it was, and whether the language was kept. A recognized language on an AVI or loose transport stream is copied to an MKV with the language on the audio stream, which is what Plex reads, and the original is kept as .metarr-orig so Plex plays the MKV. Each task is tagged with what it is, including a deinterlace and a Dolby Vision reconvert.
+
+## 0.0.190
+
+- Stop retrying a language write that hung on the NAS. The A-Team retag hung the NAS, and every restart opened the same file again and hung again, taking the UI down with it. Metarr now remembers such a file, and on start it also skips any file an earlier run left half-copied in the retag folder. The original is never touched.
+
+## 0.0.189
+
+- Convert Dolby Vision 7 files whose Dolby Vision data is damaged inside the video, such as Cliffhanger's "Invalid RPU last byte: 200". Each unreadable Dolby Vision packet is replaced with the one from the frame before, so that frame borrows its neighbour's brightness data; the picture itself is untouched. The job says how many were replaced, and a file with more than a few damaged packets is still refused. The original is never touched.
+
 ## 0.0.188
 
-- Show the Dolby Vision profile in the title sidebar, so a profile 7 file that an Apple TV cannot play is not labeled the same as one it can.
+- Convert Dolby Vision 7 files with a few damaged TS packets instead of stopping with "Invalid RPU last byte". ffmpeg leaves the damaged frames out and every frame keeps its own time, so the picture holds still for a moment there and the audio stays in sync; the job says how many frames were left out. Damage that cannot be skipped now says so plainly and suggests a fresh MakeMKV remux. The original is never touched.
 
 ## 0.0.187
 
-- Tag a deinterlace on its own, and tag the Dolby Vision 7 to 8.1 reconvert as Dolby Vision instead of a plain rewrap.
+- Find and fix Dolby Vision profile 7 files for the Apple TV, which drops frames on them. The profile comes from Plex and from the file scan, shows on the title as "Dolby Vision 7", and the library has a "Dolby Vision 7" filter. "Convert DV7 to 8.1" writes a new `.DV8.mkv` beside the file with dovi_tool: the HDR10 picture is copied without re-encoding, every audio and subtitle track is kept, and the copy is checked for profile 8, length, and audio sync before it is saved. The original stays. Run a sync first so existing titles get their profile.
 
 ## 0.0.186
 
-- Tag each task with what it is: a rip, a rewrap, text recognition, soundtrack recognition, or a version merge.
+- Notice a tool stuck waiting on the NAS. When ffmpeg or MakeMKV sits in uninterruptible disk wait for 10 minutes with no bytes moving, the task fails with what to do (restart the NFS server on the NAS or reboot), no new work starts, its scratch files are left alone so Metarr cannot hang on them too, and Tasks says why everything is waiting. Work carries on by itself once the stuck process is gone. Before, a retag stuck this way blocked language checks for days without a word.
 
 ## 0.0.185
 
-- Open a language check from the file path or a track: where it listened, how sure it was, and whether the language was kept. A recognized language on an AVI or loose transport stream is copied to an MKV with the language on the audio stream, which is what Plex reads, and the original is kept as .metarr-orig so Plex plays the MKV.
+- Say plainly when the MakeMKV beta key has expired or no valid key is set: MakeMKV then does not start at all, for DVDs too, and the task links the page where the new beta key is posted.
 
 ## 0.0.184
 
-- Stop waiting for a tool that ran past its time limit even when it does not exit after being killed, and warn at the top of every page while such a process is still alive. A process blocked on a hung NFS share ignores the kill, and the language tag writer used to wait on it forever with no message.
+- Fill in missing packet timestamps when rewrapping a TS, so a broadcast recording with a cut no longer fails with "Can't write packet with unknown timestamp" after copying for a long time.
 
 ## 0.0.183
 

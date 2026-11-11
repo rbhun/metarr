@@ -314,13 +314,15 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "catalog_titles", "version_flags", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_editions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "catalog_titles", "version_count", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "catalog_titles", "dovi_profiles", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "rewrap_jobs", "mode", "TEXT NOT NULL DEFAULT 'rewrap'");
   ensureColumn(db, "catalog_episodes", "versions_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "detect_results", "written_at", "TEXT");
   ensureColumn(db, "detect_results", "source", "TEXT");
   ensureColumn(db, "detect_results", "tag_checked_at", "TEXT");
   ensureColumn(db, "detect_results", "log", "TEXT");
+  ensureColumn(db, "detect_results", "write_stuck_at", "TEXT");
   ensureColumn(db, "rewrap_jobs", "replace_source", "INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(db, "rewrap_jobs", "mode", "TEXT NOT NULL DEFAULT 'rewrap'");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "enrichment", "episode_titles", "TEXT NOT NULL DEFAULT '{}'");
@@ -780,7 +782,7 @@ export function parseVersions(value: string | null | undefined): MediaVersion[] 
         container: typeof version.container === "string" ? version.container : null,
         resolution: typeof version.resolution === "string" ? version.resolution : null,
         hdr: asHdr(typeof version.hdr === "string" ? version.hdr : null),
-        ...(doviProfileOf(version.doviProfile) != null ? { doviProfile: doviProfileOf(version.doviProfile) } : {}),
+        doviProfile: doviProfileOf(version.doviProfile),
         is3d: version.is3d === true,
         qualityName: typeof version.qualityName === "string" ? version.qualityName : null,
         bitrateKbps: typeof version.bitrateKbps === "number" ? version.bitrateKbps : null,
@@ -914,7 +916,7 @@ function parseFiles(value: string | null | undefined): MediaFile[] {
         qualityName: typeof file.qualityName === "string" ? file.qualityName : null,
         resolution: typeof file.resolution === "string" ? file.resolution : null,
         hdr: asHdr(typeof file.hdr === "string" ? file.hdr : null),
-        ...(doviProfileOf(file.doviProfile) != null ? { doviProfile: doviProfileOf(file.doviProfile) } : {}),
+        doviProfile: doviProfileOf(file.doviProfile),
         is3d: Boolean(file.is3d),
         audioLanguages: Array.isArray(file.audioLanguages)
           ? file.audioLanguages.filter((lang): lang is string => typeof lang === "string")

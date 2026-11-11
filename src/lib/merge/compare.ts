@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { idle } from "@/lib/idle";
+import { watchStall } from "@/lib/stuck";
 import { killTool } from "@/lib/stuck-tools";
 
 const FRAME_WIDTH = 160;
@@ -331,12 +332,17 @@ function runTool(command: string, args: string[], timeoutMs: number): Promise<Bu
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       reject(error);
     };
     const timer = setTimeout(() => {
       killTool(child, command, args);
       fail(new Error(`${command} timed out while comparing frames.`));
     }, timeoutMs);
+    const unwatch = watchStall(child.pid, command, (error) => {
+      child.kill("SIGKILL");
+      fail(error);
+    });
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => {
       stderr = `${stderr}${chunk.toString()}`.slice(-8_000);
@@ -349,6 +355,7 @@ function runTool(command: string, args: string[], timeoutMs: number): Promise<Bu
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       if (code === 0) {
         resolve(Buffer.concat(chunks));
         return;

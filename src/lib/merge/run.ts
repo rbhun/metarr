@@ -6,6 +6,7 @@ import { compareFrames } from "@/lib/merge/compare";
 import { mergeTarget } from "@/lib/merge/source";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
+import { removeWorkDir, watchStall } from "@/lib/stuck";
 import { languageCode } from "@/lib/media";
 import { killTool } from "@/lib/stuck-tools";
 
@@ -107,12 +108,17 @@ function runTool(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       reject(error);
     };
     const timer = setTimeout(() => {
       killTool(child, command, args);
       fail(new Error(`${command} ran longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`));
     }, timeoutMs);
+    const unwatch = watchStall(child.pid, command, (error) => {
+      child.kill("SIGKILL");
+      fail(error);
+    });
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       stdout = `${stdout}${line}\n`.slice(-500_000);
       onLine(line);
@@ -128,6 +134,7 @@ function runTool(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unwatch();
       if (code === 0) {
         resolve(stdout);
         return;
@@ -223,7 +230,7 @@ export async function mergeVersions(options: {
       : "";
   if (options.dryRun) return `Dry run: would keep video from ${path.basename(videoPath)} and copy ${tracks} into ${target}.${flac}${offsetBit} Nothing was written.`;
   if (fs.existsSync(target)) throw new Error(`${name} already exists next to the video source.`);
-  fs.rmSync(workDir, { recursive: true, force: true });
+  removeWorkDir(workDir);
   fs.mkdirSync(workDir, { recursive: true });
   try {
     let lastWrite = 0;
@@ -242,6 +249,6 @@ export async function mergeVersions(options: {
     deliverFile(temp, target);
     return `Saved ${name} with ${tracks} (video from ${path.basename(videoPath)}).${flac}${offsetBit} Both originals were left in place.`;
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeWorkDir(workDir);
   }
 }

@@ -11,6 +11,7 @@ export const FILTER_FIELDS = [
   "length",
   "resolution",
   "hdr",
+  "dovi",
   "container",
   "version",
   "file",
@@ -44,7 +45,7 @@ export function fieldOps(field: FilterField): FilterOp[] {
   if (field === "genre") return ["includes", "excludes", "empty", "notEmpty"];
   if (field === "contentRating" || field === "resolution" || field === "hdr" || field === "container") return ["eq", "neq", "empty", "notEmpty"];
   if (field === "score" || field === "bitrate" || field === "year" || field === "length") return ["gt", "gte", "lt", "lte", "eq", "empty", "notEmpty"];
-  if (field === "kind") return ["eq", "neq"];
+  if (field === "kind" || field === "dovi") return ["eq", "neq"];
   if (field === "version") return ["eq", "neq"];
   return ["eq"];
 }
@@ -70,6 +71,8 @@ export function defaultRule(id: string, field: FilterField = "language"): Filter
                 ? "1080p"
                 : field === "hdr"
                   ? "HDR10"
+                  : field === "dovi"
+                    ? "7"
                   : field === "container"
                     ? "mkv"
                     : field === "version"
@@ -349,6 +352,19 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
         params: [value, `%,${value},%`],
       };
     }
+  }
+
+  if (rule.field === "dovi" && (rule.op === "eq" || rule.op === "neq")) {
+    const value = rule.value.trim().toLowerCase();
+    const column = `(',' || IFNULL(dovi_profiles, '') || ',')`;
+    const match =
+      value === "any"
+        ? { sql: `IFNULL(dovi_profiles, '') != ''`, params: [] }
+        : /^\d{1,2}$/.test(value)
+          ? { sql: `${column} LIKE ?`, params: [`%,${Number(value)},%`] }
+          : null;
+    if (!match) return null;
+    return rule.op === "eq" ? match : { sql: `NOT (${match.sql})`, params: match.params };
   }
 
   if (rule.field === "container") {

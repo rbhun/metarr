@@ -13,6 +13,23 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
+FROM node:22-bookworm-slim AS dovi
+ARG TARGETARCH
+WORKDIR /dovi
+RUN node -e ' \
+  const arch = process.env.TARGETARCH === "arm64" ? "aarch64" : "x86_64"; \
+  const sums = { x86_64: "1844258e13c26607b32224bf1fa82b595d3b35949f5467405fda560daad32b3f", aarch64: "b4f22a7db56954efe4ed8d02276d0f991799e84602f3584711be6c9df950cb15" }; \
+  const url = `https://github.com/quietvoid/dovi_tool/releases/download/2.3.4/dovi_tool-2.3.4-${arch}-unknown-linux-musl.tar.gz`; \
+  fetch(url).then(async (response) => { \
+    if (!response.ok) throw new Error(`${url} answered ${response.status}`); \
+    const body = Buffer.from(await response.arrayBuffer()); \
+    const sum = require("crypto").createHash("sha256").update(body).digest("hex"); \
+    if (sum !== sums[arch]) throw new Error(`dovi_tool checksum ${sum} does not match`); \
+    require("fs").writeFileSync("dovi_tool.tar.gz", body); \
+  }).catch((error) => { console.error(error); process.exit(1); });' \
+  && tar xzf dovi_tool.tar.gz \
+  && chmod 755 dovi_tool
+
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -51,6 +68,7 @@ RUN chmod 755 /usr/bin/makemkvcon /usr/bin/mmgplsrv /usr/bin/mmccextr \
   && ldconfig \
   && test -f /usr/share/MakeMKV/appdata.tar \
   && ! ldd /usr/bin/makemkvcon /usr/bin/mmgplsrv /usr/bin/mmccextr /usr/lib/libmakemkv.so.1 /usr/lib/libdriveio.so.0 /usr/lib/libmmbd.so.0 | grep "not found"
+COPY --from=dovi /dovi/dovi_tool /usr/local/bin/dovi_tool
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

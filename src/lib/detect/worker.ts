@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { applyTimeZone } from "@/lib/clock";
-import { applyNextSaved, confirmNextSaved, writeFinding } from "@/lib/detect/apply";
+import { applyNextSaved, confirmNextSaved, markInterruptedWrites, writeFinding } from "@/lib/detect/apply";
 import { queueRecognizedCopies } from "@/lib/detect/plex-copy";
 import { hasFormatRefresh, refreshNextFormat } from "@/lib/detect/format-refresh";
 import { filesForLibrary } from "@/lib/detect/files";
@@ -32,6 +32,7 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { rewrapIsRunning } from "@/lib/rewrap/store";
 import { mergeIsRunning } from "@/lib/merge/store";
 import { getDb } from "@/lib/db";
+import { stuckTools } from "@/lib/stuck";
 
 const globalForDetect = globalThis as { __metarrDetect?: { timer: NodeJS.Timeout | null; working: boolean } };
 
@@ -46,7 +47,11 @@ function state() {
   return globalForDetect.__metarrDetect;
 }
 
+const globalForLeftovers = globalThis as { __metarrRetagLeftovers?: Promise<unknown> };
+
 async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<typeof readDetectSettings>["pathMaps"]): Promise<boolean> {
+  globalForLeftovers.__metarrRetagLeftovers ??= markInterruptedWrites(db).catch(() => 0);
+  await globalForLeftovers.__metarrRetagLeftovers;
   if (await applyNextSaved(db, pathMaps)) return true;
   if (queueRecognizedCopies(db)) return true;
   if (await confirmNextSaved(db, pathMaps)) return true;
@@ -55,6 +60,7 @@ async function runFollowUps(db: ReturnType<typeof getDb>, pathMaps: ReturnType<t
 }
 
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   applyTimeZone(db);
   const settings = readDetectSettings(db);

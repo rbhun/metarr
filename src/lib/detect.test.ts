@@ -16,7 +16,7 @@ import { resolveMediaPath, subtitleStem } from "@/lib/detect/paths";
 import { plexActivitiesBusy, plexIsBusy, plexLibraryBusy, plexTranscodeBusy, setSkipPlexWait, skipPlexWait } from "@/lib/detect/plex";
 import { finishedStatus } from "@/lib/detect/worker";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
-import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWritten, moveDetections, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
+import { claimNextJob, clearJobs, clearPendingJobs, enqueueTargets, finishJob, hasUncheckedTags, hasUnwritten, listJobs, markTagChecked, markWriteStuck, markWritten, moveDetections, readDetectPause, removeJob, reopenForWrite, retryAllFailedJobs, retryFailedJob, saveDetection, writeDetectPause } from "@/lib/detect/store";
 import { claimNextRewrap } from "@/lib/rewrap/store";
 import { listTaskJobs } from "@/lib/tasks";
 import { targetsFromFiles, type ScanFile } from "@/lib/detect/targets";
@@ -29,7 +29,7 @@ import { audioTargets, subtitleTargets } from "@/lib/detect/track";
 import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
-import { commandFailureText, queueUnlabeledRecognition, recognizedWrites, writeFinding } from "@/lib/detect/apply";
+import { applyNextSaved, commandFailureText, markInterruptedWrites, queueUnlabeledRecognition, recognizedWrites, writeFinding } from "@/lib/detect/apply";
 import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths, unreadSidecars } from "@/lib/detect/publish";
@@ -1253,5 +1253,38 @@ test("a write-protected mkv still receives the language in the same file", async
       // The sample was never created.
     }
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a language write left unfinished on the NAS is not opened again after a restart", async () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-leftover-"));
+  const previous = process.env.METARR_SCRATCH;
+  process.env.METARR_SCRATCH = scratch;
+  const db = new Database(":memory:");
+  try {
+    migrate(db);
+    enqueueTargets(db, [
+      { path: "/movies/The A-Team (2010)/The A-Team.mp4", kind: "subtitle", ordinal: 0, label: "The A-Team", format: null, placement: null, streamLabel: null },
+      { path: "/movies/Dune (1984)/Dune.mp4", kind: "audio", ordinal: 0, label: "Dune", format: null, placement: null, streamLabel: null },
+    ], "immediate");
+    for (const language of ["Portuguese", "English"]) {
+      const job = claimNextJob(db, true);
+      saveDetection(db, job!, { language, role: null, confidence: 1, message: null });
+    }
+    fs.mkdirSync(path.join(scratch, "retag-work", "job-WfunAe"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "retag-work", "job-WfunAe", "The A-Team.mp4"), "partial");
+    assert.equal(await markInterruptedWrites(db), 1);
+    const rows = db.prepare(`SELECT path, write_stuck_at FROM detect_results ORDER BY path`).all() as Array<{ path: string; write_stuck_at: string | null }>;
+    assert.ok(rows.find((row) => row.path.includes("A-Team"))?.write_stuck_at);
+    assert.equal(rows.find((row) => row.path.includes("Dune"))?.write_stuck_at, null);
+    assert.equal(hasUnwritten(db), true);
+    markWriteStuck(db, { path: "/movies/Dune (1984)/Dune.mp4", kind: "audio", ordinal: 0 });
+    assert.equal(hasUnwritten(db), false);
+    assert.equal(await applyNextSaved(db, []), false);
+  } finally {
+    db.close();
+    if (previous === undefined) delete process.env.METARR_SCRATCH;
+    else process.env.METARR_SCRATCH = previous;
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 });

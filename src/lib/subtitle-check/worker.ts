@@ -2,6 +2,7 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { applyTimeZone } from "@/lib/clock";
 import { getDb, parseVersions } from "@/lib/db";
+import { stuckTools } from "@/lib/stuck";
 import { resolveMediaPath } from "@/lib/detect/paths";
 import { plexIsBusy } from "@/lib/detect/plex";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
@@ -181,6 +182,7 @@ async function step(): Promise<boolean> {
     progress(db, pass, pause);
     return false;
   }
+  if (stuckTools().length) return false;
   const item = pass.queue.shift();
   if (item) {
     try {

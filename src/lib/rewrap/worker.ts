@@ -6,6 +6,7 @@ import { pathOnPlex, resolveMediaPath } from "@/lib/detect/paths";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
 import { detectCounts, moveDetections, readDetectSettings } from "@/lib/detect/store";
+import { convertDolbyVision } from "@/lib/dovi/run";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
@@ -26,6 +27,7 @@ import {
   writeRewrapPause,
 } from "@/lib/rewrap/store";
 import { scratchRoot } from "@/lib/scratch";
+import { removeWorkDir, stuckTools } from "@/lib/stuck";
 import { startSync } from "@/lib/sync";
 
 const SYNC_AFTER_MS = 2 * 60 * 1000;
@@ -130,7 +132,45 @@ function waiting(db: ReturnType<typeof getDb>): boolean {
   return rewrapTotals(db).pending > 0;
 }
 
+/** The picture is written to scratch once as a bare stream, then muxed there with the audio. */
+async function convertDovi(db: ReturnType<typeof getDb>, id: number, libraryPath: string, local: string, workDir: string) {
+  const directory = path.dirname(local);
+  const rehearsal = dryRun();
+  if (rehearsal) {
+    const problem = discFolderProblem(directory);
+    if (problem) {
+      finishRewrap(db, id, "failed", `Dry run: ${sourceText(problem, "file")}`);
+      return;
+    }
+  } else {
+    assertWritableDiscFolder(directory);
+    const bytes = fs.statSync(local).size;
+    if (!roomFor(bytes * 2, [path.dirname(workDir)]) || !roomFor(bytes, [directory])) {
+      finishRewrap(db, id, "failed", "There is not enough free space for a converted copy of this file, so nothing was written.");
+      return;
+    }
+  }
+  const message = await convertDolbyVision({
+    source: local,
+    workDir,
+    dryRun: rehearsal,
+    onProgress: (percent, text) => updateRewrapProgress(db, id, percent, text),
+  });
+  const wrote = !rehearsal && message.startsWith("Saved ");
+  let told = "";
+  if (wrote) {
+    try {
+      told = await announceFolder(db, [path.dirname(libraryPath), directory]);
+    } catch {
+      told = "Plex and the *arr apps could not be asked to rescan.";
+    }
+  }
+  finishRewrap(db, id, "done", [message, told].filter(Boolean).join(" "));
+  if (wrote) syncSoon();
+}
+
 async function step() {
+  if (stuckTools().length) return;
   const db = getDb();
   const settings = readRewrapSettings(db);
   const urgent = hasImmediateRewrap(db);
@@ -195,6 +235,10 @@ async function step() {
       }
       finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(mkv)}.`, told].filter(Boolean).join(" "));
       syncSoon();
+      return;
+    }
+    if (job.mode === "dovi") {
+      await convertDovi(db, job.id, job.path, local, workDir);
       return;
     }
     const sources = splitSourcesOnDisk(local) ?? [local];
@@ -292,8 +336,9 @@ async function step() {
     finishRewrap(db, job.id, "done", [message, kept, told].filter(Boolean).join(" "));
     if (!rehearsal) syncSoon();
   } catch (caught) {
-    fs.rmSync(workDir, { recursive: true, force: true });
-    finishRewrap(db, job.id, "failed", sourceText(friendlyFsError(caught, "Rewrap failed."), sourceKind(job.path)));
+    removeWorkDir(workDir);
+    const fallback = job.mode === "dovi" ? "Dolby Vision conversion failed." : "Rewrap failed.";
+    finishRewrap(db, job.id, "failed", sourceText(friendlyFsError(caught, fallback), job.mode === "dovi" ? "file" : sourceKind(job.path)));
   }
 }
 

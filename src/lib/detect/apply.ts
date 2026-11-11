@@ -7,12 +7,13 @@ import { deliverFile } from "@/lib/deliver";
 import { dryRun } from "@/lib/dry-run";
 import { idle } from "@/lib/idle";
 import { scratchRoot } from "@/lib/scratch";
+import { removeWorkDir, StuckToolError, watchStall } from "@/lib/stuck";
 import { isSubtitleFile } from "@/lib/detect/sidecars";
 import { resolveMediaPath, type PathMap } from "@/lib/detect/paths";
 import { queueLanguageCopy } from "@/lib/detect/plex-copy";
 import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
-import { markTagChecked, markWritten, reopenForWrite } from "@/lib/detect/store";
+import { markTagChecked, markWriteStuck, markWritten, reopenForWrite } from "@/lib/detect/store";
 import { languageName } from "@/lib/media";
 import { killTool } from "@/lib/stuck-tools";
 import type Database from "better-sqlite3";
@@ -25,6 +26,7 @@ export type WriteResult = {
   videoPaths: string[];
   /** An MKV copy was just queued so Plex can read the language. */
   queuedRewrap?: boolean;
+  stuck?: boolean;
 };
 
 type WriteJob = {
@@ -40,6 +42,7 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
     const low = idle(command, args);
     let settled = false;
     const child = execFile(low.command, low.args, { maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+      unwatch();
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -52,15 +55,25 @@ function runTool(command: string, args: string[], timeout: number, allowWarning 
       }
       const blob = `${out}\n${err}\n${error?.message ?? ""}`;
       const missing = code === "ENOENT" || /No such file or directory|not found/i.test(blob);
+      const timedOut = Boolean(error && "killed" in error && error.killed);
       if (missing) reject(new Error(`${command} is not installed, so the file was left unchanged.`));
+      else if (timedOut) reject(new Error(`${command} timed out, so the file was left unchanged.`));
       else reject(new Error(commandFailureText(command, out, err)));
     });
     const timer = setTimeout(() => {
+      killTool(child, command, args);
       if (settled) return;
       settled = true;
-      killTool(child, command, args);
+      unwatch();
       reject(new Error(`${command} timed out, so the file was left unchanged.`));
     }, timeout);
+    const unwatch = watchStall(child.pid, command, (error) => {
+      child.kill("SIGKILL");
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }
 
@@ -125,6 +138,36 @@ function retagScratch(db: Database.Database): string {
   return path.join(scratchRoot(db.name), "retag-work");
 }
 
+/**
+ * A retag folder left behind means the run before this one never finished that copy, most often
+ * because the NAS stopped answering. Mark those files instead of opening them again on start.
+ */
+export async function markInterruptedWrites(db: Database.Database): Promise<number> {
+  const root = retagScratch(db);
+  let jobs: string[];
+  try {
+    jobs = (await fs.promises.readdir(root)).filter((name) => name.startsWith("job-"));
+  } catch {
+    return 0;
+  }
+  const names = new Set<string>();
+  for (const job of jobs) {
+    try {
+      for (const name of await fs.promises.readdir(path.join(root, job))) names.add(name);
+    } catch {
+      // Gone, or not readable; nothing to match.
+    }
+  }
+  if (!names.size) return 0;
+  const rows = db
+    .prepare(`SELECT path, kind, ordinal FROM detect_results WHERE language IS NOT NULL AND written_at IS NULL AND write_stuck_at IS NULL`)
+    .all() as Array<{ path: string; kind: string; ordinal: number }>;
+  const hit = rows.filter((row) => names.has(path.basename(row.path.replace(/\\/g, "/"))));
+  for (const row of hit) markWriteStuck(db, row);
+  if (hit.length) console.error(`Not retrying ${hit.length} language write(s) that an earlier run left unfinished on the NAS.`);
+  return hit.length;
+}
+
 function dryRunSentence(plan: Exclude<TagPlan, { action: "skip" }>, kind: "audio" | "subtitle", localFile: string): string {
   if (plan.action === "rename") return `Dry run: would rename ${path.basename(localFile)} to ${path.basename(plan.to)}. Nothing was written.`;
   if (plan.action === "riff") return `Dry run: would write ${plan.language} into this file. Nothing was written.`;
@@ -164,7 +207,7 @@ async function deliverCopy(
     deliverFile(temp, target, { replace: target === source, mode: (fs.statSync(source).mode & 0o777) | 0o660 });
     if (removeSource && target !== source) fs.rmSync(source, { force: true });
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    removeWorkDir(scratch);
   }
 }
 
@@ -355,7 +398,8 @@ export async function writeFinding(
     }
   } catch (caught) {
     const sentence = caught instanceof Error ? caught.message : "The file could not be changed.";
-    return unchanged(job, sentence.endsWith(".") ? sentence : `${sentence}.`, false);
+    const result = unchanged(job, sentence.endsWith(".") ? sentence : `${sentence}.`, false);
+    return caught instanceof StuckToolError ? { ...result, stuck: true } : result;
   }
 
   const renamedTo = plan.action === "rename" ? retargetPath(job.path, localFile, plan.to) : null;
@@ -453,7 +497,7 @@ export async function applyNextSaved(db: Database.Database, maps: PathMap[]): Pr
   const rows = db
     .prepare(
       `SELECT path, kind, ordinal, language, role FROM detect_results
-       WHERE language IS NOT NULL AND written_at IS NULL
+       WHERE language IS NOT NULL AND written_at IS NULL AND write_stuck_at IS NULL
        ORDER BY scanned_at
        LIMIT 40`,
     )
@@ -487,6 +531,7 @@ export async function applyNextSaved(db: Database.Database, maps: PathMap[]): Pr
     row.language,
     role,
   );
+  if (written.stuck) markWriteStuck(db, row);
   if (!written.settled) {
     deferredWrites.add(key);
     return true;
