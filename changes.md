@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.205
+
+- Keep an empty public folder in the image build. Removing the unused Next.js icons left that path missing, so the deploy could not copy it.
+
+## 0.0.204
+
+- Add a Delete old files switch in MKV rewrap settings, off by default, and a button that removes originals already kept beside an MKV.
+
 ## 0.0.203
 
 - Read the Dolby Vision profile from the video's own data when the container does not state it, instead of assuming profile 7. A profile 5 file without that label would otherwise have been converted as 7 to 8.1, with wrong colours; Metarr now stops before changing anything.

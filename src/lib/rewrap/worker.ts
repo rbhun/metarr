@@ -13,6 +13,7 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { mergeIsRunning } from "@/lib/merge/store";
 import { recognizedAudioLanguages } from "@/lib/detect/plex-copy";
 import { libraryAvis } from "@/lib/rewrap/candidates";
+import { oldCopiesBeside, removeOldFiles } from "@/lib/rewrap/old-files";
 import { framesJumpBack, rewrapAvi, tagMkvLanguages } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
@@ -134,10 +135,21 @@ function retireSource(file: string): string {
   return `The original was kept as ${path.basename(kept)} so Plex plays the MKV.`;
 }
 
-/** The language check stays on the file Plex plays after the original is set aside. */
+/** The language check stays on the file Plex plays after the original is set aside or removed. */
 function keepLogOnCopy(db: ReturnType<typeof getDb>, libraryPath: string, kept: string) {
-  if (!kept.startsWith("The original was kept") && !kept.startsWith("The original was already kept")) return;
+  if (!kept.startsWith("The original was kept") && !kept.startsWith("The original was already kept") && !kept.startsWith("Removed the original ")) return;
   moveDetections(db, libraryPath, rewrapTarget(libraryPath));
+}
+
+/** Delete the original when that setting is on. Otherwise a language copy is renamed so Plex plays the MKV. */
+function putOriginalsAway(sources: string[], output: string | null, drop: boolean, rename: boolean): string {
+  if (drop) return removeOldFiles(oldCopiesBeside(sources, output, existsFile));
+  if (!rename || sources.length !== 1 || alreadyKept(sources[0] ?? "")) return "";
+  try {
+    return retireSource(sources[0]);
+  } catch {
+    return "The original could not be moved aside, so Plex will list both files.";
+  }
 }
 
 function existsFile(candidate: string): boolean {
@@ -263,6 +275,7 @@ async function step() {
           await tagMkvLanguages(mkv, known?.languages ?? job.languages);
           moveDetections(db, job.path, rewrapTarget(job.path));
         }
+        const aside = !dryRun() && settings.deleteOld && kept ? removeOldFiles(oldCopiesBeside([kept], mkv, existsFile)) : "";
         let told = "";
         if (!dryRun()) {
           try {
@@ -271,7 +284,7 @@ async function step() {
             told = "Plex and the *arr apps could not be asked to rescan.";
           }
         }
-        finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(mkv)}.`, told].filter(Boolean).join(" "));
+        finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(mkv)}.`, aside, told].filter(Boolean).join(" "));
         syncSoon();
         return;
       }
@@ -298,14 +311,7 @@ async function step() {
       replacePicture = !rehearsal && (await pictureJumps(singleTarget));
       if (!replacePicture) {
         if (!rehearsal) await tagMkvLanguages(singleTarget, languages);
-        let kept = "";
-        if (!rehearsal && job.replaceSource && !alreadyKept(local)) {
-          try {
-            kept = retireSource(local);
-          } catch {
-            kept = "The original could not be moved aside, so Plex will list both files.";
-          }
-        }
+        const kept = putOriginalsAway([local], singleTarget, !rehearsal && settings.deleteOld, !rehearsal && job.replaceSource);
         let told = "";
         if (!rehearsal) {
           try {
@@ -351,14 +357,8 @@ async function step() {
       replace: replacePicture,
       onProgress: (percent, text) => updateRewrapProgress(db, job.id, percent, text),
     });
-    let kept = "";
-    if (!rehearsal && job.replaceSource && sources.length === 1 && !alreadyKept(local)) {
-      try {
-        kept = retireSource(local);
-      } catch {
-        kept = "The original could not be moved aside, so Plex will list both files.";
-      }
-    }
+    const output = sources.length > 1 ? (joinedTarget(local) ?? rewrapTarget(local)) : rewrapTarget(local);
+    const kept = putOriginalsAway(sources, output, !rehearsal && settings.deleteOld, !rehearsal && job.replaceSource);
     if (!rehearsal && sources.length > 1) {
       const partners = new Set<string>(sources);
       for (const file of sources) partners.add(pathOnPlex(file, maps));

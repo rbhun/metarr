@@ -10,6 +10,7 @@ import { migrate } from "@/lib/db";
 import { listTaskJobs } from "@/lib/tasks";
 import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
 import { checkRewrap, framesJumpBack, packedMarker, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
+import { deleteAllOldFiles, supersededByMkv } from "@/lib/rewrap/old-files";
 import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import { queueShakyRewraps } from "@/lib/rewrap/worker";
 import {
@@ -104,9 +105,11 @@ test("probe output, progress lines, and the result check", () => {
 test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   const db = new Database(":memory:");
   migrate(db);
-  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 1, endHour: 7, firstLanguage: "Hungarian" });
+  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 1, endHour: 7, firstLanguage: "Hungarian", deleteOld: false });
   writeRewrapSettings(db, { startHour: 22, endHour: 4, firstLanguage: "" });
-  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 22, endHour: 4, firstLanguage: "" });
+  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 22, endHour: 4, firstLanguage: "", deleteOld: false });
+  writeRewrapSettings(db, { deleteOld: true });
+  assert.equal(readRewrapSettings(db).deleteOld, true);
   assert.equal(parseFirstLanguage("Klingonish"), null);
   assert.equal(parseFirstLanguage(" hun "), "hun");
   assert.equal(parseFirstLanguage(""), "");
@@ -150,6 +153,51 @@ test("deinterlace and Dolby Vision reconvert are tagged apart from a rewrap", ()
   assert.match(shown.jobs.find((job) => job.label === "Vision")?.detail ?? "", /7 to 8\.1, or 5 to MP4/);
   assert.match(shown.jobs.find((job) => job.label === "Old")?.detail ?? "", /deinterlaced/);
   db.close();
+});
+
+test("delete all old files removes an AVI that already has an MKV and leaves subtitles", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-old-"));
+  try {
+    const movie = path.join(root, "Film (1999)");
+    const disc = path.join(root, "Disc", "BDMV", "STREAM");
+    const parts = path.join(root, "Parts");
+    fs.mkdirSync(movie);
+    fs.mkdirSync(disc, { recursive: true });
+    fs.mkdirSync(parts);
+    fs.writeFileSync(path.join(movie, "Film (1999).mkv"), "mkv");
+    fs.writeFileSync(path.join(movie, "Film (1999).avi"), "avi");
+    fs.writeFileSync(path.join(movie, "Film (1999).avi.metarr-orig"), "kept");
+    fs.writeFileSync(path.join(movie, "Film (1999).en.srt.metarr-orig"), "subs");
+    fs.writeFileSync(path.join(movie, "Alone.avi"), "keep");
+    fs.writeFileSync(path.join(disc, "00001.m2ts"), "disc");
+    fs.writeFileSync(path.join(disc, "00001.mkv"), "disc-mkv");
+    fs.writeFileSync(path.join(parts, "Show CD1.avi"), "part");
+    fs.writeFileSync(path.join(parts, "Show.mkv"), "joined");
+    enqueueRewraps(db, [
+      { path: path.join(movie, "Film (1999).avi") },
+      { path: path.join(disc, "00001.m2ts") },
+      { path: path.join(parts, "Show CD1.avi") },
+    ]);
+    assert.equal(supersededByMkv(path.join(movie, "Film (1999).en.srt.metarr-orig")), false);
+    assert.equal(supersededByMkv(path.join(disc, "00001.m2ts")), false);
+    const result = deleteAllOldFiles(db);
+    assert.equal(result.removed, 3);
+    assert.equal(result.failed, 0);
+    assert.equal(fs.existsSync(path.join(movie, "Film (1999).mkv")), true);
+    assert.equal(fs.existsSync(path.join(movie, "Film (1999).avi")), false);
+    assert.equal(fs.existsSync(path.join(movie, "Film (1999).avi.metarr-orig")), false);
+    assert.equal(fs.existsSync(path.join(movie, "Film (1999).en.srt.metarr-orig")), true);
+    assert.equal(fs.existsSync(path.join(movie, "Alone.avi")), true);
+    assert.equal(fs.existsSync(path.join(disc, "00001.m2ts")), true);
+    assert.equal(fs.existsSync(path.join(parts, "Show CD1.avi")), false);
+    assert.equal(fs.existsSync(path.join(parts, "Show.mkv")), true);
+    assert.equal(deleteAllOldFiles(db).removed, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    db.close();
+  }
 });
 
 test("removing one waiting or failed rewrap leaves the others", () => {

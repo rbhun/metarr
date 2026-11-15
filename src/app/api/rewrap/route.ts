@@ -1,6 +1,9 @@
+import { announceFolder } from "@/lib/announce";
 import { clampHour } from "@/lib/detect/schedule";
 import { getDb } from "@/lib/db";
+import { readFolderScan } from "@/lib/folder-scan";
 import { doviItemsForSelection, libraryAvis, listRewrapCandidates, rewrapItemsForSelection } from "@/lib/rewrap/candidates";
+import { deleteAllOldFiles } from "@/lib/rewrap/old-files";
 import { canRewrap, rewrapSplit } from "@/lib/rewrap/source";
 import {
   activeRewrap,
@@ -67,6 +70,24 @@ export async function POST(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const db = getDb();
+  if (record.action === "delete-old") {
+    try {
+      const result = deleteAllOldFiles(db);
+      let told = "";
+      if (result.removed > 0) {
+        try {
+          const roots = readFolderScan(db).roots;
+          told = await announceFolder(db, roots.length ? roots : result.folders);
+        } catch {
+          told = "Plex and the *arr apps could not be asked to rescan.";
+        }
+      }
+      return NextResponse.json({ removed: result.removed, failed: result.failed, told });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Could not delete old files.";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+  }
   if (record.mode === "dovi") {
     const items = doviItemsForSelection(db, idList(record.titles), idList(record.episodes));
     const result = enqueueRewraps(db, items, record.immediate === true);
@@ -111,6 +132,7 @@ export async function PUT(request: Request) {
     startHour,
     endHour,
     firstLanguage,
+    deleteOld: typeof record.deleteOld === "boolean" ? record.deleteOld : current.deleteOld,
   });
   kickRewrapWorker();
   return NextResponse.json({ settings: readRewrapSettings(db) });

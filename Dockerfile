@@ -12,6 +12,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
+# Git does not keep an empty public folder. The runner copy below needs the path.
+RUN mkdir -p /app/public
 
 FROM node:22-bookworm-slim AS dovi
 ARG TARGETARCH

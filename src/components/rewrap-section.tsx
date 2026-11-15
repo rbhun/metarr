@@ -174,7 +174,7 @@ export function RewrapSection() {
           MKV next to the file, and writes the audio and subtitle languages Metarr knows onto the tracks. A single file keeps its name. A labeled split,
           such as CD1 through CD3 or 1 of 3, is joined into one MKV in that order. Nothing is re-encoded, so the quality and size stay the same; Blu-ray PCM
           audio is stored as lossless FLAC. A DivX or Xvid file that packs two frames into one is split apart first, so a pan does not
-          jump back and forth. Old DivX/Xvid video may still need Plex to convert it on some players. The original files stay where they are.
+          jump back and forth. Old DivX/Xvid video may still need Plex to convert it on some players. The original files stay where they are unless Delete old files is on in Settings.
           Hours and the audio order are under Settings.
         </p>
       </div>
