@@ -104,6 +104,7 @@ export function UpdateCard() {
 
   const working = offline || Boolean(state?.requestedAt && !state.stuck) || state?.run?.state === "running";
   const newer = state && state.version !== VERSION;
+  const current = Boolean(state?.remoteVersion) && !state?.updateAvailable && !working;
 
   return (
     <Card size="sm">
@@ -131,15 +132,18 @@ export function UpdateCard() {
             </Button>
           </div>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={!state?.available || working || sending} onClick={() => void update()}>
-            {working ? "Updating…" : sending ? "Requesting…" : "Update now"}
-          </Button>
-          {state?.log ? (
-            <Button size="sm" variant="outline" onClick={() => setShowLog((value) => !value)}>
-              {showLog ? "Hide log" : "Show log"}
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-sm">Current version {state?.version ?? VERSION}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={!state?.available || working || sending || current} onClick={() => void update()}>
+              {working ? "Updating…" : sending ? "Requesting…" : "Update now"}
             </Button>
-          ) : null}
+            {state?.log ? (
+              <Button size="sm" variant="outline" onClick={() => setShowLog((value) => !value)}>
+                {showLog ? "Hide log" : "Show log"}
+              </Button>
+            ) : null}
+          </div>
         </div>
         {showLog && state?.log ? (
           <pre className="max-h-72 overflow-auto rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 whitespace-pre-wrap">{state.log}</pre>

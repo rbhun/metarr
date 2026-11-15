@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.198
+
+- Leave Update off on Settings when this copy is already the version on main, and show that version above the button.
+
 ## 0.0.197
 
 - Open Tasks and Rips without listing every media folder. Those pages were waiting on the NAS for directories they do not use, so the remux list, rewrap queue, and task list sat there until a reload gave up.

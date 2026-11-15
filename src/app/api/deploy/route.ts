@@ -9,6 +9,13 @@ export async function GET() {
 }
 
 export async function POST() {
+  const status = await deployStatus();
+  if (status.remoteVersion && !status.updateAvailable && status.run?.state !== "running" && !(status.requestedAt && !status.stuck)) {
+    return NextResponse.json(
+      { error: `This copy is already the current version (${status.version}).`, ...status },
+      { status: 409 },
+    );
+  }
   let result;
   try {
     result = requestDeploy();
