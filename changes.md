@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.211
+
+- Download MakeMKV 1.18.4 from the Internet Archive and check its published checksum. The official site is ending the binary archive after 17 KB, so tar stopped with an unexpected end of file.
+
 ## 0.0.210
 
 - Compile MakeMKV one file at a time. Using every core was killed when the machine had more cores than memory, so a new install stopped during the build.
