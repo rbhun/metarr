@@ -5,7 +5,7 @@ import readline from "node:readline";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { planMp4, tagDvh1 } from "@/lib/dovi/mp4";
-import { RpuRepair } from "@/lib/dovi/rpu-repair";
+import { RpuRepair, firstRpuProfile } from "@/lib/dovi/rpu-repair";
 import { doviProfileOf } from "@/lib/media";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
 
@@ -298,6 +298,22 @@ function start(command: string, args: string[], options: { label: string; okCode
   return { child, done };
 }
 
+/**
+ * The Dolby Vision profile from the RPUs of the first frames. ffprobe reads it from the container,
+ * and a file muxed without the Dolby Vision configuration shows none there.
+ */
+async function sniffProfile(file: string, index: number): Promise<number | null> {
+  const run = start(
+    "ffmpeg",
+    ["-hide_banner", "-v", "error", "-i", file, "-map", `0:${index}`, "-c:v", "copy", "-bsf:v", "hevc_mp4toannexb", "-frames:v", "48", "-f", "hevc", "pipe:1"],
+    { label: "ffmpeg", stdout: true, timeoutMs: PROBE_TIMEOUT_MS },
+  );
+  const chunks: Buffer[] = [];
+  run.child.stdout!.on("data", (chunk: Buffer) => chunks.push(chunk));
+  await run.done;
+  return firstRpuProfile(Buffer.concat(chunks));
+}
+
 async function probe(file: string): Promise<DoviProbe> {
   const args = [
     "-v", "error",
@@ -347,6 +363,16 @@ export async function convertDolbyVision(options: {
   const main = videos[0];
   if (!main) throw new Error("This file has no video stream.");
   if (main.codec !== "hevc") throw new Error(`Dolby Vision conversion needs HEVC video; this file is ${main.codec ?? "an unknown codec"}.`);
+  if (main.doviProfile == null) {
+    const sniffed = await sniffProfile(source, main.index);
+    if (sniffed == null) throw new Error("This file has no Dolby Vision data in its first frames, so there is nothing to convert.");
+    if (sniffed === 5) {
+      throw new Error(
+        "This file is Dolby Vision 5, but its container does not say so, and ffmpeg needs that to keep the Dolby Vision in an MP4. Metarr cannot convert this file yet; nothing was changed.",
+      );
+    }
+    main.doviProfile = sniffed;
+  }
   if (main.doviProfile === 5) return convertProfile5({ ...options, input, main });
   if (main.doviProfile != null && main.doviProfile !== 7) {
     return `Nothing to convert: this file is already Dolby Vision ${main.doviProfile}, which the Apple TV plays.`;

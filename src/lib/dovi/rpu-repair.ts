@@ -48,6 +48,35 @@ export function rpuIsValid(nal: Uint8Array): boolean {
   return crc32Mpeg2(payload.subarray(1, end - 5)) === received;
 }
 
+/**
+ * The Dolby Vision profile an RPU NAL (from its 2-byte header) belongs to, read the way dovi_tool does:
+ * `vdr_rpu_profile` 0 is profile 5; 1 is 7 or 8, told apart by whether an enhancement layer is mapped.
+ * Returns 7 for both 7 and 8, since only 5 changes what Metarr does.
+ */
+export function rpuProfile(nal: Uint8Array): number | null {
+  const payload = unescapeNal(nal.subarray(2));
+  if (payload[0] !== 0x19 || payload.length < 4) return null;
+  const bits = (payload[1]! << 16) | (payload[2]! << 8) | payload[3]!;
+  const rpuType = bits >>> 18;
+  if (rpuType !== 2) return null;
+  const vdrRpuProfile = (bits >>> 3) & 0xf;
+  return vdrRpuProfile === 0 ? 5 : vdrRpuProfile === 1 ? 7 : null;
+}
+
+/** The profile of the first readable RPU in an Annex B HEVC stream. */
+export function firstRpuProfile(stream: Buffer): number | null {
+  for (let found = stream.indexOf(START); found >= 0; found = stream.indexOf(START, found + 3)) {
+    const header = stream[found + 3];
+    if (header == null || ((header >> 1) & 0x3f) !== RPU_NAL_TYPE) continue;
+    const next = stream.indexOf(START, found + 3);
+    const nal = stream.subarray(found + 3, next < 0 ? stream.length : next);
+    const end = nal.length - trailingZeros(nal);
+    if (!rpuIsValid(nal.subarray(0, end))) continue;
+    return rpuProfile(nal.subarray(0, end));
+  }
+  return null;
+}
+
 function trailingZeros(data: Uint8Array): number {
   let count = 0;
   while (count < data.length && data[data.length - 1 - count] === 0) count += 1;

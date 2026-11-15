@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.203
+
+- Read the Dolby Vision profile from the video's own data when the container does not state it, instead of assuming profile 7. A profile 5 file without that label would otherwise have been converted as 7 to 8.1, with wrong colours; Metarr now stops before changing anything.
+
 ## 0.0.202
 
 - Open Tasks from the notice after a conversion. The title drawer was taking that click, so the button did nothing.

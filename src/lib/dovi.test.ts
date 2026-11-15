@@ -27,7 +27,7 @@ import {
   type DoviProbe,
 } from "@/lib/dovi/run";
 import { planMp4, tagDvh1 } from "@/lib/dovi/mp4";
-import { RpuRepair, crc32Mpeg2, rpuIsValid, unescapeNal } from "@/lib/dovi/rpu-repair";
+import { RpuRepair, crc32Mpeg2, firstRpuProfile, rpuIsValid, rpuProfile, unescapeNal } from "@/lib/dovi/rpu-repair";
 import { rulesWhere } from "@/lib/filters";
 import { videoFromProbe } from "@/lib/folder-scan";
 import { hdrText } from "@/lib/format";
@@ -445,6 +445,15 @@ test("a Dolby Vision 5 MKV becomes an Apple MP4 under its name, the original kep
       "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3", "-c:v", "copy", "-c:a:0", "flac", "-c:a:1", "ac3", "-c:s", "srt", source,
     ]);
     assert.equal(profile(source), "5");
+    assert.equal(firstRpuProfile(fs.readFileSync(path.join(root, "p5.hevc"))), 5);
+    assert.equal(rpuProfile(Buffer.concat([Buffer.from([0x7c, 0x01]), Buffer.from(PROFILE7_RPU, "base64").subarray(4)])), 7);
+
+    // Without -strict unofficial ffmpeg writes no Dolby Vision configuration; the RPUs still say 5.
+    const bare = path.join(root, "Bare.mp4");
+    run("ffmpeg", ["-v", "error", "-i", "p5.mkv", "-c", "copy", bare]);
+    assert.equal(profile(bare), "");
+    await assert.rejects(convertDolbyVision({ source: bare, workDir: path.join(root, "work"), onProgress: () => undefined }), /is Dolby Vision 5, but its container does not say so/);
+    assert.ok(fs.existsSync(bare) && !fs.existsSync(path.join(root, "Bare.DV7")) && !fs.existsSync(path.join(root, "Bare.DV8.mkv")));
 
     const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
     assert.match(message, /Saved Film\.DV5\.mp4 as an Apple MP4 \(dvh1\) with Dolby Vision 5/);
