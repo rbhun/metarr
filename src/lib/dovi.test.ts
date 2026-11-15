@@ -13,6 +13,7 @@ import {
   doviFinalName,
   doviOriginalName,
   frameDurationNs,
+  profile5Names,
   swapIntoPlace,
   damagedRpuMessage,
   doviTarget,
@@ -25,11 +26,12 @@ import {
   videoDelayMs,
   type DoviProbe,
 } from "@/lib/dovi/run";
+import { planMp4, tagDvh1 } from "@/lib/dovi/mp4";
 import { RpuRepair, crc32Mpeg2, rpuIsValid, unescapeNal } from "@/lib/dovi/rpu-repair";
 import { rulesWhere } from "@/lib/filters";
 import { videoFromProbe } from "@/lib/folder-scan";
 import { hdrText } from "@/lib/format";
-import { doviProfileOf } from "@/lib/media";
+import { doviProfileOf, needsDoviConversion } from "@/lib/media";
 import { claimNextRewrap, enqueueRewraps, finishRewrap, finishedRewrapPaths } from "@/lib/rewrap/store";
 
 /** One Dolby Vision profile 7 MEL RPU from the dovi_tool test assets. */
@@ -64,7 +66,7 @@ test("ffprobe side data gives the Dolby Vision profile, the start, and the frame
     }),
   );
   assert.equal(probe.duration, 7254.5);
-  assert.deepEqual(probe.streams[0], { index: 0, type: "video", codec: "hevc", start: 1.483, frameRate: "24000/1001", doviProfile: 7 });
+  assert.deepEqual(probe.streams[0], { index: 0, type: "video", codec: "hevc", start: 1.483, frameRate: "24000/1001", doviProfile: 7, channels: null, tag: null });
   assert.equal(probe.streams[1]?.frameRate, null);
   assert.equal(videoDelayMs(probe), 83);
   assert.equal(videoDelayMs(probeOf([{ type: "video", start: 0 }, { type: "audio", start: 0.5 }])), 0);
@@ -370,6 +372,90 @@ test("the converted copy takes the original's name only when nothing would be ov
     fs.writeFileSync(path.join(root, "Other.mkv"), "another version");
     assert.equal(swapIntoPlace(ts, path.join(root, "Other.DV8.mkv")), null);
     assert.equal(fs.readFileSync(path.join(root, "Other.mkv"), "utf8"), "another version");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("profile 5 is converted until it is an MP4; its names follow the .DV5 pattern", () => {
+  assert.equal(needsDoviConversion(7, "/m/Film.mp4"), true);
+  assert.equal(needsDoviConversion(5, "/m/Film.mkv"), true);
+  assert.equal(needsDoviConversion(5, "/m/Film.MP4"), false);
+  assert.equal(needsDoviConversion(8, "/m/Film.mkv"), false);
+  assert.deepEqual(profile5Names("/m/Dune (2021)/Dune.mkv"), { temp: "/m/Dune (2021)/Dune.DV5.mp4", final: "/m/Dune (2021)/Dune.mp4", original: "/m/Dune (2021)/Dune.DV5" });
+});
+
+test("an Apple MP4 keeps Apple audio and text subtitles, and converts audio only when none is left", () => {
+  const streams = (list: Array<[string, string, number?]>) =>
+    list.map(([type, codec, channels], index) => ({ index, type, codec, start: 0, frameRate: null, doviProfile: null, channels: channels ?? null }));
+  const mixed = planMp4(streams([["video", "hevc"], ["audio", "truehd", 8], ["audio", "eac3", 6], ["audio", "ac3", 2], ["subtitle", "hdmv_pgs_subtitle"], ["subtitle", "subrip"]]), 0);
+  assert.deepEqual(mixed.args, ["-map", "0:0", "-map", "0:2", "-map", "0:3", "-c:a", "copy", "-map", "0:5", "-c:s", "mov_text", "-disposition:a:0", "default"]);
+  assert.deepEqual([mixed.audio, mixed.convertedAudio, mixed.droppedAudio, mixed.subtitles, mixed.droppedSubtitles], [2, null, ["truehd"], 1, 1]);
+  const lossless = planMp4(streams([["video", "hevc"], ["audio", "truehd", 8], ["audio", "dts", 6]]), 0);
+  assert.deepEqual(lossless.args, ["-map", "0:0", "-map", "0:1", "-c:a", "eac3", "-b:a", "640k", "-ac", "6", "-disposition:a:0", "default"]);
+  assert.deepEqual([lossless.audio, lossless.convertedAudio, lossless.droppedAudio], [1, "truehd", ["dts"]]);
+});
+
+test("the video sample entry of an MP4 is renamed from hvc1 to dvh1, and nothing else changes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dvh1-"));
+  try {
+    const box = (type: string, ...parts: Buffer[]) => {
+      const body = Buffer.concat(parts);
+      const head = Buffer.alloc(8);
+      head.writeUInt32BE(body.length + 8);
+      head.write(type, 4, "latin1");
+      return Buffer.concat([head, body]);
+    };
+    const hdlr = (kind: string) => box("hdlr", Buffer.alloc(8), Buffer.from(kind, "latin1"), Buffer.alloc(12));
+    const stsd = (entry: string) => box("stsd", Buffer.from([0, 0, 0, 0, 0, 0, 0, 1]), box(entry, Buffer.alloc(78)));
+    const trak = (kind: string, entry: string) => box("trak", box("mdia", hdlr(kind), box("minf", box("stbl", stsd(entry)))));
+    const file = Buffer.concat([box("ftyp", Buffer.from("isomhvc1", "latin1")), box("moov", trak("soun", "ac-3"), trak("vide", "hvc1")), box("mdat", Buffer.from("hvc1hvc1"))]);
+    const target = path.join(root, "film.mp4");
+    fs.writeFileSync(target, file);
+    assert.equal(tagDvh1(target), "hvc1");
+    const after = fs.readFileSync(target);
+    const changed = [...after].flatMap((byte, at) => (byte === file[at] ? [] : [at]));
+    assert.equal(changed.length, 2);
+    assert.equal(after.toString("latin1").split("dvh1").length - 1, 1);
+    assert.equal(tagDvh1(target), "dvh1");
+    fs.writeFileSync(target, Buffer.concat([box("ftyp", Buffer.alloc(8)), box("moov", trak("vide", "hev1"))]));
+    assert.throws(() => tagDvh1(target), /tagged hev1/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a Dolby Vision 5 MKV becomes an Apple MP4 under its name, the original kept as .DV5", { skip: !hasTools() && "needs dovi_tool, mkvmerge, and ffmpeg with libx265" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi5-"));
+  try {
+    const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: root, stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(root, "gen.json"),
+      JSON.stringify({ cm_version: "V40", profile: "5", length: 96, level6: { max_display_mastering_luminance: 1000, min_display_mastering_luminance: 1, max_content_light_level: 1000, max_frame_average_light_level: 400 } }),
+    );
+    run(doviTool(), ["generate", "-j", "gen.json", "-o", "rpu.bin"]);
+    run("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24000/1001:d=4", "-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-x265-params", "log-level=error", "-f", "hevc", "bl.hevc"]);
+    run(doviTool(), ["inject-rpu", "-i", "bl.hevc", "--rpu-in", "rpu.bin", "-o", "p5.hevc"]);
+    run("mkvmerge", ["-q", "-o", "p5.mkv", "--default-duration", "0:24000/1001p", "p5.hevc"]);
+    fs.writeFileSync(path.join(root, "en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+    const source = path.join(root, "Film.mkv");
+    run("ffmpeg", [
+      "-v", "error", "-i", "p5.mkv", "-f", "lavfi", "-i", "sine=d=4", "-f", "lavfi", "-i", "sine=f=880:d=4", "-i", "en.srt",
+      "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3", "-c:v", "copy", "-c:a:0", "flac", "-c:a:1", "ac3", "-c:s", "srt", source,
+    ]);
+    assert.equal(profile(source), "5");
+
+    const message = await convertDolbyVision({ source, workDir: path.join(root, "work"), onProgress: () => undefined });
+    assert.match(message, /Saved Film\.DV5\.mp4 as an Apple MP4 \(dvh1\) with Dolby Vision 5/);
+    assert.match(message, /FLAC audio for the Apple TV, so that track stays only in the original/);
+    assert.match(message, /It now has the original's name, Film\.mp4, and the original was renamed to Film\.DV5\./);
+    const target = path.join(root, "Film.mp4");
+    const streams = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,codec_tag_string", "-of", "csv=p=0", target]).toString().trim().split("\n").map((line) => line.replace(/,$/, ""));
+    assert.deepEqual(streams, ["hevc,video,dvh1", "ac3,audio,ac-3", "mov_text,subtitle,tx3g"]);
+    assert.equal(profile(target), "5");
+    assert.ok(fs.existsSync(path.join(root, "Film.DV5")) && !fs.existsSync(source), "the original is kept under a new name");
+    assert.ok(!fs.existsSync(path.join(root, "work")));
+    assert.match(await convertDolbyVision({ source: target, workDir: path.join(root, "work"), onProgress: () => undefined }), /already an Apple MP4/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -64,6 +64,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
   { label: "Subtitle timing off", rule: { field: "timing", op: "eq", value: "off" } },
   { label: "Dolby Vision 7", rule: { field: "dovi", op: "eq", value: "7" } },
+  { label: "Dolby Vision 5", rule: { field: "dovi", op: "eq", value: "5" } },
 ];
 
 const selectClass =

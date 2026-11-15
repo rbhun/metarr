@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.195
+
+- Convert Dolby Vision 5 files for the Apple TV. Plex on the Apple TV cannot play profile 5 from an MKV, so Metarr copies the video and its Dolby Vision data untouched into an Apple MP4 (dvh1), which takes the file's name; the original is kept as `<name>.DV5`. Apple audio (AAC, AC3, E-AC3) and text subtitles come along. TrueHD, DTS and picture subtitles cannot go into such an MP4 and stay in the original; when no audio could be copied, the first track is converted to E-AC3. The library has a Dolby Vision 5 filter, and the convert button handles both profiles.
+
 ## 0.0.194
 
 - A Dolby Vision 7 conversion now takes the original's place: the original is renamed to `<name>.DV7`, which Plex and Radarr ignore, and the new MKV gets the original's name, so Plex keeps the title, its history and its watched state. When either name is taken, both files stay as they are. Nothing is ever overwritten or removed.

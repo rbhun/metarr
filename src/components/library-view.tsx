@@ -747,9 +747,9 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               variant="outline"
               disabled={rewrapBusy}
               onClick={() => void rewrapSelected("dovi")}
-              title="Write a Dolby Vision 8.1 copy, which the Apple TV plays, beside each selected profile 7 file. The originals stay"
+              title="Convert each selected Dolby Vision 7 file to 8.1 and each Dolby Vision 5 file to an Apple MP4, without re-encoding. The originals are kept as .DV7 or .DV5"
             >
-              Convert DV7 to 8.1
+              Convert Dolby Vision
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
               Clear

@@ -137,7 +137,7 @@ test("deinterlace and Dolby Vision reconvert are tagged apart from a rewrap", ()
   const shown = listTaskJobs(db, { queue: "rewrap", status: "done", page: 1, pageSize: 10 });
   const tags = Object.fromEntries(shown.jobs.map((job) => [job.label, job.tag]));
   assert.deepEqual(tags, { Old: "Deinterlace", Vision: "Dolby Vision", Copy: "Rewrap" });
-  assert.match(shown.jobs.find((job) => job.label === "Vision")?.detail ?? "", /Dolby Vision 7 to 8\.1/);
+  assert.match(shown.jobs.find((job) => job.label === "Vision")?.detail ?? "", /7 to 8\.1, or 5 to MP4/);
   assert.match(shown.jobs.find((job) => job.label === "Old")?.detail ?? "", /deinterlaced/);
   db.close();
 });

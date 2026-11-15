@@ -4,6 +4,7 @@ import type { ScanFile } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
 import { doviTarget } from "@/lib/dovi/run";
+import { needsDoviConversion } from "@/lib/media";
 import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
@@ -148,15 +149,18 @@ export function rewrapItemsForSelection(db: Database.Database, titles: number[],
   return items;
 }
 
-/** Dolby Vision profile 7 files on the chosen titles or episodes that have no `.DV8.mkv` beside them yet. */
+/**
+ * Dolby Vision files the Apple TV cannot play on the chosen titles or episodes: profile 7 without a
+ * `.DV8.mkv` beside it, and profile 5 that is not an MP4 yet.
+ */
 export function doviItemsForSelection(db: Database.Database, titles: number[], episodes: number[]): RewrapItem[] {
   const items: RewrapItem[] = [];
   for (const file of filesForSelection(db, titles, episodes)) {
     const paths = knownPaths(file);
     for (const version of file.versions) {
-      if (version.doviProfile !== 7 || !version.path) continue;
+      if (!version.path || !needsDoviConversion(version.doviProfile, version.path)) continue;
       if (items.some((item) => item.path === version.path)) continue;
-      if (paths.some((item) => samePath(item, doviTarget(version.path!)))) continue;
+      if (version.doviProfile === 7 && paths.some((item) => samePath(item, doviTarget(version.path!)))) continue;
       items.push({ path: version.path, label: file.label, mode: "dovi" });
     }
   }

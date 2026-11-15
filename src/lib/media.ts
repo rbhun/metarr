@@ -1534,3 +1534,9 @@ export function languageOptions(): string[] {
 export function mergeLanguages(...groups: string[][]): string[] {
   return uniqueLanguages(groups.flat());
 }
+
+/** Profile 7 always; profile 5 until it is an MP4, the only container Apple's player takes it from. */
+export function needsDoviConversion(profile: number | null | undefined, filePath: string | null | undefined): boolean {
+  if (profile === 7) return true;
+  return profile === 5 && Boolean(filePath) && !/\.(mp4|m4v)$/i.test(filePath ?? "");
+}

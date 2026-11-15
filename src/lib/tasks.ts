@@ -178,7 +178,7 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
         job.mode === "deinterlace"
           ? "AVI to MKV · deinterlaced, picture re-encoded"
           : job.mode === "dovi"
-            ? "Dolby Vision 7 to 8.1 for Apple TV · no re-encoding"
+            ? "Dolby Vision for Apple TV · 7 to 8.1, or 5 to MP4 · no re-encoding"
             : "AVI or M2TS to MKV · no re-encoding",
       progress: job.progress,
       createdAt: job.createdAt,

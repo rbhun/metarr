@@ -4,6 +4,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
+import { planMp4, tagDvh1 } from "@/lib/dovi/mp4";
 import { RpuRepair } from "@/lib/dovi/rpu-repair";
 import { doviProfileOf } from "@/lib/media";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
@@ -17,25 +18,31 @@ export function doviTool(): string {
   return process.env.DOVI_TOOL?.trim() || "dovi_tool";
 }
 
-/** `Film.mkv` is converted to `Film.DV8.mkv` beside it before the two swap names. */
-export function doviTarget(filePath: string): string {
+function stemOf(filePath: string): string {
   const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   const dot = filePath.lastIndexOf(".");
-  const stem = dot > slash ? filePath.slice(0, dot) : filePath;
-  return `${stem.replace(/\.DV8$/i, "")}.DV8.mkv`;
+  return dot > slash ? filePath.slice(0, dot) : filePath;
+}
+
+/** `Film.mkv` is converted to `Film.DV8.mkv` beside it before the two swap names. */
+export function doviTarget(filePath: string): string {
+  return `${stemOf(filePath).replace(/\.DV8$/i, "")}.DV8.mkv`;
 }
 
 /** `Film.mkv` or `Film.ts` keeps its name as `Film.DV7` once the converted copy takes its place. */
 export function doviOriginalName(filePath: string): string {
-  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-  const dot = filePath.lastIndexOf(".");
-  const stem = dot > slash ? filePath.slice(0, dot) : filePath;
-  return `${stem}.DV7`;
+  return `${stemOf(filePath)}.DV7`;
 }
 
 /** The converted copy takes the source's name, as an MKV. */
 export function doviFinalName(filePath: string): string {
   return doviTarget(filePath).replace(/\.DV8\.mkv$/i, ".mkv");
+}
+
+/** Profile 5: `Film.mkv` is written as `Film.DV5.mp4`, then becomes `Film.mp4` and the original `Film.DV5`. */
+export function profile5Names(filePath: string): { temp: string; final: string; original: string } {
+  const stem = stemOf(filePath).replace(/\.DV5$/i, "");
+  return { temp: `${stem}.DV5.mp4`, final: `${stem}.mp4`, original: `${stem}.DV5` };
 }
 
 /** One frame at this rate in nanoseconds, for the MKV header. */
@@ -50,9 +57,12 @@ export function frameDurationNs(frameRate: string | null): number | null {
  * so Plex keeps the title, its history and its watched state. Nothing is overwritten or removed:
  * when either name is taken, both files stay where they are.
  */
-export function swapIntoPlace(source: string, converted: string): { final: string; original: string } | null {
-  const original = doviOriginalName(source);
-  const final = doviFinalName(source);
+export function swapIntoPlace(
+  source: string,
+  converted: string,
+  final = doviFinalName(source),
+  original = doviOriginalName(source),
+): { final: string; original: string } | null {
   if (fs.existsSync(original)) return null;
   if (final !== source && fs.existsSync(final)) return null;
   fs.renameSync(source, original);
@@ -72,6 +82,8 @@ export type DoviStream = {
   start: number | null;
   frameRate: string | null;
   doviProfile: number | null;
+  channels?: number | null;
+  tag?: string | null;
 };
 
 export type DoviProbe = { duration: number | null; streams: DoviStream[] };
@@ -97,6 +109,8 @@ export function parseDoviProbe(text: string): DoviProbe {
         start: number(stream.start_time),
         frameRate: rate,
         doviProfile: sideData.map((data) => doviProfileOf((data as { dv_profile?: unknown } | null)?.dv_profile)).find((profile) => profile != null) ?? null,
+        channels: number(stream.channels),
+        tag: typeof stream.codec_tag_string === "string" ? stream.codec_tag_string : null,
       },
     ];
   });
@@ -287,7 +301,7 @@ function start(command: string, args: string[], options: { label: string; okCode
 async function probe(file: string): Promise<DoviProbe> {
   const args = [
     "-v", "error",
-    "-show_entries", "stream=index,codec_type,codec_name,start_time,r_frame_rate:stream_side_data=dv_profile:format=duration",
+    "-show_entries", "stream=index,codec_type,codec_name,codec_tag_string,channels,start_time,r_frame_rate:stream_side_data=dv_profile:format=duration",
     "-of", "json", file,
   ];
   const wrapped = idle("ffprobe", args);
@@ -333,6 +347,7 @@ export async function convertDolbyVision(options: {
   const main = videos[0];
   if (!main) throw new Error("This file has no video stream.");
   if (main.codec !== "hevc") throw new Error(`Dolby Vision conversion needs HEVC video; this file is ${main.codec ?? "an unknown codec"}.`);
+  if (main.doviProfile === 5) return convertProfile5({ ...options, input, main });
   if (main.doviProfile != null && main.doviProfile !== 7) {
     return `Nothing to convert: this file is already Dolby Vision ${main.doviProfile}, which the Apple TV plays.`;
   }
@@ -454,6 +469,112 @@ export async function convertDolbyVision(options: {
           ? " The files could not be renamed, so both were left as they are."
           : ` It now has the original's name, ${path.basename(placed.final)}, and the original was renamed to ${path.basename(placed.original)}.`;
     return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${borrowed}${skipped}${kept}`;
+  } finally {
+    removeWorkDir(workDir);
+  }
+}
+
+/** The Apple MP4 must still be Dolby Vision 5 tagged `dvh1`, the same length, with the audio planned. */
+export function checkProfile5Output(source: DoviProbe, output: DoviProbe, audio: number): string | null {
+  const video = output.streams.find((stream) => stream.type === "video");
+  if (!video) return "The MP4 has no video, so the original was left as it is.";
+  if (video.doviProfile !== 5) return "The MP4 lost its Dolby Vision data, so the original was left as it is.";
+  if (video.tag !== "dvh1") return `The MP4's video is tagged ${video.tag ?? "nothing"} instead of dvh1, so the original was left as it is.`;
+  const tracks = output.streams.filter((stream) => stream.type === "audio").length;
+  if (tracks < audio) return `The MP4 has ${tracks} of the ${audio} audio tracks it should have, so the original was left as it is.`;
+  if (source.duration && output.duration && Math.abs(source.duration - output.duration) > Math.max(2, source.duration * 0.01)) {
+    return `The MP4 runs ${Math.round(output.duration)} seconds instead of ${Math.round(source.duration)}, so the original was left as it is.`;
+  }
+  return null;
+}
+
+function list(items: string[]): string {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+  return [...counts].map(([codec, count]) => (count > 1 ? `${count} ${codec.toUpperCase()}` : codec.toUpperCase())).join(", ");
+}
+
+/**
+ * Profile 5 has no HDR10 picture to fall back on, and Apple's player only takes it from an MP4 tagged
+ * `dvh1`. The video and its Dolby Vision data are copied as they are into that MP4, which then takes
+ * the original's place; the original is kept as `<name>.DV5`.
+ */
+async function convertProfile5(options: {
+  source: string;
+  workDir: string;
+  dryRun?: boolean;
+  onProgress: (percent: number, message: string) => void;
+  input: DoviProbe;
+  main: DoviStream;
+}): Promise<string> {
+  const { source, workDir, onProgress, input, main } = options;
+  if (/\.(mp4|m4v)$/i.test(source) && main.tag === "dvh1") {
+    return "Nothing to convert: this Dolby Vision 5 file is already an Apple MP4 (dvh1), which the Apple TV plays.";
+  }
+  const names = profile5Names(source);
+  const name = path.basename(names.temp);
+  if (fs.existsSync(names.temp)) throw new Error(`${name} already exists next to the file.`);
+  const plan = planMp4(input.streams, main.index);
+  if (options.dryRun) {
+    return `Dry run: would copy the Dolby Vision 5 video into an Apple MP4 (dvh1) named ${path.basename(names.final)}, keeping the original as ${path.basename(names.original)}. Nothing was written.`;
+  }
+
+  removeWorkDir(workDir);
+  fs.mkdirSync(workDir, { recursive: true });
+  const output = path.join(workDir, name);
+  try {
+    onProgress(0, "Copying into an Apple MP4");
+    let lastWrite = 0;
+    await start(
+      "ffmpeg",
+      [
+        "-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:2", "-y",
+        "-i", source,
+        ...plan.args,
+        "-c:v", "copy", "-tag:v", "hvc1",
+        "-map_chapters", "0",
+        // Without this ffmpeg leaves out the Dolby Vision configuration box (dvcC).
+        "-strict", "unofficial",
+        "-movflags", "+faststart",
+        output,
+      ],
+      {
+        label: "ffmpeg",
+        onLine: (line) => {
+          const match = /^out_time_us=(\d+)$/.exec(line.trim());
+          if (!match || !input.duration) return;
+          const now = Date.now();
+          if (now - lastWrite < 2_000) return;
+          lastWrite = now;
+          const percent = Math.min(94, Math.floor((Number(match[1]) / 1_000_000 / input.duration) * 94));
+          onProgress(percent, `Copying into an Apple MP4 ${Math.round((percent / 94) * 100)}%`);
+        },
+      },
+    ).done;
+    tagDvh1(output);
+
+    onProgress(96, "Checking the MP4");
+    const problem = checkProfile5Output(input, await probe(output), plan.audio);
+    if (problem) throw new Error(problem);
+    onProgress(99, "Moving the MP4 beside the file");
+    deliverFile(output, names.temp);
+    let placed: { final: string; original: string } | "taken" | "failed";
+    try {
+      placed = swapIntoPlace(source, names.temp, names.final, names.original) ?? "taken";
+    } catch {
+      placed = "failed";
+    }
+    const notes: string[] = [];
+    if (plan.convertedAudio) notes.push(`No audio track could be copied, so the ${plan.convertedAudio.toUpperCase()} track was converted to E-AC3.`);
+    if (plan.droppedAudio.length) notes.push(`An MP4 cannot carry ${list(plan.droppedAudio)} audio for the Apple TV, so ${plan.droppedAudio.length === 1 ? "that track stays" : "those tracks stay"} only in the original.`);
+    if (plan.droppedSubtitles) notes.push(`${plan.droppedSubtitles === 1 ? "1 picture subtitle stays" : `${plan.droppedSubtitles} picture subtitles stay`} only in the original; text subtitles were kept.`);
+    const kept =
+      placed === "taken"
+        ? `Both files were left as they are, because ${path.basename(names.original)} or ${path.basename(names.final)} already exists.`
+        : placed === "failed"
+          ? "The files could not be renamed, so both were left as they are."
+          : `It now has the original's name, ${path.basename(placed.final)}, and the original was renamed to ${path.basename(placed.original)}.`;
+    return [`Saved ${name} as an Apple MP4 (dvh1) with Dolby Vision 5. The picture and its Dolby Vision data were copied untouched.`, ...notes, kept].join(" ");
   } finally {
     removeWorkDir(workDir);
   }

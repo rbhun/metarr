@@ -19,6 +19,7 @@ import { convertedFileFor } from "@/lib/remux/discs";
 import { convertNow } from "@/components/remux-actions";
 import { doviNow, rewrapNow } from "@/components/rewrap-actions";
 import { needsRewrap } from "@/lib/rewrap/source";
+import { needsDoviConversion } from "@/lib/media";
 import { timingFormat } from "@/lib/subtitle-timing";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
@@ -187,9 +188,10 @@ export function TitleDetail({
   const showDovi = Boolean(
     title &&
       (episode || title.kind === "movie") &&
-      file?.versions.some((version) => version.doviProfile === 7) &&
+      file?.versions.some((version) => needsDoviConversion(version.doviProfile, version.path)) &&
       !file.versions.some((version) => /\.DV8\.mkv$/i.test(version.path ?? "")),
   );
+  const doviFive = Boolean(file?.versions.some((version) => version.doviProfile === 5 && needsDoviConversion(5, version.path)));
   const textSidecar = file
     ? [...(file.subtitleTracks ?? []), ...file.versions.flatMap((version) => version.subtitleTracks)].some(
         (track) => track.placement === "external" && track.file && timingFormat(track.file),
@@ -321,9 +323,13 @@ export function TitleDetail({
                     className="w-fit"
                     disabled={convertBusy}
                     onClick={() => void convertDovi()}
-                    title="Write a copy with Dolby Vision 8.1, which the Apple TV plays, beside the profile 7 file. The picture is not re-encoded and the original stays"
+                    title={
+                      doviFive
+                        ? "Copy the Dolby Vision 5 video into an Apple MP4, which the Apple TV plays. The picture is not re-encoded; the MP4 takes the file's name and the original is kept as .DV5"
+                        : "Write a Dolby Vision 8.1 copy, which the Apple TV plays. The picture is not re-encoded; the copy takes the file's name and the original is kept as .DV7"
+                    }
                   >
-                    {convertBusy ? "Starting…" : "Convert DV7 to 8.1"}
+                    {convertBusy ? "Starting…" : doviFive ? "Convert DV5 to Apple MP4" : "Convert DV7 to 8.1"}
                   </Button>
                 ) : null}
               </div>

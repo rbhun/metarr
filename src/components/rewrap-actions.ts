@@ -36,7 +36,7 @@ export async function rewrapNow(titles: number[], episodes: number[]): Promise<s
   return describe(await postRewrap({ titles, episodes, immediate: true }), true);
 }
 
-/** Writes a Dolby Vision 8.1 MKV beside each profile 7 file on the titles or episodes, starting now. */
+/** Converts each Dolby Vision 7 or 5 file on the titles or episodes for the Apple TV, starting now. */
 export async function doviNow(titles: number[], episodes: number[]): Promise<string> {
   const payload = await postRewrap({ titles, episodes, immediate: true, mode: "dovi" });
   const added = payload.added ?? 0;
@@ -44,7 +44,7 @@ export async function doviNow(titles: number[], episodes: number[]): Promise<str
   if (added === 0 && promoted === 0) {
     return (payload.already ?? 0) > 0
       ? "That file is already converting or waiting to start."
-      : "Nothing to convert: no Dolby Vision 7 file without a .DV8.mkv beside it was found.";
+      : "Nothing to convert: no Dolby Vision 7 file, and no Dolby Vision 5 file outside an MP4, was found.";
   }
-  return "Converting Dolby Vision 7 to 8.1 now. The original stays; the new MKV is saved beside it. Follow it in Tasks.";
+  return "Converting Dolby Vision for the Apple TV now. The new file takes the original's name and the original is kept beside it. Follow it in Tasks.";
 }
