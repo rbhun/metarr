@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type DiscCandidate = {
@@ -71,36 +71,43 @@ export function RipsView() {
   const [search, setSearch] = useState("");
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const loadingList = useRef(false);
 
   const load = useCallback(async () => {
-    let response: Response;
+    if (loadingList.current) return;
+    loadingList.current = true;
     try {
-      response = await fetch("/api/remux?discs=1", { cache: "no-store" });
-    } catch {
-      setError("The remux list could not be loaded.");
+      let response: Response;
+      try {
+        response = await fetch("/api/remux?discs=1", { cache: "no-store" });
+      } catch {
+        setError("The remux list could not be loaded.");
+        setLoading(false);
+        return;
+      }
+      const body = (await response.json().catch(() => null)) as RemuxBody | null;
+      if (!response.ok || !body) {
+        setError(body?.error || "The remux list could not be loaded.");
+        setLoading(false);
+        return;
+      }
+      setError(null);
+      setDiscs(body.discs ?? []);
+      setTotals(
+        body.totals ?? {
+          pending: body.counts.waiting,
+          running: body.counts.running,
+          done: 0,
+          failed: 0,
+        },
+      );
+      setSettings(body.settings);
+      setPause(body.pause);
+      setLatest(body.latest ?? null);
       setLoading(false);
-      return;
+    } finally {
+      loadingList.current = false;
     }
-    const body = (await response.json().catch(() => null)) as RemuxBody | null;
-    if (!response.ok || !body) {
-      setError(body?.error || "The remux list could not be loaded.");
-      setLoading(false);
-      return;
-    }
-    setError(null);
-    setDiscs(body.discs ?? []);
-    setTotals(
-      body.totals ?? {
-        pending: body.counts.waiting,
-        running: body.counts.running,
-        done: 0,
-        failed: 0,
-      },
-    );
-    setSettings(body.settings);
-    setPause(body.pause);
-    setLatest(body.latest ?? null);
-    setLoading(false);
   }, []);
 
   useEffect(() => {

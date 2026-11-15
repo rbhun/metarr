@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type AviCandidate = {
@@ -66,8 +66,11 @@ export function RewrapSection() {
   const [pathInput, setPathInput] = useState("");
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const loadingList = useRef(false);
 
   const load = useCallback(async () => {
+    if (loadingList.current) return;
+    loadingList.current = true;
     try {
       const response = await fetch("/api/rewrap?files=1", { cache: "no-store" });
       const next = (await response.json().catch(() => null)) as RewrapBody | null;
@@ -76,6 +79,8 @@ export function RewrapSection() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The file list could not be loaded.");
+    } finally {
+      loadingList.current = false;
     }
   }, []);
 

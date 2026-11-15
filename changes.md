@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.197
+
+- Open Tasks and Rips without listing every media folder. Those pages were waiting on the NAS for directories they do not use, so the remux list, rewrap queue, and task list sat there until a reload gave up.
+
 ## 0.0.196
 
 - Offer the Dolby Vision 5 conversion for MP4 files too. Web downloads are often already MP4, but tagged `dvhe`, which the Apple TV refuses; Metarr retags them `dvh1` the same way, and leaves an MP4 that already is `dvh1` alone.

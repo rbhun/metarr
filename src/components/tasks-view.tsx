@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 50;
@@ -163,6 +163,7 @@ export function TasksView() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [redoing, setRedoing] = useState<string | null>(null);
   const [redoingAll, setRedoingAll] = useState(false);
+  const loadingList = useRef<string | null>(null);
 
   const writeQuery = useCallback(
     (next: { status?: StatusFilter; page?: number; queue?: QueueFilter }) => {
@@ -176,25 +177,32 @@ export function TasksView() {
   );
 
   const load = useCallback(async () => {
-    let response: Response;
+    const key = `${queue}|${status}|${page}`;
+    if (loadingList.current === key) return;
+    loadingList.current = key;
     try {
-      response = await fetch(`/api/tasks?queue=${queue}&status=${status}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
-    } catch {
-      setError("The task list could not be loaded.");
+      let response: Response;
+      try {
+        response = await fetch(`/api/tasks?queue=${queue}&status=${status}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
+      } catch {
+        setError("The task list could not be loaded.");
+        setLoading(false);
+        return;
+      }
+      const body = (await response.json().catch(() => null)) as TasksBody | null;
+      if (!response.ok || !body) {
+        setError(body?.error || "The task list could not be loaded.");
+        setLoading(false);
+        return;
+      }
+      setError(null);
+      setJobs(body.jobs ?? []);
+      setTotal(body.total ?? 0);
+      setTotals(body.totals ?? { pending: 0, running: 0, done: 0, failed: 0, skipped: 0 });
       setLoading(false);
-      return;
+    } finally {
+      if (loadingList.current === key) loadingList.current = null;
     }
-    const body = (await response.json().catch(() => null)) as TasksBody | null;
-    if (!response.ok || !body) {
-      setError(body?.error || "The task list could not be loaded.");
-      setLoading(false);
-      return;
-    }
-    setError(null);
-    setJobs(body.jobs ?? []);
-    setTotal(body.total ?? 0);
-    setTotals(body.totals ?? { pending: 0, running: 0, done: 0, failed: 0, skipped: 0 });
-    setLoading(false);
   }, [page, queue, status]);
 
   useEffect(() => {

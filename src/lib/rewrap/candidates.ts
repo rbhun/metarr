@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { filesForLibrary, filesForSelection } from "@/lib/detect/files";
+import { filesForLibrary, filesForSelection, librarySnapshot, type LibraryMedia } from "@/lib/detect/files";
 import type { ScanFile } from "@/lib/detect/targets";
 import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
@@ -91,13 +91,25 @@ function samePath(left: string | null | undefined, right: string | null | undefi
   return left.replace(/\\/g, "/").toLowerCase() === right.replace(/\\/g, "/").toLowerCase();
 }
 
+function rewrapPaths(file: LibraryMedia): RewrapItem[] {
+  const found: RewrapItem[] = [];
+  const push = (filePath: string | null, container: string | null) => {
+    if (!filePath || (!canRewrap(container, filePath) && !rewrapSplit(filePath))) return;
+    if (found.some((item) => item.path === filePath)) return;
+    found.push({ path: filePath, label: file.label });
+  };
+  push(file.path, file.container);
+  for (const version of file.versions) push(version.path, version.container);
+  return found;
+}
+
 export function listRewrapCandidates(db: Database.Database): RewrapCandidateView[] {
   const seen = new Set<string>();
   const finished = finishedRewrapPaths(db);
   const candidates: RewrapCandidateView[] = [];
-  for (const file of filesForLibrary(db)) {
-    const paths = knownPaths(file);
-    for (const group of bundleRewraps(avisFromFile(file))) {
+  for (const file of librarySnapshot(db).files) {
+    const paths = [file.path, ...file.versions.map((version) => version.path)];
+    for (const group of bundleRewraps(rewrapPaths(file))) {
       const lead = group[0];
       if (!lead || seen.has(lead.path)) continue;
       for (const item of group) seen.add(item.path);
