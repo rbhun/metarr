@@ -1,5 +1,21 @@
 # Changes
 
+## 0.0.202
+
+- Open Tasks from the notice after a conversion. The title drawer was taking that click, so the button did nothing.
+
+## 0.0.201
+
+- Split packed DivX and Xvid frames apart before timing them, so a pan no longer jumps back and forth after an AVI is copied to MKV. A copy that still jumps is made again and replaced. Redo on an already rewrapped file starts that now.
+
+## 0.0.200
+
+- Ask for one login before the app opens, the way Radarr and Sonarr do, so a published port does not hand out stored keys or start a remux.
+
+## 0.0.199
+
+- Drop this server's LAN addresses from the examples, stop deploy from rewriting uid 1000, and remove unused Next.js icons so a tester clone does not inherit this setup.
+
 ## 0.0.198
 
 - Leave Update off on Settings when this copy is already the version on main, and show that version above the button.

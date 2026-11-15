@@ -76,6 +76,11 @@ export function migrate(db: Database.Database) {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token_hash TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS source_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       connector TEXT NOT NULL,

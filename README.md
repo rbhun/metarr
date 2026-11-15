@@ -1,6 +1,6 @@
 # Metarr
 
-Metarr is a local library for Plex, Radarr, Sonarr, and Bazarr. It downloads titles, files, quality, languages, ratings, and what is missing, and stores them in SQLite on this machine. Sync does not copy video or subtitle files. There is no login. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
+Metarr is a local library for Plex, Radarr, Sonarr, and Bazarr. It downloads titles, files, quality, languages, ratings, and what is missing, and stores them in SQLite on this machine. Sync does not copy video or subtitle files. The first visit creates one login, the same way Radarr and Sonarr do. After that, every page and API route asks for it. Paste each server’s base URL and key in Settings. Unused apps stay disconnected.
 
 New MKV files are written only by disc remux, rewrap, and version merge, beside the source. An existing file is never overwritten, and a disc is left in place.
 
@@ -68,8 +68,8 @@ Settings live in `/opt/metarr/.env`; the first deploy copies it from `metarr.env
 
 | Setting          | Default                   | Why                                                                                                                            |
 | ---------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `METARR_UID`     | `1500`                    | Dedicated media user. Not 1000, which maps to a restricted account on the NFS server.                                          |
-| `METARR_GID`     | `1002`                    | Group `media`, which gives write access to `/mnt/media`.                                                                       |
+| `METARR_UID`     | `1500`                    | User that owns new media files. Set this to the media user on this machine.                                                    |
+| `METARR_GID`     | `1002`                    | Group that can write the library. Set this to the media group on this machine.                                                 |
 | `UMASK`          | `002`                     | New files stay group-writable, so Radarr and Sonarr can manage them.                                                           |
 | `METARR_DRY_RUN` | `0`                       | `1` makes remux and file tagging report what they would change without writing to media.                                       |
 | `METARR_SCRATCH` | `/mnt/media/.metarr-work` | Work folder for remux and MP4 retagging, on the NAS and outside every library folder. A Blu-ray remux needs up to about 50 GB. |
@@ -97,7 +97,7 @@ After that first run, **Settings → Update Metarr** does the same from the brow
 
 ## Settings
 
-Open **Settings** from the sidebar (or go to `/settings`).
+Open **Settings** from the sidebar (or go to `/settings`). **Login** on this page changes the username or password, and chooses whether a connection from this machine can skip it. A browser that opens the published port from another device still signs in. Remember me keeps that browser signed in for 14 days. The password is stored as a hash in the local database.
 
 
 | App    | Auth                                 |
@@ -150,4 +150,4 @@ In Settings, add a TMDB key, an OMDb key, or both, and turn **Use when looking u
 
 ## Out of scope
 
-TVDB keys, Lidarr, Readarr, Prowlarr, downloading media, writing posters or ratings back to Plex or the *arr apps, user accounts, and Plex OAuth. Recognized track languages are written into the media file, and those apps are asked to re-read the file.
+TVDB keys, Lidarr, Readarr, Prowlarr, downloading media, writing posters or ratings back to Plex or the *arr apps, more than one login, and Plex OAuth. Recognized track languages are written into the media file, and those apps are asked to re-read the file.

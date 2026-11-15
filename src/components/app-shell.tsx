@@ -18,7 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Disc3, GitMerge, Library, ListTodo, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { Disc3, GitMerge, Library, ListTodo, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -98,6 +98,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
+  const bare = pathname === "/login" || pathname === "/setup";
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem("metarr-sidebar") === "collapsed");
@@ -114,6 +116,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/sync", { cache: "no-store" });
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return;
+    }
     if (!response.ok) return;
     const next = (await response.json()) as SyncStatus;
     setStatus((previous) => {
@@ -124,18 +130,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [bump]);
 
   useEffect(() => {
+    if (bare) return;
     const timer = window.setTimeout(() => {
       void refresh();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [refresh]);
+  }, [bare, refresh]);
 
   useEffect(() => {
+    if (bare) return;
     const timer = window.setInterval(() => {
       void refresh();
     }, status?.running || syncOpen ? 800 : 10_000);
     return () => window.clearInterval(timer);
-  }, [refresh, status?.running, syncOpen]);
+  }, [bare, refresh, status?.running, syncOpen]);
 
   const startSync = useCallback(async (id?: ConnectorId) => {
     setSyncOpen(true);
@@ -158,6 +166,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     toast.success("Stopping sync…");
     await refresh();
   }, [refresh, status?.running]);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  }
+
+  if (bare) {
+    return (
+      <ShellContext.Provider value={{ status, epoch, startSync, cancelSync, bump }}>
+        <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">{children}</div>
+      </ShellContext.Provider>
+    );
+  }
 
   return (
     <ShellContext.Provider value={{ status, epoch, startSync, cancelSync, bump }}>
@@ -207,6 +228,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className={cn(collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
           </div>
+          <div className={cn("mt-auto pb-3", collapsed ? "px-2" : "px-3")}>
+            <button type="button" className={navItemClass(collapsed)} title={collapsed ? "Sign out" : undefined} onClick={() => void signOut()}>
+              <LogOut />
+              {collapsed ? <span className="sr-only">Sign out</span> : "Sign out"}
+            </button>
+          </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center gap-2 border-b px-3 py-2 md:hidden">
@@ -224,8 +251,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <CpuReadout />
                   </div>
                 </SheetHeader>
-                <div className="px-4">
+                <div className="flex flex-col gap-2 px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
+                  <button type="button" className={navItemClass(false)} onClick={() => void signOut()}>
+                    <LogOut />
+                    Sign out
+                  </button>
                 </div>
               </SheetContent>
             </Sheet>

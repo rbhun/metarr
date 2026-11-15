@@ -8,13 +8,23 @@ export function rewrapSplit(filePath: string | null | undefined): SplitIdentity 
 const AVI = new Set(["avi", "divx"]);
 const TRANSPORT = new Set(["m2ts", "mts", "ts"]);
 const VIDEO = new Set(["avi", "divx", "m2ts", "mts", "ts", "mkv", "mp4", "m4v", "mpg", "mpeg", "wmv", "mov", "webm"]);
+const KEPT_ORIGINAL = ".metarr-orig";
+
+/** The path before Metarr set the original aside, so a kept AVI still names the movie. */
+export function withoutKeptOriginal(filePath: string): string {
+  return filePath.toLowerCase().endsWith(KEPT_ORIGINAL) ? filePath.slice(0, -KEPT_ORIGINAL.length) : filePath;
+}
+
+function plainPath(filePath: string | null | undefined): string | null | undefined {
+  return filePath ? withoutKeptOriginal(filePath) : filePath;
+}
 
 function inDiscFolder(filePath: string): boolean {
   return /[\\/](bdmv|video_ts)[\\/]/i.test(filePath);
 }
 
 export function isAvi(container: string | null | undefined, filePath: string | null | undefined): boolean {
-  const ext = fileExtension(filePath);
+  const ext = fileExtension(plainPath(filePath));
   if (ext) return AVI.has(ext);
   return AVI.has((container ?? "").toLowerCase());
 }
@@ -26,20 +36,20 @@ export function isAvi(container: string | null | undefined, filePath: string | n
 export function canRewrap(container: string | null | undefined, filePath: string | null | undefined): boolean {
   if (isAvi(container, filePath)) return true;
   if (filePath && inDiscFolder(filePath)) return false;
-  const ext = fileExtension(filePath) ?? (container ?? "").toLowerCase();
+  const ext = fileExtension(plainPath(filePath)) ?? (container ?? "").toLowerCase();
   return TRANSPORT.has(ext);
 }
 
 /** "AVI" or "M2TS", for messages about the file being copied. */
 export function sourceKind(filePath: string): string {
-  const ext = fileExtension(filePath);
+  const ext = fileExtension(withoutKeptOriginal(filePath));
   if (!ext || AVI.has(ext)) return "AVI";
   return ext.toUpperCase();
 }
 
 /** Files of one kind join together. A CD1 AVI is not joined with a CD2 MKV. */
 export function rewrapFamily(filePath: string | null | undefined): string | null {
-  const ext = fileExtension(filePath);
+  const ext = fileExtension(plainPath(filePath));
   if (!ext || !VIDEO.has(ext)) return null;
   if (AVI.has(ext)) return "avi";
   if (TRANSPORT.has(ext)) return "ts";
@@ -129,9 +139,10 @@ export function splitSources(filePath: string, readDirectory: (directory: string
 
 /** The MKV lands beside the source under the same name, so sidecar subtitles keep matching. A split set uses joinedTarget instead. */
 export function rewrapTarget(filePath: string): string {
-  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-  const dot = filePath.lastIndexOf(".");
-  const stem = dot > slash ? filePath.slice(0, dot) : filePath;
+  const plain = withoutKeptOriginal(filePath);
+  const slash = Math.max(plain.lastIndexOf("/"), plain.lastIndexOf("\\"));
+  const dot = plain.lastIndexOf(".");
+  const stem = dot > slash ? plain.slice(0, dot) : plain;
   return `${stem}.mkv`;
 }
 

@@ -68,6 +68,12 @@ export function TitleDetail({
   const [convertBusy, setConvertBusy] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
   const router = useRouter();
+  function openTasks(href: string) {
+    return () => {
+      onOpenChange(false);
+      router.push(href);
+    };
+  }
   async function detectNow() {
     if (!title) return;
     setDetectBusy(true);
@@ -203,7 +209,7 @@ export function TitleDetail({
     setConvertBusy(true);
     try {
       toast.success(await rewrapNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
-        action: { label: "Tasks", onClick: () => router.push("/tasks?queue=rewrap&status=all") },
+        action: { label: "Tasks", onClick: openTasks("/tasks?queue=rewrap&status=all") },
       });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the rewrap.");
@@ -216,7 +222,7 @@ export function TitleDetail({
     setConvertBusy(true);
     try {
       toast.success(await doviNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
-        action: { label: "Tasks", onClick: () => router.push("/tasks?queue=rewrap&status=all") },
+        action: { label: "Tasks", onClick: openTasks("/tasks?queue=rewrap&status=all") },
       });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the conversion.");
@@ -229,7 +235,7 @@ export function TitleDetail({
     setConvertBusy(true);
     try {
       toast.success(await convertNow(episode ? [] : [title.id], episode ? [episode.id] : []), {
-        action: { label: "Tasks", onClick: () => router.push("/tasks") },
+        action: { label: "Tasks", onClick: openTasks("/tasks?queue=remux&status=all") },
       });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not start the conversion.");

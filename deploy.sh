@@ -26,11 +26,7 @@ fi
 
 if [ ! -f .env ]; then
   cp metarr.env.example .env
-  echo "Wrote $root/.env from metarr.env.example."
-fi
-if grep -q '^METARR_UID=1000$' .env; then
-  sed -i 's/^METARR_UID=1000$/METARR_UID=1500/' .env
-  echo "Changed METARR_UID from 1000 to 1500 in .env: uid 1000 maps to a restricted account on the NFS server."
+  echo "Wrote $root/.env from metarr.env.example. Set METARR_UID and METARR_GID to this machine before the first real write."
 fi
 . ./.env
 METARR_UID=${METARR_UID:-1500}

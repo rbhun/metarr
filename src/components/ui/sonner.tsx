@@ -34,6 +34,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          // The title drawer disables clicks on the page. This notice has to take them back, or Tasks does nothing.
+          pointerEvents: "auto",
         } as React.CSSProperties
       }
       toastOptions={{

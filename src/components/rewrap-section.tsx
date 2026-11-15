@@ -173,7 +173,8 @@ export function RewrapSection() {
           AVI and loose M2TS or TS files cannot store a language on each track. ffmpeg copies the video, every audio track, and the subtitles into an
           MKV next to the file, and writes the audio and subtitle languages Metarr knows onto the tracks. A single file keeps its name. A labeled split,
           such as CD1 through CD3 or 1 of 3, is joined into one MKV in that order. Nothing is re-encoded, so the quality and size stay the same; Blu-ray PCM
-          audio is stored as lossless FLAC. Old DivX/Xvid video may still need Plex to convert it on some players. The original files stay where they are.
+          audio is stored as lossless FLAC. A DivX or Xvid file that packs two frames into one is split apart first, so a pan does not
+          jump back and forth. Old DivX/Xvid video may still need Plex to convert it on some players. The original files stay where they are.
           Hours and the audio order are under Settings.
         </p>
       </div>
@@ -266,12 +267,14 @@ export function RewrapSection() {
         <div className="space-y-2 pt-2">
           <div>
             <h3 className="text-sm font-medium">Already rewrapped</h3>
-            <p className="text-xs text-muted-foreground">These files have their MKV. The original is still there until you remove it.</p>
+            <p className="text-xs text-muted-foreground">
+              These files have their MKV. Redo makes that MKV again; a copy whose picture jumps is replaced, and the original stays.
+            </p>
           </div>
           <ul className="divide-y overflow-hidden rounded-lg border">
             {converted.map((file) => (
               <li key={file.path} className="px-3 py-3">
-                <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   {file.titleId ? (
                     <Link href={`/?file=${encodeURIComponent(file.path)}`} className="text-sm font-medium underline-offset-2 hover:underline">
                       {file.label}
@@ -282,6 +285,16 @@ export function RewrapSection() {
                   <span className="text-xs text-emerald-700 dark:text-emerald-300">
                     {file.convertedPath ? `Rewrapped to ${fileName(file.convertedPath)}` : "Rewrap finished"}
                   </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    disabled={sending}
+                    title="Make the MKV again. A copy whose picture jumps back and forth is replaced."
+                    onClick={() => void send([{ path: file.path, label: file.label }], true)}
+                  >
+                    Redo
+                  </Button>
                 </span>
                 {(file.paths ?? [file.path]).map((filePath) => (
                   <span key={filePath} className="mt-1 block text-xs leading-5 break-all text-muted-foreground">

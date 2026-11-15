@@ -44,6 +44,39 @@ export function parseProbe(json: string): Probe {
   return { streams, duration: Number.isFinite(duration) && duration > 0 ? duration : null };
 }
 
+const USER_DATA = Buffer.from([0x00, 0x00, 0x01, 0xb2]);
+
+/**
+ * True when a buffer holds a DivX/Xvid user-data string ending in "p", which marks
+ * a B-frame packed into the frame before it.
+ */
+export function packedMarker(buffer: Buffer): boolean {
+  let from = 0;
+  while (from < buffer.length) {
+    const at = buffer.indexOf(USER_DATA, from);
+    if (at < 0) return false;
+    const text = buffer.subarray(at + USER_DATA.length, Math.min(buffer.length, at + USER_DATA.length + 255));
+    const end = text.indexOf(0);
+    if (end > 0 && text[end - 1] === 0x70) return true;
+    from = at + USER_DATA.length;
+  }
+  return false;
+}
+
+/** The marker is in the codec header or the first frames, so the start of the file is enough. */
+export function fileHasPackedFrames(file: string): boolean {
+  const handle = fs.openSync(file, "r");
+  try {
+    const buffer = Buffer.alloc(2 * 1024 * 1024);
+    const read = fs.readSync(handle, buffer, 0, buffer.length, 0);
+    return packedMarker(buffer.subarray(0, read));
+  } catch {
+    return false;
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
 /**
  * ffmpeg arguments that copy every video and audio stream (and subtitles Matroska can hold) into an MKV
  * without re-encoding. Audio in `firstLanguage` moves to the front and becomes the default track.
@@ -83,7 +116,10 @@ export function rewrapArgs(
   args.push("-c", "copy", "-map_metadata", "0", "-max_interleave_delta", String(INTERLEAVE_US));
   if (options.transport) args.push("-bsf:v", FILL_TIMESTAMPS, "-bsf:a", FILL_TIMESTAMPS, "-bsf:s", FILL_TIMESTAMPS);
   video.forEach((stream, position) => {
-    // Xvid/DivX "packed B-frames" stutter in Matroska unless they are unpacked.
+    // A B-frame packed into the frame before it stutters in Matroska unless it is split out.
+    // Splitting it here, in the same command that invents timestamps, gives that B-frame the
+    // later frame's time, so a pan jumps ahead and then back. Packed files are split into an
+    // AVI first; this filter then finds nothing left to split.
     if (stream.codecName === "mpeg4") args.push(`-bsf:v:${position}`, "mpeg4_unpack_bframes");
   });
   let converted = 0;
@@ -101,6 +137,44 @@ export function rewrapArgs(
   });
   args.push("-progress", "pipe:1", "-nostats", "-f", "matroska", output);
   return { args, video: video.length, audio: ordered.length, subtitles: subtitles.length, firstMoved, converted };
+}
+
+/**
+ * Copy into an AVI with each packed B-frame in its own slot, and do not invent timestamps.
+ * An AVI can hold those frames without a time on each one. The MKV copy then times them in order.
+ */
+export function unpackArgs(input: string, output: string, concat: boolean): string[] {
+  const args = ["-nostdin", "-hide_banner", "-loglevel", "error"];
+  if (concat) args.push("-f", "concat", "-safe", "0");
+  args.push("-i", input, "-map", "0", "-c", "copy", "-bsf:v", "mpeg4_unpack_bframes", "-progress", "pipe:1", "-nostats", "-f", "avi", output);
+  return args;
+}
+
+/** True when the first seconds of decoded frames step backwards, which is a pan jumping back a frame. */
+export async function framesJumpBack(file: string): Promise<boolean> {
+  const output = await runTool(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "v:0", "-read_intervals", "%+3", "-show_frames", "-show_entries", "frame=pts_time", "-of", "csv=p=0", file],
+    PROBE_TIMEOUT_MS,
+  );
+  let previous: number | null = null;
+  for (const line of output.split(/\r?\n/)) {
+    const text = line.trim();
+    if (!/^-?\d+(\.\d+)?$/.test(text)) continue;
+    const value = Number(text);
+    if (previous != null && value < previous - 0.015) return true;
+    previous = value;
+  }
+  return false;
+}
+
+function freeBytes(directory: string): number | null {
+  try {
+    const space = fs.statfsSync(directory);
+    return Number(space.bavail) * Number(space.bsize);
+  } catch {
+    return null;
+  }
 }
 
 /** What to say when ffmpeg or ffprobe does not exit 0. A signal kill has no exit code. */
@@ -242,6 +316,8 @@ export async function rewrapAvi(options: {
   subtitleLanguages?: Array<string | null>;
   firstLanguage: string;
   dryRun?: boolean;
+  /** Write over an MKV that is already there. Used when that copy plays frames out of order. */
+  replace?: boolean;
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
   const { source, workDir, onProgress } = options;
@@ -261,13 +337,15 @@ export async function rewrapAvi(options: {
   }
   const duration = probed.reduce((sum, item) => sum + (item.duration ?? 0), 0);
   const input: Probe = { streams: first.streams, duration: duration > 0 ? duration : null };
+  const packed = rewrapFamily(source) === "avi" && sources.some((file) => fileHasPackedFrames(file));
   const listPath = path.join(workDir, "parts.txt");
+  const unpacked = path.join(workDir, "unpacked.avi");
   const temp = path.join(workDir, name);
-  const plan = rewrapArgs(joining ? listPath : source, temp, input, {
+  const plan = rewrapArgs(packed ? unpacked : joining ? listPath : source, temp, input, {
     languages: options.languages,
     subtitleLanguages: options.subtitleLanguages,
     firstLanguage: options.firstLanguage,
-    concat: joining,
+    concat: packed ? false : joining,
     transport: rewrapFamily(source) === "ts",
   });
   const tracks = [plural(plan.video, "video stream"), plural(plan.audio, "audio track"), plan.subtitles ? plural(plan.subtitles, "subtitle") : null]
@@ -276,31 +354,54 @@ export async function rewrapAvi(options: {
   const moved = plan.firstMoved ? ` ${options.firstLanguage} audio goes first.` : "";
   const flac = plan.converted ? ` ${plural(plan.converted, "PCM audio track")} ${plan.converted === 1 ? "is" : "are"} stored as lossless FLAC.` : "";
   const joined = joining ? ` Joined from ${sources.length} parts.` : "";
+  const ordered = packed ? " The picture frames stay in order." : "";
   if (options.dryRun) {
     const action = joining ? `join ${sources.length} parts and copy` : "copy";
-    return `Dry run: would ${action} ${tracks} into ${target} without re-encoding.${moved}${flac} Nothing was written.`;
+    const split = packed ? " Packed frames are split apart first so the picture stays in order." : "";
+    return `Dry run: would ${action} ${tracks} into ${target} without re-encoding.${moved}${flac}${split} Nothing was written.`;
   }
-  if (fs.existsSync(target)) throw new Error(`${name} already exists next to the ${kind}.`);
+  if (!options.replace && fs.existsSync(target)) throw new Error(`${name} already exists next to the ${kind}.`);
   removeWorkDir(workDir);
   fs.mkdirSync(workDir, { recursive: true });
   try {
     if (joining) fs.writeFileSync(listPath, concatList(sources));
     let lastWrite = 0;
-    await runTool("ffmpeg", plan.args, REWRAP_TIMEOUT_MS, (line) => {
+    const report = (line: string, message: (percent: number) => string) => {
       const percent = progressFromLine(line, input.duration);
       if (percent == null) return;
       const now = Date.now();
       if (now - lastWrite < 2_000) return;
       lastWrite = now;
-      onProgress(percent, `Rewrapping ${percent}%`);
+      onProgress(percent, message(percent));
+    };
+    if (packed) {
+      let bytes = 0;
+      try {
+        for (const file of sources) bytes += fs.statSync(file).size;
+      } catch {
+        bytes = 0;
+      }
+      const free = freeBytes(workDir);
+      if (bytes > 0 && free != null && free < bytes * 2 + 512 * 1024 * 1024) {
+        throw new Error("There is not enough free space to split the packed frames before copying, so nothing was written.");
+      }
+      onProgress(0, "Splitting packed frames");
+      await runTool("ffmpeg", unpackArgs(joining ? listPath : source, unpacked, joining), REWRAP_TIMEOUT_MS, (line) => {
+        report(line, (percent) => `Splitting packed frames ${percent}%`);
+      });
+    }
+    await runTool("ffmpeg", plan.args, REWRAP_TIMEOUT_MS, (line) => {
+      report(line, (percent) => `Rewrapping ${percent}%`);
     });
     onProgress(99, "Checking the MKV");
     const problem = checkRewrap(input, await probe(temp), plan, joining ? "parts" : kind);
     if (problem) throw new Error(problem);
+    if (packed && (await framesJumpBack(temp))) throw new Error("The MKV would play frames out of order, so it was not saved.");
     onProgress(100, "Saving the MKV");
-    deliverFile(temp, target);
+    deliverFile(temp, target, { replace: options.replace });
     const left = joining ? `The ${kind} files were left in place.` : `The ${kind} was left in place.`;
-    return `Saved ${name} with ${tracks}.${joined}${moved}${flac} ${left}`;
+    const verb = options.replace ? "Replaced" : "Saved";
+    return `${verb} ${name} with ${tracks}.${joined}${moved}${flac}${ordered} ${left}`;
   } finally {
     removeWorkDir(workDir);
   }

@@ -13,11 +13,13 @@ import { remuxIsRunning } from "@/lib/remux/store";
 import { mergeIsRunning } from "@/lib/merge/store";
 import { recognizedAudioLanguages } from "@/lib/detect/plex-copy";
 import { libraryAvis } from "@/lib/rewrap/candidates";
-import { rewrapAvi, tagMkvLanguages } from "@/lib/rewrap/run";
-import { canRewrap, joinedTarget, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
+import { framesJumpBack, rewrapAvi, tagMkvLanguages } from "@/lib/rewrap/run";
+import { canRewrap, isAvi, joinedTarget, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
+  enqueueRewraps,
   finishRewrap,
+  finishedRewrapPaths,
   hasImmediateRewrap,
   readRewrapSettings,
   releaseRunningRewrap,
@@ -46,11 +48,11 @@ function splitSourcesOnDisk(filePath: string): string[] | null {
 }
 
 const globalForRewrap = globalThis as {
-  __metarrRewrap?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null };
+  __metarrRewrap?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null; scanned: boolean };
 };
 
 function state() {
-  if (!globalForRewrap.__metarrRewrap) globalForRewrap.__metarrRewrap = { timer: null, working: false, syncTimer: null };
+  if (!globalForRewrap.__metarrRewrap) globalForRewrap.__metarrRewrap = { timer: null, working: false, syncTimer: null, scanned: false };
   return globalForRewrap.__metarrRewrap;
 }
 
@@ -89,6 +91,38 @@ function currentLanguages(db: ReturnType<typeof getDb>, filePath: string): { lan
   } catch {
     return recognized.length ? { languages: recognized, subtitleLanguages: [] } : null;
   }
+}
+
+function alreadyKept(file: string): boolean {
+  return file.toLowerCase().endsWith(".metarr-orig");
+}
+
+/** A probe that cannot be read is left as it is, so a language update still finishes. */
+async function pictureJumps(file: string): Promise<boolean> {
+  try {
+    return await framesJumpBack(file);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Queue finished AVI copies whose picture steps backwards in time. They run in the
+ * rewrap hours, and the new MKV replaces the shaky one. A smooth copy is left alone.
+ */
+export async function queueShakyRewraps(db: ReturnType<typeof getDb>): Promise<number> {
+  if (dryRun()) return 0;
+  const maps = readDetectSettings(db).pathMaps;
+  const items: Array<{ path: string; label: string }> = [];
+  for (const filePath of finishedRewrapPaths(db)) {
+    if (!isAvi(null, filePath)) continue;
+    const mkv = resolveMediaPath(rewrapTarget(filePath), maps, existsFile);
+    const source = resolveMediaPath(filePath, maps, existsFile) ?? resolveMediaPath(`${filePath}.metarr-orig`, maps, existsFile);
+    if (!mkv || !source || !(await pictureJumps(mkv))) continue;
+    items.push({ path: filePath, label: path.basename(filePath) });
+  }
+  if (!items.length) return 0;
+  return enqueueRewraps(db, items).added;
 }
 
 /** Keep the original beside the MKV under a name Plex does not play. */
@@ -213,29 +247,34 @@ async function step() {
   const workDir = rewrapWorkDirectory(db.name, job.id);
   try {
     const maps = readDetectSettings(db).pathMaps;
-    const local = resolveMediaPath(job.path, maps, existsFile);
+    let local = resolveMediaPath(job.path, maps, existsFile);
     if (!local) {
       const mkv = resolveMediaPath(rewrapTarget(job.path), maps, existsFile);
-      if (!mkv) {
-        finishRewrap(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
+      const kept = resolveMediaPath(`${job.path}.metarr-orig`, maps, existsFile);
+      if (kept && mkv && !dryRun() && (await pictureJumps(mkv))) {
+        local = kept;
+      } else {
+        if (!mkv) {
+          finishRewrap(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
+          return;
+        }
+        const known = currentLanguages(db, job.path);
+        if (!dryRun()) {
+          await tagMkvLanguages(mkv, known?.languages ?? job.languages);
+          moveDetections(db, job.path, rewrapTarget(job.path));
+        }
+        let told = "";
+        if (!dryRun()) {
+          try {
+            told = await announceFolder(db, [path.dirname(job.path), path.dirname(mkv)]);
+          } catch {
+            told = "Plex and the *arr apps could not be asked to rescan.";
+          }
+        }
+        finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(mkv)}.`, told].filter(Boolean).join(" "));
+        syncSoon();
         return;
       }
-      const known = currentLanguages(db, job.path);
-      if (!dryRun()) {
-        await tagMkvLanguages(mkv, known?.languages ?? job.languages);
-        moveDetections(db, job.path, rewrapTarget(job.path));
-      }
-      let told = "";
-      if (!dryRun()) {
-        try {
-          told = await announceFolder(db, [path.dirname(job.path), path.dirname(mkv)]);
-        } catch {
-          told = "Plex and the *arr apps could not be asked to rescan.";
-        }
-      }
-      finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(mkv)}.`, told].filter(Boolean).join(" "));
-      syncSoon();
-      return;
     }
     if (job.mode === "dovi") {
       await convertDovi(db, job.id, job.path, local, workDir);
@@ -254,28 +293,32 @@ async function step() {
     const languages = known?.languages ?? job.languages;
     const subtitleLanguages = known?.subtitleLanguages ?? job.subtitleLanguages;
     const singleTarget = sources.length === 1 ? rewrapTarget(local) : null;
+    let replacePicture = false;
     if (singleTarget && fs.existsSync(singleTarget)) {
-      if (!rehearsal) await tagMkvLanguages(singleTarget, languages);
-      let kept = "";
-      if (!rehearsal && job.replaceSource) {
-        try {
-          kept = retireSource(local);
-        } catch {
-          kept = "The original could not be moved aside, so Plex will list both files.";
+      replacePicture = !rehearsal && (await pictureJumps(singleTarget));
+      if (!replacePicture) {
+        if (!rehearsal) await tagMkvLanguages(singleTarget, languages);
+        let kept = "";
+        if (!rehearsal && job.replaceSource && !alreadyKept(local)) {
+          try {
+            kept = retireSource(local);
+          } catch {
+            kept = "The original could not be moved aside, so Plex will list both files.";
+          }
         }
-      }
-      let told = "";
-      if (!rehearsal) {
-        try {
-          told = await announceFolder(db, [path.dirname(job.path), directory, outputDir]);
-        } catch {
-          told = "Plex and the *arr apps could not be asked to rescan.";
+        let told = "";
+        if (!rehearsal) {
+          try {
+            told = await announceFolder(db, [path.dirname(job.path), directory, outputDir]);
+          } catch {
+            told = "Plex and the *arr apps could not be asked to rescan.";
+          }
         }
+        keepLogOnCopy(db, job.path, kept);
+        finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(singleTarget)}.`, kept, told].filter(Boolean).join(" "));
+        if (!rehearsal) syncSoon();
+        return;
       }
-      keepLogOnCopy(db, job.path, kept);
-      finishRewrap(db, job.id, "done", [`Updated the languages on ${path.basename(singleTarget)}.`, kept, told].filter(Boolean).join(" "));
-      if (!rehearsal) syncSoon();
-      return;
     }
     if (rehearsal) {
       const problem = discFolderProblem(outputDir);
@@ -305,10 +348,11 @@ async function step() {
       subtitleLanguages,
       firstLanguage: settings.firstLanguage,
       dryRun: rehearsal,
+      replace: replacePicture,
       onProgress: (percent, text) => updateRewrapProgress(db, job.id, percent, text),
     });
     let kept = "";
-    if (!rehearsal && job.replaceSource && sources.length === 1) {
+    if (!rehearsal && job.replaceSource && sources.length === 1 && !alreadyKept(local)) {
       try {
         kept = retireSource(local);
       } catch {
@@ -347,6 +391,15 @@ async function loop() {
   if (current.working) return;
   current.working = true;
   try {
+    if (!current.scanned) {
+      current.scanned = true;
+      try {
+        const queued = await queueShakyRewraps(getDb());
+        if (queued > 0) console.log(`Queued ${queued} rewrap${queued === 1 ? "" : "s"} whose picture plays out of order.`);
+      } catch (caught) {
+        console.error("Could not look for rewraps whose picture plays out of order.", caught);
+      }
+    }
     await step();
   } catch (caught) {
     console.error("Rewrap stopped on one item.", caught);

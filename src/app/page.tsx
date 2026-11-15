@@ -1,9 +1,11 @@
 import { LibraryView } from "@/components/library-view";
 import { queryLibrary } from "@/lib/db";
+import { enforceAppAccess } from "@/lib/page-guard";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
+export default async function HomePage() {
+  await enforceAppAccess();
   const initial = queryLibrary({
     kind: "all",
     rules: [],

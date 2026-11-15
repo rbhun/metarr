@@ -3,13 +3,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { listTaskJobs } from "@/lib/tasks";
 import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
-import { checkRewrap, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, type Probe } from "@/lib/rewrap/run";
+import { checkRewrap, framesJumpBack, packedMarker, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
+import { queueShakyRewraps } from "@/lib/rewrap/worker";
 import {
   claimNextRewrap,
   parseLanguages,
@@ -38,6 +40,8 @@ const XVID: Probe = {
 
 test("an AVI becomes an MKV with the same name beside it", () => {
   assert.equal(rewrapTarget("/movies/Film (1999)/Film (1999).avi"), "/movies/Film (1999)/Film (1999).mkv");
+  assert.equal(rewrapTarget("/movies/Film (1999)/Film (1999).avi.metarr-orig"), "/movies/Film (1999)/Film (1999).mkv");
+  assert.equal(isAvi(null, "/movies/Film (1999)/Film (1999).avi.metarr-orig"), true);
   assert.equal(rewrapTarget("/movies/Film (1999)/Film cd1.AVI"), "/movies/Film (1999)/Film cd1.mkv");
   assert.equal(isAvi(null, "/a/b.AVI"), true);
   assert.equal(isAvi("avi", "/a/b.mkv"), false);
@@ -85,6 +89,12 @@ test("probe output, progress lines, and the result check", () => {
   assert.equal(progressFromLine("out_time_us=60250000", 120.5), 50);
   assert.equal(progressFromLine("out_time_us=999000000", 120.5), 99);
   assert.equal(progressFromLine("frame=10", 120.5), null);
+  assert.equal(packedMarker(Buffer.from([0x00, 0x00, 0x01, 0xb2, 0x44, 0x69, 0x76, 0x58, 0x70, 0x00])), true);
+  assert.equal(packedMarker(Buffer.from("Lavc63.1.102\0")), false);
+  const unpack = unpackArgs("in.avi", "out.avi", false).join(" ");
+  assert.match(unpack, /-bsf:v mpeg4_unpack_bframes/);
+  assert.doesNotMatch(unpack, /genpts/);
+  assert.match(unpack, /-f avi out\.avi$/);
   const expected = { video: 1, audio: 2, subtitles: 0 };
   assert.equal(checkRewrap(XVID, { ...XVID, duration: 5401 }, expected), null);
   assert.match(checkRewrap(XVID, { duration: 5400, streams: XVID.streams.slice(0, 2) }, expected) ?? "", /missing a stream/);
@@ -299,6 +309,77 @@ test("a real Xvid AVI rewraps into an MKV beside it and the AVI stays", { skip: 
     );
     const dry = await rewrapAvi({ source: avi, workDir: path.join(root, "work", "job-3"), languages: [], firstLanguage: "", dryRun: true, onProgress: () => undefined });
     assert.match(dry, /^Dry run: would copy 1 video stream, 2 audio tracks into .*Film \(1999\)\.mkv/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function pictureOrder(file: string): string {
+  const csv = execFileSync("ffprobe", [
+    "-v", "error", "-select_streams", "v:0", "-show_frames", "-show_entries", "frame=pts_time,pict_type", "-of", "csv=p=0", file,
+  ]).toString();
+  return csv
+    .trim()
+    .split(/\n/)
+    .map((line) => {
+      const [pts, typ] = line.split(",");
+      return { pts: Number(pts), typ: typ?.trim() ?? "" };
+    })
+    .filter((row) => row.typ && Number.isFinite(row.pts))
+    .sort((left, right) => left.pts - right.pts)
+    .map((row) => row.typ)
+    .join("");
+}
+
+test("a packed Xvid AVI keeps frame order, and a shaky copy is queued again", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-packed-"));
+  const sample = fileURLToPath(new URL("./rewrap/packed-bframes.avi", import.meta.url));
+  try {
+    const movie = path.join(root, "Anamorph (2007)");
+    fs.mkdirSync(movie);
+    const avi = path.join(movie, "rtz6-nmrph.avi");
+    fs.copyFileSync(sample, avi);
+    assert.equal(packedMarker(fs.readFileSync(avi)), true);
+    const shaky = path.join(movie, "one-step.mkv");
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-fflags", "+genpts", "-i", avi, "-c", "copy", "-bsf:v", "mpeg4_unpack_bframes", shaky]);
+    assert.equal(await framesJumpBack(shaky), true);
+
+    const message = await rewrapAvi({
+      source: avi,
+      workDir: path.join(root, "work", "job-1"),
+      languages: [],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    const mkv = path.join(movie, "rtz6-nmrph.mkv");
+    assert.match(message, /Saved rtz6-nmrph\.mkv with 1 video stream, 0 audio tracks\. The picture frames stay in order\./);
+    assert.equal(await framesJumpBack(mkv), false);
+    assert.equal(pictureOrder(mkv), "IBBPBBPBBPBPPPP");
+    assert.notEqual(pictureOrder(shaky), pictureOrder(mkv));
+    assert.equal(fs.existsSync(avi), true);
+
+    const replaced = await rewrapAvi({
+      source: avi,
+      workDir: path.join(root, "work", "job-2"),
+      languages: [],
+      firstLanguage: "",
+      replace: true,
+      onProgress: () => undefined,
+    });
+    assert.match(replaced, /^Replaced rtz6-nmrph\.mkv /);
+    assert.equal(await framesJumpBack(mkv), false);
+
+    const db = new Database(":memory:");
+    migrate(db);
+    const queued = enqueueRewraps(db, [{ path: avi, label: "Anamorph" }]);
+    const job = claimNextRewrap(db);
+    finishRewrap(db, job!.id, "done", "Saved rtz6-nmrph.mkv.");
+    assert.equal(queued.added, 1);
+    fs.copyFileSync(shaky, mkv);
+    assert.equal(await queueShakyRewraps(db), 1);
+    assert.equal(rewrapTotals(db).pending, 1);
+    assert.equal(await queueShakyRewraps(db), 0);
+    db.close();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

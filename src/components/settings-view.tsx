@@ -1,5 +1,6 @@
 "use client";
 
+import { AuthSettingsCard } from "@/components/auth-settings";
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
 import { FolderScanCard } from "@/components/folder-scan-settings";
@@ -413,6 +414,8 @@ export function SettingsView() {
           </p>
         </div>
 
+        <AuthSettingsCard />
+
         <UpdateCard />
 
         {error ? (
@@ -581,7 +584,7 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>File Browser</CardTitle>
               <CardDescription>
-                Opens the folder that contains a file. Paste the File Browser address, such as http://192.168.30.4:8080. Files start at is the folder that app calls home. If home is /mnt, a file at /mnt/media/Movies opens as /files/media/Movies.
+                Opens the folder that contains a file. Paste the File Browser address, such as http://192.168.1.20:8080. Files start at is the folder that app calls home. If home is /mnt, a file at /mnt/media/Movies opens as /files/media/Movies.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -590,7 +593,7 @@ export function SettingsView() {
                 <Input
                   id="file-browser-url"
                   value={fileBrowserUrl}
-                  placeholder="http://192.168.30.4:8080"
+                  placeholder="http://192.168.1.20:8080"
                   onChange={(event) => setFileBrowserUrl(event.target.value)}
                 />
               </div>
