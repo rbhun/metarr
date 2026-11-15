@@ -4,6 +4,8 @@ FROM debian:bookworm-slim
 # 2.0.0 crashes (SIGSEGV) on every unencrypted Blu-ray image or folder right
 # after "AACS directory not present"; 1.18.4 reads the same discs.
 # 1.18.4 is no longer on the current download page. It stays under old/.
+# Compile one file at a time. make -j$(nproc) is killed when the machine has
+# more cores than memory, and the build then stops with no compiler error.
 ARG MAKEMKV_VERSION=1.18.4
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -18,7 +20,7 @@ RUN apt-get update \
   && tar xzf "makemkv-bin-${MAKEMKV_VERSION}.tar.gz" \
   && cd "makemkv-oss-${MAKEMKV_VERSION}" \
   && ./configure --disable-gui \
-  && make -j"$(nproc)" \
+  && make -j1 \
   && make install \
   && cd "../makemkv-bin-${MAKEMKV_VERSION}" \
   && mkdir -p tmp && echo accepted > tmp/eula_accepted \

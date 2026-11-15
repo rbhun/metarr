@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.210
+
+- Compile MakeMKV one file at a time. Using every core was killed when the machine had more cores than memory, so a new install stopped during the build.
+
 ## 0.0.209
 
 - Download MakeMKV 1.18.4 from the old-version folder. The current download page no longer has that file.
