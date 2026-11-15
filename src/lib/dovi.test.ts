@@ -377,10 +377,11 @@ test("the converted copy takes the original's name only when nothing would be ov
   }
 });
 
-test("profile 5 is converted until it is an MP4; its names follow the .DV5 pattern", () => {
+test("profile 5 and 7 files are offered for conversion; profile 5 names follow the .DV5 pattern", () => {
   assert.equal(needsDoviConversion(7, "/m/Film.mp4"), true);
   assert.equal(needsDoviConversion(5, "/m/Film.mkv"), true);
-  assert.equal(needsDoviConversion(5, "/m/Film.MP4"), false);
+  assert.equal(needsDoviConversion(5, "/m/Film.MP4"), true);
+  assert.equal(needsDoviConversion(5, null), false);
   assert.equal(needsDoviConversion(8, "/m/Film.mkv"), false);
   assert.deepEqual(profile5Names("/m/Dune (2021)/Dune.mkv"), { temp: "/m/Dune (2021)/Dune.DV5.mp4", final: "/m/Dune (2021)/Dune.mp4", original: "/m/Dune (2021)/Dune.DV5" });
 });
@@ -456,6 +457,21 @@ test("a Dolby Vision 5 MKV becomes an Apple MP4 under its name, the original kep
     assert.ok(fs.existsSync(path.join(root, "Film.DV5")) && !fs.existsSync(source), "the original is kept under a new name");
     assert.ok(!fs.existsSync(path.join(root, "work")));
     assert.match(await convertDolbyVision({ source: target, workDir: path.join(root, "work"), onProgress: () => undefined }), /already an Apple MP4/);
+
+    // A web download: profile 5 in an MP4 with the parameter sets in the stream (hev1, as dvhe is).
+    const web = path.join(root, "Web.mp4");
+    run("ffmpeg", ["-v", "error", "-i", "p5.mkv", "-f", "lavfi", "-i", "sine=d=4", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-tag:v", "hev1", "-c:a", "eac3", "-strict", "unofficial", web]);
+    const bytes = fs.readFileSync(web);
+    const at = bytes.indexOf("hev1", bytes.indexOf("stsd"), "latin1");
+    bytes.write("dvhe", at, "latin1");
+    fs.writeFileSync(web, bytes);
+    assert.equal(execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_tag_string", "-of", "csv=p=0", web]).toString().trim().replace(/,$/, ""), "dvhe");
+    const webMessage = await convertDolbyVision({ source: web, workDir: path.join(root, "work"), onProgress: () => undefined });
+    assert.match(webMessage, /It now has the original's name, Web\.mp4, and the original was renamed to Web\.DV5\./);
+    const webStreams = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,codec_tag_string", "-of", "csv=p=0", web]).toString().trim().split("\n").map((line) => line.replace(/,$/, ""));
+    assert.deepEqual(webStreams, ["hevc,video,dvh1", "eac3,audio,ec-3"]);
+    assert.equal(profile(web), "5");
+    assert.ok(fs.existsSync(path.join(root, "Web.DV5")) && !fs.existsSync(path.join(root, "Web.DV5.mp4")));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

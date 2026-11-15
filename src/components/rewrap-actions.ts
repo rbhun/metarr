@@ -44,7 +44,7 @@ export async function doviNow(titles: number[], episodes: number[]): Promise<str
   if (added === 0 && promoted === 0) {
     return (payload.already ?? 0) > 0
       ? "That file is already converting or waiting to start."
-      : "Nothing to convert: no Dolby Vision 7 file, and no Dolby Vision 5 file outside an MP4, was found.";
+      : "Nothing to convert: no Dolby Vision 7 or 5 file was found.";
   }
   return "Converting Dolby Vision for the Apple TV now. The new file takes the original's name and the original is kept beside it. Follow it in Tasks.";
 }

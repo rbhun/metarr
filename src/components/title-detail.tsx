@@ -191,7 +191,7 @@ export function TitleDetail({
       file?.versions.some((version) => needsDoviConversion(version.doviProfile, version.path)) &&
       !file.versions.some((version) => /\.DV8\.mkv$/i.test(version.path ?? "")),
   );
-  const doviFive = Boolean(file?.versions.some((version) => version.doviProfile === 5 && needsDoviConversion(5, version.path)));
+  const doviFive = Boolean(file?.versions.some((version) => version.doviProfile === 5 && Boolean(version.path)));
   const textSidecar = file
     ? [...(file.subtitleTracks ?? []), ...file.versions.flatMap((version) => version.subtitleTracks)].some(
         (track) => track.placement === "external" && track.file && timingFormat(track.file),

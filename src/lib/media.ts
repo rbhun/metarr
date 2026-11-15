@@ -1535,8 +1535,10 @@ export function mergeLanguages(...groups: string[][]): string[] {
   return uniqueLanguages(groups.flat());
 }
 
-/** Profile 7 always; profile 5 until it is an MP4, the only container Apple's player takes it from. */
+/**
+ * Profile 7, and profile 5, which Apple's player only takes from an MP4 tagged `dvh1`. The catalog does
+ * not know the tag, so the conversion itself skips a profile 5 MP4 that already has it.
+ */
 export function needsDoviConversion(profile: number | null | undefined, filePath: string | null | undefined): boolean {
-  if (profile === 7) return true;
-  return profile === 5 && Boolean(filePath) && !/\.(mp4|m4v)$/i.test(filePath ?? "");
+  return Boolean(filePath) && (profile === 7 || profile === 5);
 }
