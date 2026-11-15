@@ -1,6 +1,7 @@
 "use client";
 
 import { AuthSettingsCard } from "@/components/auth-settings";
+import { BackupSettingsCard } from "@/components/backup-settings";
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
 import { FolderScanCard } from "@/components/folder-scan-settings";
@@ -808,6 +809,8 @@ export function SettingsView() {
             </Button>
           </CardContent>
         </Card>
+
+        <BackupSettingsCard />
       </div>
     </div>
   );

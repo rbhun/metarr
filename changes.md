@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.208
+
+- Add a backup on Settings, under the line at the bottom, to download the checked tables and restore them from that file.
+
+## 0.0.207
+
+- Check main every 10 seconds while Settings is open, so Update unlocks soon after a push instead of keeping the previous version for 15 minutes.
+
 ## 0.0.206
 
 - Put the login settings under the line above Stored library, and drop the Radarr and Sonarr comparison.

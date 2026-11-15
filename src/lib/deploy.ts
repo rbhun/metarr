@@ -103,14 +103,18 @@ export function updateIsAvailable(current: string, remote: string | null): boole
 }
 
 const PUBLISHED_VERSION_URL = "https://raw.githubusercontent.com/rbhun/metarr/main/src/lib/version.ts";
-const PUBLISHED_CACHE_MS = 15 * 60 * 1000;
-const PUBLISHED_RETRY_MS = 60 * 1000;
+const PUBLISHED_CACHE_MS = 10 * 1000;
+const PUBLISHED_RETRY_MS = 10 * 1000;
 
 let publishedCache: { at: number; version: string | null } | null = null;
 
-async function fetchPublishedVersion(): Promise<string | null> {
+async function fetchPublishedVersion(now = Date.now()): Promise<string | null> {
   try {
-    const response = await fetch(PUBLISHED_VERSION_URL, { signal: AbortSignal.timeout(4_000), cache: "no-store" });
+    // A fresh query avoids GitHub's cached copy of the previous version.ts.
+    const response = await fetch(`${PUBLISHED_VERSION_URL}?t=${Math.floor(now / PUBLISHED_CACHE_MS)}`, {
+      signal: AbortSignal.timeout(4_000),
+      cache: "no-store",
+    });
     if (!response.ok) return null;
     return versionFromSource(await response.text());
   } catch {
@@ -118,11 +122,11 @@ async function fetchPublishedVersion(): Promise<string | null> {
   }
 }
 
-/** The version on main. A successful read is kept for 15 minutes; a failure is tried again after a minute. */
+/** The version on main. A read is kept for 10 seconds, matching the Settings page check. */
 export async function publishedVersion(now = Date.now()): Promise<string | null> {
   const cached = publishedCache;
   if (cached && now - cached.at < (cached.version ? PUBLISHED_CACHE_MS : PUBLISHED_RETRY_MS)) return cached.version;
-  const version = await fetchPublishedVersion();
+  const version = await fetchPublishedVersion(now);
   if (!version && cached?.version && now - cached.at < PUBLISHED_CACHE_MS) return cached.version;
   publishedCache = { at: now, version };
   return version;

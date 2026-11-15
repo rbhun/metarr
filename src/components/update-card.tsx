@@ -45,6 +45,7 @@ function statusText(state: DeployState | null, offline: boolean): string {
   const run = state.run;
   if (!run) {
     if (state.updateAvailable && state.remoteVersion) return `Version ${state.version}. An update is available (${state.remoteVersion}).`;
+    if (state.remoteVersion) return `This copy is ${state.version}. Main is ${state.remoteVersion}, so Update stays off.`;
     return `Version ${state.version}. No update has been run from here yet.`;
   }
   if (run.state === "running") return `Updating since ${when(run.startedAt)}…`;
@@ -78,7 +79,7 @@ export function UpdateCard() {
     let timer = 0;
     const tick = async () => {
       await load();
-      timer = window.setTimeout(() => void tick(), busy.current ? 3_000 : 30_000);
+      timer = window.setTimeout(() => void tick(), busy.current ? 3_000 : 10_000);
     };
     timer = window.setTimeout(() => void tick(), 0);
     return () => window.clearTimeout(timer);
@@ -133,7 +134,10 @@ export function UpdateCard() {
           </div>
         ) : null}
         <div className="flex flex-col items-start gap-2">
-          <p className="text-sm">Current version {state?.version ?? VERSION}</p>
+          <p className="text-sm">
+            This copy is {state?.version ?? VERSION}
+            {state?.remoteVersion ? `. Main is ${state.remoteVersion}.` : ""}
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={!state?.available || working || sending || current} onClick={() => void update()}>
               {working ? "Updating…" : sending ? "Requesting…" : "Update now"}
