@@ -56,7 +56,7 @@ export function AuthSettingsCard() {
       <CardHeader>
         <CardTitle>Login</CardTitle>
         <CardDescription>
-          One username and password for this server, the same way Radarr and Sonarr do it. The password is stored as a hash. Saving signs other browsers out.
+          One username and password for this server. The password is stored as a hash. Saving signs other browsers out.
         </CardDescription>
       </CardHeader>
       <CardContent>

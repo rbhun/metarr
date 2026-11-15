@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.206
+
+- Put the login settings under the line above Stored library, and drop the Radarr and Sonarr comparison.
+
 ## 0.0.205
 
 - Keep an empty public folder in the image build. Removing the unused Next.js icons left that path missing, so the deploy could not copy it.

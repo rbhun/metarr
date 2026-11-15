@@ -414,8 +414,6 @@ export function SettingsView() {
           </p>
         </div>
 
-        <AuthSettingsCard />
-
         <UpdateCard />
 
         {error ? (
@@ -774,6 +772,8 @@ export function SettingsView() {
         </Card>
 
         <Separator />
+
+        <AuthSettingsCard />
 
         <Card size="sm">
           <CardHeader>
