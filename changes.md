@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.214
+
+- Cover the library column bar so titles do not show through the gap above Title and Where.
+
 ## 0.0.213
 
 - Add Force next to Remove on a waiting task, so that one job starts now and the schedule window stays as it is.

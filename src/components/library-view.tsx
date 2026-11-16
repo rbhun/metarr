@@ -758,9 +758,9 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-3 [&_[data-slot=table-container]]:overflow-visible">
+      <div className="min-h-0 flex-1 overflow-auto px-4 pb-3 [&_[data-slot=table-container]]:overflow-visible">
         {loading && !data ? (
-          <div className="space-y-2">
+          <div className="space-y-2 pt-3">
             <p className="text-sm text-muted-foreground">Loading the library…</p>
             {Array.from({ length: 8 }, (_, index) => (
               <Skeleton key={index} className="h-10 w-full" />
@@ -811,8 +811,8 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                   <col className="w-[229px]" />
                   <col className="w-[232px]" />
                 </colgroup>
-                <TableHeader className="sticky top-0 z-10 bg-background">
-                  <TableRow>
+                <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:h-auto [&_th]:bg-background [&_th]:pt-3 [&_th]:shadow-[0_-1px_0_0_var(--background)]">
+                  <TableRow className="hover:bg-background">
                     <TableHead className="w-10">
                       <Checkbox
                         checked={pageAllSelected ? true : pageSomeSelected ? "indeterminate" : false}
@@ -971,7 +971,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
                 </TableBody>
               </Table>
             </div>
-            <div className="grid gap-3 md:hidden">
+            <div className="grid gap-3 pt-3 md:hidden">
               {titles.map((title) => {
                 const arr = arrPresence(title, data?.configured ?? []);
                 const open = openId === title.id;
