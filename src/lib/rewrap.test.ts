@@ -473,8 +473,45 @@ test("a packed Xvid AVI keeps frame order, and a shaky copy is queued again", { 
     fs.copyFileSync(shaky, mkv);
     assert.equal(await queueShakyRewraps(db), 1);
     assert.equal(rewrapTotals(db).pending, 1);
+    const repair = claimNextRewrap(db);
+    assert.equal(repair?.rebuild, true);
     assert.equal(await queueShakyRewraps(db), 0);
     db.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packed frames without the DivX mark are still split before they are saved", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-unmarked-"));
+  const sample = fileURLToPath(new URL("./rewrap/packed-bframes.avi", import.meta.url));
+  try {
+    const movie = path.join(root, "Black Swan (2010)");
+    fs.mkdirSync(movie);
+    const avi = path.join(movie, "Black Swan.avi");
+    const flipped = Buffer.from(fs.readFileSync(sample));
+    const needle = Buffer.from("DivX999b000p");
+    let at = 0;
+    let flips = 0;
+    while ((at = flipped.indexOf(needle, at)) >= 0) {
+      flipped[at + needle.length - 1] = "x".charCodeAt(0);
+      flips += 1;
+      at += needle.length;
+    }
+    assert.ok(flips > 0);
+    assert.equal(packedMarker(flipped), false);
+    fs.writeFileSync(avi, flipped);
+    const message = await rewrapAvi({
+      source: avi,
+      workDir: path.join(root, "work", "job-1"),
+      languages: [],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    const mkv = path.join(movie, "Black Swan.mkv");
+    assert.match(message, /The picture frames stay in order/);
+    assert.equal(await framesJumpBack(mkv), false);
+    assert.equal(pictureOrder(mkv), "IBBPBBPBBPBPPPP");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

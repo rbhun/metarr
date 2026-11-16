@@ -108,19 +108,20 @@ async function pictureJumps(file: string): Promise<boolean> {
 }
 
 /**
- * Queue finished AVI copies whose picture steps backwards in time. They run in the
- * rewrap hours, and the new MKV replaces the shaky one. A smooth copy is left alone.
+ * Queue finished AVI copies whose picture steps backwards in time. The job copies the
+ * picture again, so a file without the DivX mark is split too. They run in the rewrap
+ * hours. A smooth copy is left alone.
  */
 export async function queueShakyRewraps(db: ReturnType<typeof getDb>): Promise<number> {
   if (dryRun()) return 0;
   const maps = readDetectSettings(db).pathMaps;
-  const items: Array<{ path: string; label: string }> = [];
+  const items: Array<{ path: string; label: string; rebuild: boolean }> = [];
   for (const filePath of finishedRewrapPaths(db)) {
     if (!isAvi(null, filePath)) continue;
     const mkv = resolveMediaPath(rewrapTarget(filePath), maps, existsFile);
     const source = resolveMediaPath(filePath, maps, existsFile) ?? resolveMediaPath(`${filePath}.metarr-orig`, maps, existsFile);
     if (!mkv || !source || !(await pictureJumps(mkv))) continue;
-    items.push({ path: filePath, label: path.basename(filePath) });
+    items.push({ path: filePath, label: path.basename(filePath), rebuild: true });
   }
   if (!items.length) return 0;
   return enqueueRewraps(db, items).added;

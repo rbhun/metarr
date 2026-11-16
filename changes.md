@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.215
+
+- Redo every finished AVI copy whose frames step backwards, and split packed frames even when the DivX mark is missing. A Mac player can hide that, and an Apple TV conversion cannot.
+
 ## 0.0.214
 
 - Cover the library column bar so titles do not show through the gap above Title and Where.

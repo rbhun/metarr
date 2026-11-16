@@ -198,6 +198,22 @@ function freeBytes(directory: string): number | null {
   }
 }
 
+/** The unpacked AVI and the MKV are on disk together, so both have to fit. */
+function roomToSplit(sources: string[], directory: string) {
+  let bytes = 0;
+  try {
+    for (const file of sources) bytes += fs.statSync(file).size;
+  } catch {
+    bytes = 0;
+  }
+  const free = freeBytes(directory);
+  if (bytes > 0 && free != null && free < bytes * 2 + 512 * 1024 * 1024) {
+    throw new Error("There is not enough free space to split the packed frames before copying, so nothing was written.");
+  }
+}
+
+const OUT_OF_ORDER = "The MKV would play frames out of order, so it was not saved.";
+
 /** What to say when ffmpeg or ffprobe does not exit 0. A signal kill has no exit code. */
 export function rewrapStop(command: string, code: number | null, signal: NodeJS.Signals | null): string {
   if (code != null) return `${command} exited with code ${code}.`;
@@ -375,7 +391,7 @@ export async function rewrapAvi(options: {
   const moved = plan.firstMoved ? ` ${options.firstLanguage} audio goes first.` : "";
   const flac = plan.converted ? ` ${plural(plan.converted, "PCM audio track")} ${plan.converted === 1 ? "is" : "are"} stored as lossless FLAC.` : "";
   const joined = joining ? ` Joined from ${sources.length} parts.` : "";
-  const ordered = packed ? " The picture frames stay in order." : "";
+  let ordered = packed ? " The picture frames stay in order." : "";
   if (options.dryRun) {
     const action = joining ? `join ${sources.length} parts and copy` : "copy";
     const split = packed ? " Packed frames are split apart first so the picture stays in order." : "";
@@ -395,29 +411,42 @@ export async function rewrapAvi(options: {
       lastWrite = now;
       onProgress(percent, message(percent));
     };
-    if (packed) {
-      let bytes = 0;
-      try {
-        for (const file of sources) bytes += fs.statSync(file).size;
-      } catch {
-        bytes = 0;
-      }
-      const free = freeBytes(workDir);
-      if (bytes > 0 && free != null && free < bytes * 2 + 512 * 1024 * 1024) {
-        throw new Error("There is not enough free space to split the packed frames before copying, so nothing was written.");
-      }
+    const splitPacked = async () => {
+      roomToSplit(sources, workDir);
       onProgress(0, "Splitting packed frames");
       await runTool("ffmpeg", unpackArgs(joining ? listPath : source, unpacked, joining), REWRAP_TIMEOUT_MS, (line) => {
         report(line, (percent) => `Splitting packed frames ${percent}%`);
       });
-    }
+    };
+    if (packed) await splitPacked();
     await runTool("ffmpeg", plan.args, REWRAP_TIMEOUT_MS, (line) => {
       report(line, (percent) => `Rewrapping ${percent}%`);
     });
     onProgress(99, "Checking the MKV");
     const problem = checkRewrap(input, await probe(temp), plan, joining ? "parts" : kind);
     if (problem) throw new Error(problem);
-    if (packed && (await framesJumpBack(temp))) throw new Error("The MKV would play frames out of order, so it was not saved.");
+    const mpeg4 = rewrapFamily(source) === "avi" && input.streams.some((stream) => stream.codecType === "video" && stream.codecName === "mpeg4");
+    // The DivX "p" mark is not on every packed file. Xvid can store the next B-frame in the
+    // previous one without that text, and one copy then gives the B-frame the later time.
+    // A Mac player reorders from the picture data. Apple TV converts from these times.
+    if ((packed || mpeg4) && (await framesJumpBack(temp))) {
+      if (packed) throw new Error(OUT_OF_ORDER);
+      await splitPacked();
+      fs.rmSync(temp, { force: true });
+      const again = rewrapArgs(unpacked, temp, input, {
+        languages: options.languages,
+        subtitleLanguages: options.subtitleLanguages,
+        firstLanguage: options.firstLanguage,
+        concat: false,
+      });
+      await runTool("ffmpeg", again.args, REWRAP_TIMEOUT_MS, (line) => {
+        report(line, (percent) => `Rewrapping ${percent}%`);
+      });
+      const retry = checkRewrap(input, await probe(temp), again, joining ? "parts" : kind);
+      if (retry) throw new Error(retry);
+      if (await framesJumpBack(temp)) throw new Error(OUT_OF_ORDER);
+      ordered = " The picture frames stay in order.";
+    }
     onProgress(100, "Saving the MKV");
     deliverFile(temp, target, { replace: options.replace });
     const left = joining ? `The ${kind} files were left in place.` : `The ${kind} was left in place.`;
