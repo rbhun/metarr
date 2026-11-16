@@ -18,6 +18,15 @@ test("a probe report becomes audio and subtitle tracks in file order", () => {
   assert.equal(probed?.audio[0]?.streamIndex, 0);
   assert.equal(probed?.subtitles[0]?.language, "Czech");
   assert.equal(probed?.subtitles[0]?.format, "PGS");
+  const fromHeader = tracksFromProbe({
+    format: { tags: { IAS1: "hun", IAS2: "eng" } },
+    streams: [
+      { codec_type: "audio", codec_name: "mp3", channels: 2 },
+      { codec_type: "audio", codec_name: "ac3", channels: 6, tags: { language: "ita" } },
+    ],
+  });
+  assert.equal(fromHeader?.audio[0]?.language, "Hungarian");
+  assert.equal(fromHeader?.audio[1]?.language, "Italian");
 });
 
 test("a scanned file takes the Radarr identity for the same path", () => {

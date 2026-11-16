@@ -30,7 +30,7 @@ import { decodeSubtitleBytes } from "@/lib/detect/encoding";
 import { readPgsImages, scaleBitmap } from "@/lib/detect/pgs";
 import { audioClipArgs, audioCopyArgs, audioPid, audioSliceArgs, clipStart, dialogueMix, isExceptionallyShortClip, isShortSpan, languageFromProbeTags, markerWindow, openingWindow, pcmIsSilent, pidActivity, sampleOffsets, tsWindow, wavSeconds } from "@/lib/detect/audio";
 import { applyNextSaved, commandFailureText, markInterruptedWrites, queueUnlabeledRecognition, recognizedWrites, writeFinding } from "@/lib/detect/apply";
-import { fileOmitsSavedLanguage, planTag, retargetPath } from "@/lib/detect/tag";
+import { carryLanguages, fileOmitsSavedLanguage, headerAudioLanguages, planTag, retargetPath } from "@/lib/detect/tag";
 import { stampLanguage } from "@/lib/detect/stamp";
 import { playerIdsForPaths, unreadSidecars } from "@/lib/detect/publish";
 import { cueSampleStarts, pgsCopyArgs, pgsDemuxArgs, pgsSliceArgs, vobsubCanvasSize, vobsubExtractArgs } from "@/lib/detect/picture";
@@ -1018,6 +1018,14 @@ test("mkvpropedit's own reason is the failure, because it writes that to standar
   );
   assert.match(text, /could not be opened for writing/);
   assert.equal(commandFailureText("mkvpropedit", "The file is being analyzed.\nDone.\n", ""), "mkvpropedit could not change the file.");
+});
+
+test("an AVI header language is kept and an empty track can still be named later", () => {
+  assert.deepEqual(headerAudioLanguages({ IAS1: "hun", IAS2: "und", IAS3: "not-a-language" }), ["Hungarian"]);
+  assert.deepEqual(headerAudioLanguages({ ias1: "hung" }), ["Hungarian"]);
+  assert.deepEqual(carryLanguages(["English"], ["Hungarian"]), ["Hungarian"]);
+  assert.deepEqual(carryLanguages(["English", "Italian"], [null]), ["English", "Italian"]);
+  assert.deepEqual(carryLanguages([], ["Hungarian"]), ["Hungarian"]);
 });
 
 test("a recognized language is planned as a file tag or a renamed subtitle", () => {

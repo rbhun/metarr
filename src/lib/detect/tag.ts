@@ -1,6 +1,6 @@
 import path from "node:path";
 import { languageFromSubtitleName } from "@/lib/detect/sidecars";
-import { fileExtension, languageCode } from "@/lib/media";
+import { fileExtension, languageCode, languageName } from "@/lib/media";
 
 const MATROSKA = new Set(["mkv", "mka", "mks", "mk3d", "webm"]);
 const ISO_BMFF = new Set(["mp4", "m4v", "mov", "m4p"]);
@@ -75,6 +75,36 @@ export function planTag(
     return { action: "rename", to, pairFrom: pairTo ? pairFrom : null, pairTo };
   }
   return { action: "skip", reason: "container" };
+}
+
+/**
+ * Languages an AVI stores beside the streams, IAS1 for the first audio track through IAS9.
+ * A copy into MKV keeps the same tags on the file. `und` and anything that is not a language are left empty.
+ */
+export function headerAudioLanguages(tags: unknown): Array<string | null> {
+  if (!tags || typeof tags !== "object") return [];
+  const record = tags as Record<string, unknown>;
+  const languages: Array<string | null> = [];
+  for (let index = 1; index <= 9; index += 1) {
+    const raw = record[`IAS${index}`] ?? record[`ias${index}`];
+    if (typeof raw !== "string") continue;
+    const named = languageName(raw);
+    if (!named || !languageCode(named)) continue;
+    languages[index - 1] = named;
+  }
+  return languages;
+}
+
+/** A language already on the file fills a blank. It is not replaced by an empty or undetermined slot. */
+export function carryLanguages(chosen: Array<string | null>, fromFile: Array<string | null>): Array<string | null> {
+  const length = Math.max(chosen.length, fromFile.length);
+  return Array.from({ length }, (_, index) => {
+    const file = fromFile[index];
+    if (file && languageCode(file)) return file;
+    const kept = chosen[index];
+    if (kept && languageCode(kept)) return kept;
+    return null;
+  });
 }
 
 /** A saved recognition still needs writing when this container can store it and the track has no language. */

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { stampLanguage } from "@/lib/detect/stamp";
-import { fileOmitsSavedLanguage, planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
+import { fileOmitsSavedLanguage, headerAudioLanguages, planTag, retargetPath, type TagPlan } from "@/lib/detect/tag";
 import { deliverFile } from "@/lib/deliver";
 import { dryRun } from "@/lib/dry-run";
 import { idle } from "@/lib/idle";
@@ -14,6 +14,7 @@ import { queueLanguageCopy } from "@/lib/detect/plex-copy";
 import { canRewrap } from "@/lib/rewrap/source";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { markTagChecked, markWriteStuck, markWritten, reopenForWrite } from "@/lib/detect/store";
+import { languageFromProbeTags } from "@/lib/detect/audio";
 import { languageName } from "@/lib/media";
 import { killTool } from "@/lib/stuck-tools";
 import type Database from "better-sqlite3";
@@ -113,9 +114,19 @@ async function existingLanguage(file: string, kind: "audio" | "subtitle", ordina
       ["-v", "error", "-select_streams", spec, "-show_entries", "stream_tags=language", "-of", "json", file],
       30_000,
     );
-    const body = JSON.parse(stdout) as { streams?: Array<{ tags?: { language?: unknown } }> };
-    const code = body.streams?.[0]?.tags?.language;
-    return typeof code === "string" ? languageName(code) : null;
+    const body = JSON.parse(stdout) as { streams?: Array<{ tags?: unknown }> };
+    return languageFromProbeTags(body.streams?.[0]?.tags);
+  } catch {
+    return null;
+  }
+}
+
+/** The AVI header language for one audio track, when it names a real language. */
+async function headerLanguage(file: string, ordinal: number): Promise<string | null> {
+  try {
+    const { stdout } = await runTool("ffprobe", ["-v", "error", "-show_entries", "format_tags", "-of", "json", file], 30_000);
+    const body = JSON.parse(stdout) as { format?: { tags?: unknown } };
+    return headerAudioLanguages(body.format?.tags)[ordinal] ?? null;
   } catch {
     return null;
   }
@@ -255,6 +266,13 @@ export async function writeFinding(
   language: string,
   role: "commentary" | "forced" | "short" | null,
 ): Promise<WriteResult> {
+  if (job.kind === "audio") {
+    const onStream = await existingLanguage(localFile, "audio", job.ordinal);
+    if (!onStream) {
+      const kept = await headerLanguage(localFile, job.ordinal);
+      if (kept) language = kept;
+    }
+  }
   const plan = planTag(localFile, job.kind, job.ordinal, language, role);
   if (canRewrap(null, job.path) && (plan.action === "riff" || (plan.action === "skip" && plan.reason === "container"))) {
     if (dryRun()) {

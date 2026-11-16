@@ -15,7 +15,7 @@ import { mergeIsRunning } from "@/lib/merge/store";
 import { recognizedAudioLanguages } from "@/lib/detect/plex-copy";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { oldCopiesBeside, removeOldFiles } from "@/lib/rewrap/old-files";
-import { framesJumpBack, rewrapAvi, tagMkvLanguages } from "@/lib/rewrap/run";
+import { framesJumpBack, rewrapAvi, tagMkvLanguages, withFileLanguages } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
   claimNextRewrap,
@@ -309,13 +309,17 @@ async function step() {
     const directory = path.dirname(local);
     const rehearsal = dryRun();
     const outputDir = sources.length > 1 ? path.dirname(joinedTarget(local) ?? local) : directory;
-    const languages = known?.languages ?? job.languages;
+    let languages = known?.languages ?? job.languages;
+    if (!rehearsal) {
+      languages = await withFileLanguages(local, languages);
+    }
     const subtitleLanguages = known?.subtitleLanguages ?? job.subtitleLanguages;
     const singleTarget = sources.length === 1 ? rewrapTarget(local) : null;
     let replacePicture = false;
     if (singleTarget && fs.existsSync(singleTarget)) {
       replacePicture = !rehearsal && (job.rebuild || (await pictureJumps(singleTarget)));
       if (!replacePicture) {
+        if (!rehearsal) languages = await withFileLanguages(singleTarget, languages);
         if (!rehearsal) await tagMkvLanguages(singleTarget, languages);
         const kept = putOriginalsAway([local], singleTarget, !rehearsal && settings.deleteOld, !rehearsal && job.replaceSource);
         let told = "";

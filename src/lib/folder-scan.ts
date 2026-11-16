@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { audioCodecLabel, audioLayoutLabel, formatGaps } from "@/lib/audio-format";
 import { languageFromProbeTags } from "@/lib/detect/audio";
+import { headerAudioLanguages } from "@/lib/detect/tag";
 import { queueUnlabeledRecognition, recognizedWrites } from "@/lib/detect/apply";
 import { resolveMediaPath, mediaPathCandidates, type PathMap } from "@/lib/detect/paths";
 import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
@@ -111,8 +112,9 @@ export function videoFromProbe(payload: unknown): ProbedVideo | null {
 }
 
 export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtitles: SubtitleTrack[] } | null {
-  const record = payload && typeof payload === "object" ? (payload as { streams?: unknown }) : null;
+  const record = payload && typeof payload === "object" ? (payload as { streams?: unknown; format?: { tags?: unknown } }) : null;
   if (!Array.isArray(record?.streams)) return null;
+  const header = headerAudioLanguages(record.format?.tags);
   const audio: AudioTrack[] = [];
   const subtitles: SubtitleTrack[] = [];
   for (const item of record.streams) {
@@ -125,7 +127,7 @@ export function tracksFromProbe(payload: unknown): { audio: AudioTrack[]; subtit
       channel_layout?: unknown;
       tags?: unknown;
     };
-    const language = languageFromProbeTags(stream.tags);
+    const language = languageFromProbeTags(stream.tags) ?? (stream.codec_type === "audio" ? header[audio.length] ?? null : null);
     if (stream.codec_type === "audio") {
       audio.push({
         language,
@@ -725,7 +727,7 @@ function subtitleFormat(codec: unknown): string | null {
 
 function probeFile(file: string): Promise<unknown> {
   return new Promise((resolve) => {
-    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,profile,channels,channel_layout,color_transfer:stream_tags=language:stream_side_data=dv_profile", "-of", "json", file], {
+    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name,profile,channels,channel_layout,color_transfer:stream_tags=language:stream_side_data=dv_profile:format_tags", "-of", "json", file], {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const chunks: Buffer[] = [];

@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
 import { deliverFile } from "@/lib/deliver";
 import { idle } from "@/lib/idle";
 import { removeWorkDir, watchStall } from "@/lib/stuck";
+import { languageFromProbeTags } from "@/lib/detect/audio";
+import { carryLanguages, headerAudioLanguages } from "@/lib/detect/tag";
 import { languageCode } from "@/lib/media";
 import { killTool } from "@/lib/stuck-tools";
 import { joinedTarget, rewrapFamily, rewrapTarget, sourceKind } from "@/lib/rewrap/source";
@@ -29,19 +31,42 @@ const MKV_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "dvd_subtitle", "t
 /** Blu-ray PCM has no Matroska mapping; FLAC keeps it lossless. */
 const LOSSLESS_AUDIO: Record<string, string> = { pcm_bluray: "flac", pcm_dvd: "flac" };
 
-export type ProbeStream = { index: number; codecType: string; codecName: string | null };
-export type Probe = { streams: ProbeStream[]; duration: number | null };
+export type ProbeStream = { index: number; codecType: string; codecName: string | null; language?: string | null };
+export type Probe = { streams: ProbeStream[]; duration: number | null; headerLanguages?: Array<string | null> };
 
 export function parseProbe(json: string): Probe {
   const value = JSON.parse(json) as {
-    streams?: Array<{ index?: number; codec_type?: string; codec_name?: string }>;
-    format?: { duration?: string };
+    streams?: Array<{ index?: number; codec_type?: string; codec_name?: string; tags?: unknown }>;
+    format?: { duration?: string; tags?: unknown };
   };
   const streams = (value.streams ?? [])
     .filter((stream) => typeof stream.index === "number" && typeof stream.codec_type === "string")
-    .map((stream) => ({ index: stream.index as number, codecType: stream.codec_type as string, codecName: stream.codec_name ?? null }));
+    .map((stream) => ({
+      index: stream.index as number,
+      codecType: stream.codec_type as string,
+      codecName: stream.codec_name ?? null,
+      language: languageFromProbeTags(stream.tags),
+    }));
   const duration = Number(value.format?.duration);
-  return { streams, duration: Number.isFinite(duration) && duration > 0 ? duration : null };
+  return {
+    streams,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+    headerLanguages: headerAudioLanguages(value.format?.tags),
+  };
+}
+
+/** Audio languages already stored on the file, in track order. A header tag fills a track that has none. */
+export function audioLanguagesFromProbe(probe: Probe): Array<string | null> {
+  const header = probe.headerLanguages ?? [];
+  const audio = probe.streams.filter((stream) => stream.codecType === "audio");
+  const length = Math.max(audio.length, header.length);
+  return Array.from({ length }, (_, ordinal) => {
+    const stream = audio[ordinal]?.language;
+    if (stream && languageCode(stream)) return stream;
+    const tagged = header[ordinal];
+    if (tagged && languageCode(tagged)) return tagged;
+    return null;
+  });
 }
 
 const USER_DATA = Buffer.from([0x00, 0x00, 0x01, 0xb2]);
@@ -292,10 +317,19 @@ function runTool(
 async function probe(file: string): Promise<Probe> {
   const output = await runTool(
     "ffprobe",
-    ["-v", "error", "-show_entries", "stream=index,codec_type,codec_name:format=duration", "-of", "json", file],
+    ["-v", "error", "-show_entries", "stream=index,codec_type,codec_name:stream_tags=language:format=duration:format_tags", "-of", "json", file],
     PROBE_TIMEOUT_MS,
   );
   return parseProbe(output);
+}
+
+/** Keep a language the file already has. A blank catalog slot takes it, and an empty file leaves a listened language alone. */
+export async function withFileLanguages(file: string, languages: Array<string | null>): Promise<Array<string | null>> {
+  try {
+    return carryLanguages(languages, audioLanguagesFromProbe(await probe(file)));
+  } catch {
+    return languages;
+  }
 }
 
 export function progressFromLine(line: string, duration: number | null): number | null {
@@ -374,12 +408,13 @@ export async function rewrapAvi(options: {
   }
   const duration = probed.reduce((sum, item) => sum + (item.duration ?? 0), 0);
   const input: Probe = { streams: first.streams, duration: duration > 0 ? duration : null };
+  const languages = carryLanguages(options.languages, audioLanguagesFromProbe(first));
   const packed = rewrapFamily(source) === "avi" && sources.some((file) => fileHasPackedFrames(file));
   const listPath = path.join(workDir, "parts.txt");
   const unpacked = path.join(workDir, "unpacked.avi");
   const temp = path.join(workDir, name);
   const plan = rewrapArgs(packed ? unpacked : joining ? listPath : source, temp, input, {
-    languages: options.languages,
+    languages,
     subtitleLanguages: options.subtitleLanguages,
     firstLanguage: options.firstLanguage,
     concat: packed ? false : joining,
@@ -434,7 +469,7 @@ export async function rewrapAvi(options: {
       await splitPacked();
       fs.rmSync(temp, { force: true });
       const again = rewrapArgs(unpacked, temp, input, {
-        languages: options.languages,
+        languages,
         subtitleLanguages: options.subtitleLanguages,
         firstLanguage: options.firstLanguage,
         concat: false,

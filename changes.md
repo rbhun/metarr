@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.217
+
+- Keep an audio language stored in an AVI header, such as IAS1, and write it on the MKV track Plex reads. A blank track can still be listened to. A label the file already has is not replaced with an undetermined one.
+
 ## 0.0.216
 
 - Watch the library for Dolby Vision 7 and convert it to 8.1, with a setting to delete the .DV7 original and a button for leftovers already beside the movie.

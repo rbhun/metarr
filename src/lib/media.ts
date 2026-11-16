@@ -29,6 +29,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   eng: "English",
   hu: "Hungarian",
   hun: "Hungarian",
+  hung: "Hungarian",
   magyar: "Hungarian",
   de: "German",
   deu: "German",

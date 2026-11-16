@@ -412,6 +412,33 @@ test("a real Xvid AVI rewraps into an MKV beside it and the AVI stays", { skip: 
   }
 });
 
+test("an AVI header language is written on the MKV audio track", { skip: !hasFfmpeg }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-ias-"));
+  try {
+    const avi = path.join(root, "Film.avi");
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi", "-i", "testsrc=size=160x120:rate=25:duration=1",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+      "-map", "0", "-map", "1",
+      "-c:v", "mpeg4", "-c:a", "libmp3lame",
+      "-metadata", "IAS1=hun",
+      avi,
+    ]);
+    await rewrapAvi({
+      source: avi,
+      workDir: path.join(root, "work"),
+      languages: [],
+      firstLanguage: "",
+      onProgress: () => undefined,
+    });
+    const language = execFileSync("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=language", "-of", "default=nw=1:nk=1", path.join(root, "Film.mkv")]).toString().trim();
+    assert.equal(language, "hun");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function pictureOrder(file: string): string {
   const csv = execFileSync("ffprobe", [
     "-v", "error", "-select_streams", "v:0", "-show_frames", "-show_entries", "frame=pts_time,pict_type", "-of", "csv=p=0", file,
