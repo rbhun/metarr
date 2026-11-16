@@ -13,6 +13,10 @@ export type RewrapSettings = {
   firstLanguage: string;
   /** After the MKV is saved, delete the AVI or transport file it replaced. Off leaves the original in place. */
   deleteOld: boolean;
+  /** Queue every library Dolby Vision 7 file for an 8.1 copy. Off waits for a manual convert. */
+  doviWatch: boolean;
+  /** After that 8.1 file takes the movie's name, delete the `.DV7` original. Off leaves it beside the movie. */
+  doviDeleteOld: boolean;
 };
 
 /** `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV beside a profile 7 file. */
@@ -101,6 +105,8 @@ export function readRewrapSettings(db: Database.Database): RewrapSettings {
     endHour: clampHour(meta(db, "rewrap_schedule_end"), 7),
     firstLanguage: first == null ? DEFAULT_FIRST_LANGUAGE : first,
     deleteOld: meta(db, "rewrap_delete_old") === "1",
+    doviWatch: meta(db, "dovi_watch") === "1",
+    doviDeleteOld: meta(db, "dovi_delete_old") === "1",
   };
 }
 
@@ -115,13 +121,15 @@ export function parseFirstLanguage(value: unknown): string | null {
 
 export function writeRewrapSettings(
   db: Database.Database,
-  settings: { enabled?: boolean; startHour?: number; endHour?: number; firstLanguage?: string; deleteOld?: boolean },
+  settings: { enabled?: boolean; startHour?: number; endHour?: number; firstLanguage?: string; deleteOld?: boolean; doviWatch?: boolean; doviDeleteOld?: boolean },
 ) {
   if (settings.enabled != null) setMetaValue(db, "rewrap_schedule_enabled", settings.enabled ? "1" : "0");
   if (settings.startHour != null) setMetaValue(db, "rewrap_schedule_start", String(settings.startHour));
   if (settings.endHour != null) setMetaValue(db, "rewrap_schedule_end", String(settings.endHour));
   if (settings.firstLanguage != null) setMetaValue(db, "rewrap_first_language", settings.firstLanguage);
   if (settings.deleteOld != null) setMetaValue(db, "rewrap_delete_old", settings.deleteOld ? "1" : "0");
+  if (settings.doviWatch != null) setMetaValue(db, "dovi_watch", settings.doviWatch ? "1" : "0");
+  if (settings.doviDeleteOld != null) setMetaValue(db, "dovi_delete_old", settings.doviDeleteOld ? "1" : "0");
 }
 
 export function readRewrapPause(db: Database.Database): RewrapPause | null {

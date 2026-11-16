@@ -75,6 +75,18 @@ export function swapIntoPlace(
   return { final, original };
 }
 
+/** Delete the renamed original once the converted file has its name. A missing file is already gone. */
+export function removeSwappedOriginal(placed: { final: string; original: string }): "removed" | "failed" | "kept" {
+  try {
+    if (!fs.existsSync(placed.final) || !fs.existsSync(placed.original)) return "kept";
+    if (path.resolve(placed.final) === path.resolve(placed.original)) return "kept";
+    fs.rmSync(placed.original);
+    return "removed";
+  } catch {
+    return "failed";
+  }
+}
+
 export type DoviStream = {
   index: number;
   type: string;
@@ -353,6 +365,8 @@ export async function convertDolbyVision(options: {
   source: string;
   workDir: string;
   dryRun?: boolean;
+  /** After the 8.1 file takes the source's name, delete the `.DV7` original. */
+  removeOriginal?: boolean;
   onProgress: (percent: number, message: string) => void;
 }): Promise<string> {
   const { source, workDir, onProgress } = options;
@@ -488,12 +502,15 @@ export async function convertDolbyVision(options: {
     const skipped = missing
       ? ` ${missing === 1 ? "1 damaged frame" : `${missing} damaged frames`} in the file ${missing === 1 ? "was" : "were"} left out; the picture holds still there for a moment and the audio stays in sync.`
       : "";
+    const dropped = placed !== "taken" && placed !== "failed" && options.removeOriginal ? removeSwappedOriginal(placed) : "kept";
     const kept =
       placed === "taken"
         ? ` Both files were left as they are, because ${path.basename(doviOriginalName(source))} or ${path.basename(doviFinalName(source))} already exists.`
         : placed === "failed"
           ? " The files could not be renamed, so both were left as they are."
-          : ` It now has the original's name, ${path.basename(placed.final)}, and the original was renamed to ${path.basename(placed.original)}.`;
+          : dropped === "removed"
+            ? ` It now has the original's name, ${path.basename(placed.final)}. The original was removed.`
+            : ` It now has the original's name, ${path.basename(placed.final)}, and the original was renamed to ${path.basename(placed.original)}.${dropped === "failed" ? " The original could not be removed." : ""}`;
     return `Saved ${name} with Dolby Vision 8.1 for the Apple TV. The HDR10 picture was copied untouched and every audio and subtitle track kept.${borrowed}${skipped}${kept}`;
   } finally {
     removeWorkDir(workDir);

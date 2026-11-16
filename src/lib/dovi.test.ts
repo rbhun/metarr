@@ -14,6 +14,7 @@ import {
   doviOriginalName,
   frameDurationNs,
   profile5Names,
+  removeSwappedOriginal,
   swapIntoPlace,
   damagedRpuMessage,
   doviTarget,
@@ -32,7 +33,9 @@ import { rulesWhere } from "@/lib/filters";
 import { videoFromProbe } from "@/lib/folder-scan";
 import { hdrText } from "@/lib/format";
 import { doviProfileOf, needsDoviConversion } from "@/lib/media";
-import { claimNextRewrap, enqueueRewraps, finishRewrap, finishedRewrapPaths } from "@/lib/rewrap/store";
+import { deleteDoviOriginals, leftoverDoviOriginal } from "@/lib/dovi/old-files";
+import { queueProfile7 } from "@/lib/dovi/watch";
+import { claimNextRewrap, enqueueRewraps, finishRewrap, finishedRewrapPaths, writeRewrapSettings } from "@/lib/rewrap/store";
 
 /** One Dolby Vision profile 7 MEL RPU from the dovi_tool test assets. */
 const PROFILE7_RPU =
@@ -347,6 +350,77 @@ test("a Dolby Vision packet damaged inside the video is replaced so the file sti
     assert.equal(profile(path.join(root, "Film.mkv")), "8");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("watching queues a Dolby Vision 7 file and a finished one stays put", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  try {
+    const versions = JSON.stringify([
+      { name: "Film", path: "/m/Film.mkv", doviProfile: 7 },
+      { name: "Kept", path: "/m/Film.DV7", doviProfile: 7 },
+      { name: "Five", path: "/m/Five.mkv", doviProfile: 5 },
+      { name: "Eight", path: "/m/Eight.mkv", doviProfile: 8 },
+      { name: "Half", path: "/m/Half.mkv", doviProfile: 7 },
+      { name: "Half out", path: "/m/Half.DV8.mkv", doviProfile: 8 },
+    ]);
+    db.prepare(
+      `INSERT INTO catalog_titles (kind, title, sort_title, year, playable_label, versions_json, dovi_profiles) VALUES ('movie', 'Film', 'film', 1999, 'video', ?, '5,7,8')`,
+    ).run(versions);
+    const series = db.prepare(`INSERT INTO catalog_titles (kind, title, sort_title, playable_label, dovi_profiles) VALUES ('series', 'Show', 'show', 'video', '7')`).run();
+    db.prepare(
+      `INSERT INTO catalog_episodes (catalog_id, season, episode, title, playable_label, versions_json) VALUES (?, 1, 2, 'Pilot', 'video', ?)`,
+    ).run(series.lastInsertRowid, JSON.stringify([{ name: "Pilot", path: "/m/Show.mkv", doviProfile: 7 }]));
+    assert.equal(queueProfile7(db), 0);
+    writeRewrapSettings(db, { doviWatch: true });
+    assert.equal(queueProfile7(db), 2);
+    const movie = claimNextRewrap(db);
+    assert.equal(movie?.path, "/m/Film.mkv");
+    assert.equal(movie?.mode, "dovi");
+    assert.equal(movie?.label, "Film (1999)");
+    finishRewrap(db, movie!.id, "done", "Saved.");
+    const episode = claimNextRewrap(db);
+    assert.equal(episode?.label, "Show S01E02 Pilot");
+    finishRewrap(db, episode!.id, "failed", "No.");
+    assert.equal(queueProfile7(db), 0);
+  } finally {
+    db.close();
+  }
+});
+
+test("a swapped original can be removed, and leftover .DV7 files go only when the movie is beside them", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-dovi-old-"));
+  const db = new Database(":memory:");
+  migrate(db);
+  try {
+    const movie = path.join(root, "Film");
+    fs.mkdirSync(movie);
+    const final = path.join(movie, "Film.mkv");
+    const original = path.join(movie, "Film.DV7");
+    fs.writeFileSync(final, "eight");
+    fs.writeFileSync(original, "seven");
+    assert.equal(removeSwappedOriginal({ final, original }), "removed");
+    assert.equal(fs.existsSync(final), true);
+    assert.equal(fs.existsSync(original), false);
+    assert.equal(removeSwappedOriginal({ final, original }), "kept");
+
+    fs.writeFileSync(original, "seven");
+    fs.writeFileSync(path.join(movie, "Alone.DV7"), "only");
+    fs.writeFileSync(path.join(movie, "Film.DV5"), "five");
+    enqueueRewraps(db, [{ path: final, mode: "dovi" }]);
+    assert.equal(leftoverDoviOriginal(original), true);
+    assert.equal(leftoverDoviOriginal(path.join(movie, "Alone.DV7")), false);
+    const result = deleteDoviOriginals(db);
+    assert.equal(result.removed, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(fs.existsSync(final), true);
+    assert.equal(fs.existsSync(original), false);
+    assert.equal(fs.existsSync(path.join(movie, "Alone.DV7")), true);
+    assert.equal(fs.existsSync(path.join(movie, "Film.DV5")), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    db.close();
   }
 });
 

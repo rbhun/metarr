@@ -106,11 +106,14 @@ test("probe output, progress lines, and the result check", () => {
 test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   const db = new Database(":memory:");
   migrate(db);
-  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 1, endHour: 7, firstLanguage: "Hungarian", deleteOld: false });
+  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 1, endHour: 7, firstLanguage: "Hungarian", deleteOld: false, doviWatch: false, doviDeleteOld: false });
   writeRewrapSettings(db, { startHour: 22, endHour: 4, firstLanguage: "" });
-  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 22, endHour: 4, firstLanguage: "", deleteOld: false });
+  assert.deepEqual(readRewrapSettings(db), { enabled: true, startHour: 22, endHour: 4, firstLanguage: "", deleteOld: false, doviWatch: false, doviDeleteOld: false });
   writeRewrapSettings(db, { deleteOld: true });
   assert.equal(readRewrapSettings(db).deleteOld, true);
+  writeRewrapSettings(db, { doviWatch: true, doviDeleteOld: true });
+  assert.equal(readRewrapSettings(db).doviWatch, true);
+  assert.equal(readRewrapSettings(db).doviDeleteOld, true);
   assert.equal(parseFirstLanguage("Klingonish"), null);
   assert.equal(parseFirstLanguage(" hun "), "hun");
   assert.equal(parseFirstLanguage(""), "");

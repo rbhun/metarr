@@ -7,6 +7,7 @@ import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
 import { detectCounts, moveDetections, readDetectSettings } from "@/lib/detect/store";
 import { convertDolbyVision } from "@/lib/dovi/run";
+import { queueProfile7 } from "@/lib/dovi/watch";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError } from "@/lib/remux/access";
 import { remuxIsRunning } from "@/lib/remux/store";
@@ -180,7 +181,7 @@ function waiting(db: ReturnType<typeof getDb>): boolean {
 }
 
 /** The picture is written to scratch once as a bare stream, then muxed there with the audio. */
-async function convertDovi(db: ReturnType<typeof getDb>, id: number, libraryPath: string, local: string, workDir: string) {
+async function convertDovi(db: ReturnType<typeof getDb>, id: number, libraryPath: string, local: string, workDir: string, removeOriginal: boolean) {
   const directory = path.dirname(local);
   const rehearsal = dryRun();
   if (rehearsal) {
@@ -201,6 +202,7 @@ async function convertDovi(db: ReturnType<typeof getDb>, id: number, libraryPath
     source: local,
     workDir,
     dryRun: rehearsal,
+    removeOriginal,
     onProgress: (percent, text) => updateRewrapProgress(db, id, percent, text),
   });
   const wrote = !rehearsal && message.startsWith("Saved ");
@@ -294,7 +296,7 @@ async function step() {
       }
     }
     if (job.mode === "dovi") {
-      await convertDovi(db, job.id, job.path, local, workDir);
+      await convertDovi(db, job.id, job.path, local, workDir, settings.doviDeleteOld);
       return;
     }
     const sources = splitSourcesOnDisk(local) ?? [local];
@@ -403,6 +405,12 @@ async function loop() {
       } catch (caught) {
         console.error("Could not look for rewraps whose picture plays out of order.", caught);
       }
+    }
+    try {
+      const queued = queueProfile7(getDb());
+      if (queued > 0) console.log(`Queued ${queued} Dolby Vision 7 ${queued === 1 ? "file" : "files"} to convert to 8.1.`);
+    } catch (caught) {
+      console.error("Could not look for Dolby Vision 7 files.", caught);
     }
     await step();
   } catch (caught) {

@@ -747,7 +747,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
               variant="outline"
               disabled={rewrapBusy}
               onClick={() => void rewrapSelected("dovi")}
-              title="Convert each selected Dolby Vision 7 file to 8.1 and each Dolby Vision 5 file to an Apple MP4, without re-encoding. The originals are kept as .DV7 or .DV5"
+              title="Convert each selected Dolby Vision 7 file to 8.1 and each Dolby Vision 5 file to an Apple MP4, without re-encoding. The original is kept as .DV7 or .DV5 unless Delete old files is on in Settings"
             >
               Convert Dolby Vision
             </Button>

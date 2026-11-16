@@ -4,6 +4,7 @@ import { AuthSettingsCard } from "@/components/auth-settings";
 import { BackupSettingsCard } from "@/components/backup-settings";
 import { useShell } from "@/components/app-shell";
 import { DetectSettingsCard } from "@/components/detect-settings";
+import { DoviSettingsCard } from "@/components/dovi-settings";
 import { FolderScanCard } from "@/components/folder-scan-settings";
 import { MergeSettingsCard } from "@/components/merge-settings";
 import { RemuxSettingsCard } from "@/components/remux-settings";
@@ -690,6 +691,7 @@ export function SettingsView() {
           <SubtitleTimingSettingsCard />
           <RemuxSettingsCard />
           <RewrapSettingsCard />
+          <DoviSettingsCard />
           <MergeSettingsCard />
         </div>
 

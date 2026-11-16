@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.216
+
+- Watch the library for Dolby Vision 7 and convert it to 8.1, with a setting to delete the .DV7 original and a button for leftovers already beside the movie.
+
 ## 0.0.215
 
 - Redo every finished AVI copy whose frames step backwards, and split packed frames even when the DivX mark is missing. A Mac player can hide that, and an Apple TV conversion cannot.

@@ -332,7 +332,7 @@ export function TitleDetail({
                     title={
                       doviFive
                         ? "Copy the Dolby Vision 5 video into an Apple MP4, which the Apple TV plays. The picture is not re-encoded; the MP4 takes the file's name and the original is kept as .DV5"
-                        : "Write a Dolby Vision 8.1 copy, which the Apple TV plays. The picture is not re-encoded; the copy takes the file's name and the original is kept as .DV7"
+                        : "Write a Dolby Vision 8.1 copy, which the Apple TV plays. The picture is not re-encoded; the copy takes the file's name and the original is kept as .DV7 unless Delete old files is on in Settings"
                     }
                   >
                     {convertBusy ? "Starting…" : doviFive ? "Convert DV5 to Apple MP4" : "Convert DV7 to 8.1"}
