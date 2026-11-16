@@ -26,6 +26,8 @@ export type RewrapItem = {
   languages?: Array<string | null>;
   /** Known language per subtitle stream inside the file, in file order. */
   subtitleLanguages?: Array<string | null>;
+  /** Make the MKV again from the original, instead of only writing languages onto the copy that is already there. */
+  rebuild?: boolean;
 };
 
 export type RewrapJob = {
@@ -37,6 +39,8 @@ export type RewrapJob = {
   subtitleLanguages: Array<string | null>;
   /** Move the original aside after the MKV is saved, so Plex plays the copy that carries the language. */
   replaceSource: boolean;
+  /** Copy the picture again from the original, even when the first seconds of the MKV look smooth. */
+  rebuild: boolean;
 };
 
 export type RewrapJobStatus = "pending" | "running" | "done" | "failed";
@@ -70,6 +74,7 @@ type JobRow = {
   started_at: string | null;
   finished_at: string | null;
   replace_source?: number;
+  rebuild?: number;
 };
 
 const DEFAULT_FIRST_LANGUAGE = "Hungarian";
@@ -139,9 +144,11 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   const existing = db.prepare(
     `SELECT status, immediate FROM rewrap_jobs WHERE path = ? AND mode = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`,
   );
-  const promote = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE path = ? AND mode = ? AND status = 'pending'`);
+  const promote = db.prepare(
+    `UPDATE rewrap_jobs SET immediate = 1, rebuild = CASE WHEN ? = 1 THEN 1 ELSE rebuild END WHERE path = ? AND mode = ? AND status = 'pending'`,
+  );
   const insert = db.prepare(
-    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at, replace_source) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0)`,
+    `INSERT INTO rewrap_jobs (path, mode, label, languages, immediate, status, created_at, replace_source, rebuild) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?)`,
   );
   const now = new Date().toISOString();
   let added = 0;
@@ -158,7 +165,10 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
       const row = existing.get(filePath, mode) as { status: string; immediate: number } | undefined;
       if (row) {
         if (immediate && row.status === "pending" && row.immediate !== 1) {
-          promote.run(filePath, mode);
+          promote.run(item.rebuild ? 1 : 0, filePath, mode);
+          promoted += 1;
+        } else if (item.rebuild && row.status === "pending") {
+          promote.run(1, filePath, mode);
           promoted += 1;
         } else {
           already += 1;
@@ -169,7 +179,7 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
       const languages = item.subtitleLanguages?.length
         ? { audio: item.languages ?? [], subtitles: item.subtitleLanguages }
         : (item.languages ?? []);
-      insert.run(filePath, mode, label, JSON.stringify(languages), immediate ? 1 : 0, now);
+      insert.run(filePath, mode, label, JSON.stringify(languages), immediate ? 1 : 0, now, item.rebuild ? 1 : 0);
       added += 1;
     }
   });
@@ -241,6 +251,7 @@ export function claimNextRewrap(db: Database.Database, onlyImmediate = false): R
     languages: languages.audio,
     subtitleLanguages: languages.subtitles,
     replaceSource: row.replace_source === 1,
+    rebuild: row.rebuild === 1,
   };
 }
 

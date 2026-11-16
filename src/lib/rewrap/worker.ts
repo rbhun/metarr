@@ -263,8 +263,11 @@ async function step() {
     if (!local) {
       const mkv = resolveMediaPath(rewrapTarget(job.path), maps, existsFile);
       const kept = resolveMediaPath(`${job.path}.metarr-orig`, maps, existsFile);
-      if (kept && mkv && !dryRun() && (await pictureJumps(mkv))) {
+      if (kept && mkv && !dryRun() && (job.rebuild || (await pictureJumps(mkv)))) {
         local = kept;
+      } else if (job.rebuild) {
+        finishRewrap(db, job.id, "failed", "The original file is gone, so the picture cannot be copied again.");
+        return;
       } else {
         if (!mkv) {
           finishRewrap(db, job.id, "failed", `Cannot open ${job.path}. Add a path mapping in Settings if Plex uses a different path.`);
@@ -308,7 +311,7 @@ async function step() {
     const singleTarget = sources.length === 1 ? rewrapTarget(local) : null;
     let replacePicture = false;
     if (singleTarget && fs.existsSync(singleTarget)) {
-      replacePicture = !rehearsal && (await pictureJumps(singleTarget));
+      replacePicture = !rehearsal && (job.rebuild || (await pictureJumps(singleTarget)));
       if (!replacePicture) {
         if (!rehearsal) await tagMkvLanguages(singleTarget, languages);
         const kept = putOriginalsAway([local], singleTarget, !rehearsal && settings.deleteOld, !rehearsal && job.replaceSource);

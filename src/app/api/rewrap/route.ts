@@ -41,7 +41,7 @@ function itemList(value: unknown): RewrapItem[] {
     const filePath = typeof record.path === "string" ? record.path.trim() : "";
     if (!filePath) continue;
     const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
-    items.push({ path: filePath, label });
+    items.push({ path: filePath, label, rebuild: record.rebuild === true });
   }
   return items;
 }

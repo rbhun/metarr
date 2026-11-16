@@ -5,7 +5,7 @@ import type { AudioTrack, SubtitleTrack } from "@/lib/types";
 import { finishedRewrapPaths, type RewrapItem } from "@/lib/rewrap/store";
 import { doviTarget } from "@/lib/dovi/run";
 import { needsDoviConversion } from "@/lib/media";
-import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrappedPathFor } from "@/lib/rewrap/source";
+import { canRewrap, joinedTarget, orderedSplit, rewrapFamily, rewrapSplit, rewrapTarget, rewrappedPathFor, withoutKeptOriginal } from "@/lib/rewrap/source";
 
 export type RewrapCandidateView = {
   path: string;
@@ -103,16 +103,24 @@ function rewrapPaths(file: LibraryMedia): RewrapItem[] {
   return found;
 }
 
+function cover(seen: Set<string>, filePath: string) {
+  seen.add(filePath.toLowerCase());
+  seen.add(withoutKeptOriginal(filePath).toLowerCase());
+  seen.add(rewrapTarget(filePath).toLowerCase());
+}
+
 export function listRewrapCandidates(db: Database.Database): RewrapCandidateView[] {
   const seen = new Set<string>();
   const finished = finishedRewrapPaths(db);
+  const originalForMkv = new Map<string, string>();
+  for (const filePath of finished) originalForMkv.set(rewrapTarget(filePath).toLowerCase(), filePath);
   const candidates: RewrapCandidateView[] = [];
   for (const file of librarySnapshot(db).files) {
     const paths = [file.path, ...file.versions.map((version) => version.path)];
     for (const group of bundleRewraps(rewrapPaths(file))) {
       const lead = group[0];
-      if (!lead || seen.has(lead.path)) continue;
-      for (const item of group) seen.add(item.path);
+      if (!lead || seen.has(lead.path.toLowerCase())) continue;
+      for (const item of group) cover(seen, item.path);
       const joined = group.length > 1 ? joinedTarget(lead.path) : null;
       const joinedKnown = Boolean(joined && paths.some((item) => samePath(item, joined)));
       const eachDone = group.every((item) => finished.has(item.path) || Boolean(rewrappedPathFor(item.path, paths)));
@@ -123,6 +131,20 @@ export function listRewrapCandidates(db: Database.Database): RewrapCandidateView
         label: lead.label ?? lead.path,
         converted: group.length > 1 ? joinedKnown || eachDone : Boolean(convertedPath) || finished.has(lead.path),
         convertedPath,
+        titleId: file.titleId ?? null,
+      });
+    }
+    for (const mediaPath of paths) {
+      if (!mediaPath) continue;
+      const original = originalForMkv.get(mediaPath.toLowerCase());
+      if (!original || seen.has(original.toLowerCase()) || seen.has(mediaPath.toLowerCase())) continue;
+      cover(seen, original);
+      candidates.push({
+        path: original,
+        paths: [original],
+        label: file.label,
+        converted: true,
+        convertedPath: mediaPath,
         titleId: file.titleId ?? null,
       });
     }

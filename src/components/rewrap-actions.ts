@@ -27,7 +27,7 @@ function describe(payload: RewrapResponse, immediate: boolean): string {
   return `Queued ${files} for Tasks. They run one at a time during the MKV rewrap hours.${rest}`;
 }
 
-export async function enqueueRewrapPaths(paths: Array<{ path: string; label?: string }>, immediate = false): Promise<string> {
+export async function enqueueRewrapPaths(paths: Array<{ path: string; label?: string; rebuild?: boolean }>, immediate = false): Promise<string> {
   return describe(await postRewrap({ paths, immediate }), immediate);
 }
 

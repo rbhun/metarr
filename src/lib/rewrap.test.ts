@@ -8,8 +8,8 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { listTaskJobs } from "@/lib/tasks";
-import { avisFromFile, bundleRewraps } from "@/lib/rewrap/candidates";
-import { checkRewrap, framesJumpBack, packedMarker, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
+import { avisFromFile, bundleRewraps, listRewrapCandidates } from "@/lib/rewrap/candidates";
+import { checkRewrap, framesJumpBack, jumpIntervals, packedMarker, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
 import { deleteAllOldFiles, supersededByMkv } from "@/lib/rewrap/old-files";
 import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import { queueShakyRewraps } from "@/lib/rewrap/worker";
@@ -124,12 +124,16 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.equal(enqueueRewraps(db, [{ path: "/m/Film.avi" }], true).already, 1);
   assert.equal(hasImmediateRewrap(db), true);
   const first = claimNextRewrap(db, true);
-  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", mode: "rewrap", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [], replaceSource: false });
+  assert.deepEqual(first, { id: 2, path: "/m/Film.avi", mode: "rewrap", label: "Film (1999)", languages: ["hun"], subtitleLanguages: [], replaceSource: false, rebuild: false });
   finishRewrap(db, first!.id, "done", "Saved Film.mkv.");
+  enqueueRewraps(db, [{ path: "/m/Film.avi", rebuild: true }], true);
+  const again = claimNextRewrap(db, true);
+  assert.equal(again?.rebuild, true);
+  finishRewrap(db, again!.id, "done", "Replaced Film.mkv.");
   const old = claimNextRewrap(db);
   assert.equal(old?.label, "Old.avi");
   finishRewrap(db, old!.id, "failed", "");
-  assert.deepEqual(rewrapTotals(db), { pending: 0, running: 0, done: 1, failed: 1 });
+  assert.deepEqual(rewrapTotals(db), { pending: 0, running: 0, done: 2, failed: 1 });
   const shown = listTaskJobs(db, { queue: "rewrap", status: "all", page: 1, pageSize: 10 });
   assert.ok(shown.jobs.length > 0);
   assert.ok(shown.jobs.every((job) => job.tag === "Rewrap"));
@@ -137,6 +141,34 @@ test("the rewrap queue has its own hours, and Rewrap now jumps ahead", () => {
   assert.equal(retryFailedRewrap(db, old!.id), "retried");
   assert.equal(rewrapTotals(db).pending, 1);
   db.close();
+});
+
+test("a movie Plex lists only as an MKV stays on the rewrap list", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO catalog_titles (kind, title, sort_title, year, path, container, playable_label) VALUES ('movie', 'Anamorph', 'anamorph', 2007, '/m/rtz6-nmrph.mkv', 'mkv', 'video')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO rewrap_jobs (path, label, languages, status, created_at, finished_at, mode) VALUES ('/m/rtz6-nmrph.avi', 'Anamorph', '[]', 'done', ?, ?, 'rewrap')`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO catalog_titles (kind, title, sort_title, path, container, playable_label) VALUES ('movie', 'Other', 'other', '/m/Other.mkv', 'mkv', 'video')`,
+  ).run();
+  const rows = listRewrapCandidates(db);
+  assert.deepEqual(
+    rows.map((row) => [row.label, row.path, row.converted, row.convertedPath]),
+    [["Anamorph (2007)", "/m/rtz6-nmrph.avi", true, "/m/rtz6-nmrph.mkv"]],
+  );
+  db.close();
+});
+
+test("frame-order checks look past the opening when the file is long enough", () => {
+  assert.equal(jumpIntervals(4), "%+5");
+  assert.equal(jumpIntervals(null), "%+5");
+  assert.equal(jumpIntervals(120), "%+5,45%+5");
+  assert.equal(jumpIntervals(7200), "%+5,45%+5,180%+5,600%+5,1800%+5");
 });
 
 test("deinterlace and Dolby Vision reconvert are tagged apart from a rewrap", () => {

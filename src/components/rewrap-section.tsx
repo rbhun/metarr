@@ -121,7 +121,7 @@ export function RewrapSection() {
     });
   }
 
-  async function send(paths: Array<{ path: string; label?: string }>, immediate: boolean) {
+  async function send(paths: Array<{ path: string; label?: string; rebuild?: boolean }>, immediate: boolean) {
     if (paths.length < 1 || sending) return;
     setSending(true);
     try {
@@ -268,7 +268,7 @@ export function RewrapSection() {
           <div>
             <h3 className="text-sm font-medium">Already rewrapped</h3>
             <p className="text-xs text-muted-foreground">
-              These files have their MKV. Redo makes that MKV again; a copy whose picture jumps is replaced, and the original stays.
+              These files have their MKV. Redo copies the picture again from the original AVI, including one Plex now lists only as an MKV.
             </p>
           </div>
           <ul className="divide-y overflow-hidden rounded-lg border">
@@ -290,8 +290,8 @@ export function RewrapSection() {
                     variant="outline"
                     className="h-7"
                     disabled={sending}
-                    title="Make the MKV again. A copy whose picture jumps back and forth is replaced."
-                    onClick={() => void send([{ path: file.path, label: file.label }], true)}
+                    title="Copy the picture again from the original. The MKV is replaced."
+                    onClick={() => void send([{ path: file.path, label: file.label, rebuild: true }], true)}
                   >
                     Redo
                   </Button>

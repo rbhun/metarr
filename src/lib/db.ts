@@ -328,6 +328,7 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "detect_results", "log", "TEXT");
   ensureColumn(db, "detect_results", "write_stuck_at", "TEXT");
   ensureColumn(db, "rewrap_jobs", "replace_source", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "rewrap_jobs", "rebuild", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "enrichment", "episode_titles", "TEXT NOT NULL DEFAULT '{}'");

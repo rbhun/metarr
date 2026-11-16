@@ -150,11 +150,32 @@ export function unpackArgs(input: string, output: string, concat: boolean): stri
   return args;
 }
 
-/** True when the first seconds of decoded frames step backwards, which is a pan jumping back a frame. */
+/**
+ * Windows of the picture to check, in ffprobe interval form. A logo at the start has no
+ * packed B-frames, so a later pan is checked too. A file shorter than a window skips it.
+ */
+export function jumpIntervals(duration: number | null): string {
+  const windows = ["%+5"];
+  for (const start of [45, 180, 600, 1800]) {
+    if (duration == null || duration < start + 8) continue;
+    windows.push(`${start}%+5`);
+  }
+  return windows.join(",");
+}
+
+/** True when decoded frames step backwards, which is a pan jumping back a frame. */
 export async function framesJumpBack(file: string): Promise<boolean> {
+  let duration: number | null = null;
+  try {
+    const header = await runTool("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file], PROBE_TIMEOUT_MS);
+    const parsed = Number(header.trim().split(/\r?\n/).find((line) => line.trim()) ?? "");
+    duration = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    duration = null;
+  }
   const output = await runTool(
     "ffprobe",
-    ["-v", "error", "-select_streams", "v:0", "-read_intervals", "%+3", "-show_frames", "-show_entries", "frame=pts_time", "-of", "csv=p=0", file],
+    ["-v", "error", "-select_streams", "v:0", "-read_intervals", jumpIntervals(duration), "-show_frames", "-show_entries", "frame=pts_time", "-of", "csv=p=0", file],
     PROBE_TIMEOUT_MS,
   );
   let previous: number | null = null;

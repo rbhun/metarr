@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.212
+
+- Show a rewrapped movie in Rips after Plex only has the MKV, and make Redo copy the picture again from the original. A language update was rewriting the MKV without touching the frames, so a jagged pan stayed.
+
 ## 0.0.211
 
 - Download MakeMKV 1.18.4 from the Internet Archive and check its published checksum. The official site is ending the binary archive after 17 KB, so tar stopped with an unexpected end of file.
