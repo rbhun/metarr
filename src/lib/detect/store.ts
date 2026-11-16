@@ -175,6 +175,15 @@ export function claimNextJob(db: Database.Database, allowWindow: boolean): Detec
   return mapJob({ ...row, status: "running", message: null });
 }
 
+/** Start one waiting language check now. The overnight window stays as it is. */
+export function forceDetectJob(db: Database.Database, id: number): "forced" | "missing" | "already" {
+  const row = db.prepare(`SELECT status, priority FROM detect_jobs WHERE id = ?`).get(id) as { status: string; priority: string } | undefined;
+  if (!row || row.status !== "pending") return "missing";
+  if (row.priority === "immediate") return "already";
+  const changed = db.prepare(`UPDATE detect_jobs SET priority = 'immediate' WHERE id = ? AND status = 'pending' AND priority != 'immediate'`).run(id);
+  return changed.changes === 1 ? "forced" : "already";
+}
+
 export function retryFailedJob(db: Database.Database, id: number): "retried" | "missing" | "already" {
   const row = db.prepare(`SELECT path, kind, ordinal, status FROM detect_jobs WHERE id = ?`).get(id) as
     | { path: string; kind: string; ordinal: number; status: string }

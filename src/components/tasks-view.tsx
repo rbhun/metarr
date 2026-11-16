@@ -161,6 +161,7 @@ export function TasksView() {
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [forcing, setForcing] = useState<string | null>(null);
   const [redoing, setRedoing] = useState<string | null>(null);
   const [redoingAll, setRedoingAll] = useState(false);
   const loadingList = useRef<string | null>(null);
@@ -276,6 +277,26 @@ export function TasksView() {
       toast.error(caught instanceof Error ? caught.message : "Those tasks could not be redone.");
     } finally {
       setRedoingAll(false);
+    }
+  }
+
+  async function forceJob(job: TaskJob) {
+    if (job.status !== "pending" || job.priority === "immediate" || job.queue === "merge" || forcing || removing || redoing) return;
+    setForcing(job.key);
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "force", queue: job.queue, id: job.id }),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
+      if (!response.ok) throw new Error(body?.error || "That task could not be started.");
+      toast.success(body?.result === "already" ? "That task is already set to start now." : "Starting now. The schedule window stays as it is.");
+      await load();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "That task could not be started.");
+    } finally {
+      setForcing(null);
     }
   }
 
@@ -403,15 +424,26 @@ export function TasksView() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {job.status === "failed" ? (
-                      <Button size="sm" variant="outline" disabled={redoing === job.key || removing === job.key} onClick={() => void redoJob(job)}>
+                      <Button size="sm" variant="outline" disabled={redoing === job.key || removing === job.key || forcing === job.key} onClick={() => void redoJob(job)}>
                         {redoing === job.key ? "Queuing…" : "Redo"}
+                      </Button>
+                    ) : null}
+                    {job.status === "pending" && job.queue !== "merge" && job.priority !== "immediate" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={forcing === job.key || removing === job.key || redoing === job.key}
+                        onClick={() => void forceJob(job)}
+                        title="Start this now. The schedule window stays as it is."
+                      >
+                        {forcing === job.key ? "Starting…" : "Force"}
                       </Button>
                     ) : null}
                     {job.status === "pending" || job.status === "failed" ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={removing === job.key || redoing === job.key}
+                        disabled={removing === job.key || redoing === job.key || forcing === job.key}
                         onClick={() => void removeJob(job)}
                         title={job.status === "pending" ? "Remove this job from the waiting list" : "Remove this failed job from the list"}
                       >

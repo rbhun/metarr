@@ -18,6 +18,7 @@ import {
   parseLanguages,
   enqueueRewraps,
   finishRewrap,
+  forceRewrap,
   finishedRewrapPaths,
   hasImmediateRewrap,
   parseFirstLanguage,
@@ -169,6 +170,20 @@ test("frame-order checks look past the opening when the file is long enough", ()
   assert.equal(jumpIntervals(null), "%+5");
   assert.equal(jumpIntervals(120), "%+5,45%+5");
   assert.equal(jumpIntervals(7200), "%+5,45%+5,180%+5,600%+5,1800%+5");
+});
+
+test("force starts a waiting rewrap without changing the window", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueRewraps(db, [{ path: "/m/Film.avi", label: "Film" }]);
+  const waiting = listTaskJobs(db, { queue: "rewrap", status: "pending", page: 1, pageSize: 10 });
+  assert.equal(waiting.jobs[0]?.priority, "window");
+  assert.equal(forceRewrap(db, waiting.jobs[0]!.id), "forced");
+  assert.equal(forceRewrap(db, waiting.jobs[0]!.id), "already");
+  const started = listTaskJobs(db, { queue: "rewrap", status: "pending", page: 1, pageSize: 10 });
+  assert.equal(started.jobs[0]?.priority, "immediate");
+  assert.equal(forceRewrap(db, 999), "missing");
+  db.close();
 });
 
 test("deinterlace and Dolby Vision reconvert are tagged apart from a rewrap", () => {

@@ -53,6 +53,7 @@ export type RewrapJobView = {
   status: RewrapJobStatus;
   message: string | null;
   progress: number | null;
+  immediate: boolean;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -291,6 +292,15 @@ export function finishRewrap(db: Database.Database, id: number, status: "done" |
   db.prepare(`UPDATE rewrap_jobs SET status = ?, message = ?, progress = NULL, finished_at = ? WHERE id = ?`).run(status, text, new Date().toISOString(), id);
 }
 
+/** Start one waiting rewrap now. The schedule window stays as it is. */
+export function forceRewrap(db: Database.Database, id: number): "forced" | "missing" | "already" {
+  const row = db.prepare(`SELECT status, immediate FROM rewrap_jobs WHERE id = ?`).get(id) as { status: string; immediate: number } | undefined;
+  if (!row || row.status !== "pending") return "missing";
+  if (row.immediate === 1) return "already";
+  const changed = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE id = ? AND status = 'pending' AND immediate = 0`).run(id);
+  return changed.changes === 1 ? "forced" : "already";
+}
+
 export function retryFailedRewrap(db: Database.Database, id: number): "retried" | "missing" | "already" {
   const row = db.prepare(`SELECT path, mode, status FROM rewrap_jobs WHERE id = ?`).get(id) as { path: string; mode: string; status: string } | undefined;
   if (!row || row.status !== "failed") return "missing";
@@ -391,6 +401,7 @@ function mapView(row: JobRow): RewrapJobView {
     status: row.status as RewrapJobStatus,
     message: row.message,
     progress: row.progress,
+    immediate: row.immediate === 1,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,

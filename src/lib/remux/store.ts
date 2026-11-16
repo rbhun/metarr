@@ -176,6 +176,15 @@ export function updateRemuxProgress(db: Database.Database, id: number, progress:
   db.prepare(`UPDATE remux_jobs SET progress = ?, message = ? WHERE id = ? AND status = 'running'`).run(progress, message.slice(0, 500), id);
 }
 
+/** Start one waiting disc now. The schedule window stays as it is. */
+export function forceRemux(db: Database.Database, id: number): "forced" | "missing" | "already" {
+  const row = db.prepare(`SELECT status, immediate FROM remux_jobs WHERE id = ?`).get(id) as { status: string; immediate: number } | undefined;
+  if (!row || row.status !== "pending") return "missing";
+  if (row.immediate === 1) return "already";
+  const changed = db.prepare(`UPDATE remux_jobs SET immediate = 1 WHERE id = ? AND status = 'pending' AND immediate = 0`).run(id);
+  return changed.changes === 1 ? "forced" : "already";
+}
+
 export function retryFailedRemux(db: Database.Database, id: number): "retried" | "missing" | "already" {
   const row = db.prepare(`SELECT path, status FROM remux_jobs WHERE id = ?`).get(id) as { path: string; status: string } | undefined;
   if (!row || row.status !== "failed") return "missing";
@@ -255,6 +264,7 @@ export type RemuxJobView = {
   status: RemuxJobStatus;
   message: string | null;
   progress: number | null;
+  immediate: boolean;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -291,6 +301,7 @@ function mapRemuxRow(row: JobRow): RemuxJobView {
     status: row.status as RemuxJobStatus,
     message: row.message,
     progress: row.progress,
+    immediate: row.immediate === 1,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,

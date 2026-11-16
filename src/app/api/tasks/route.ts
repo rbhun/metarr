@@ -1,9 +1,9 @@
-import { clearJobs, detectCounts, jobTotals as languageTotals, removeJob, retryAllFailedJobs, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
+import { clearJobs, detectCounts, forceDetectJob, jobTotals as languageTotals, removeJob, retryAllFailedJobs, retryFailedJob, type DetectJobStatus } from "@/lib/detect/store";
 import { clearMergeJobs, mergeTotals, removeMergeJob, retryAllFailedMerge, retryFailedMerge, type MergeJobStatus } from "@/lib/merge/store";
 import { kickMergeWorker, startMergeWorker } from "@/lib/merge/worker";
-import { clearRemuxJobs, remuxCounts, remuxTotals, removeRemuxJob, retryAllFailedRemux, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
+import { clearRemuxJobs, forceRemux, remuxCounts, remuxTotals, removeRemuxJob, retryAllFailedRemux, retryFailedRemux, type RemuxJobStatus } from "@/lib/remux/store";
 import { kickRemuxWorker, startRemuxWorker } from "@/lib/remux/worker";
-import { clearRewrapJobs, removeRewrapJob, retryAllFailedRewrap, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
+import { clearRewrapJobs, forceRewrap, removeRewrapJob, retryAllFailedRewrap, retryFailedRewrap, rewrapTotals, type RewrapJobStatus } from "@/lib/rewrap/store";
 import { kickRewrapWorker, startRewrapWorker } from "@/lib/rewrap/worker";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
@@ -73,6 +73,18 @@ export async function POST(request: Request) {
   const id = typeof record.id === "number" && Number.isInteger(record.id) && record.id > 0 ? record.id : null;
   if (!queue) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
   const db = getDb();
+  if (record.action === "force") {
+    if (queue === "all" || !id) return NextResponse.json({ error: "Choose a waiting task to start." }, { status: 400 });
+    if (queue === "merge") return NextResponse.json({ error: "A merge already starts as soon as it can." }, { status: 400 });
+    const result = queue === "language" ? forceDetectJob(db, id) : queue === "rewrap" ? forceRewrap(db, id) : forceRemux(db, id);
+    if (result === "missing") return NextResponse.json({ error: "That waiting task is no longer there." }, { status: 404 });
+    if (result === "forced") {
+      if (queue === "language") kickDetectWorker();
+      else if (queue === "rewrap") kickRewrapWorker();
+      else kickRemuxWorker();
+    }
+    return NextResponse.json({ result, totals: taskTotalsFor(db, queue) });
+  }
   if (redoAll) {
     let retried = 0;
     if (queue === "all" || queue === "language") retried += retryAllFailedJobs(db);

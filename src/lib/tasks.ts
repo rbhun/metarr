@@ -148,7 +148,7 @@ function mapRemux(status: RemuxJobStatus | null, page: number, pageSize: number,
       tag: "Rip",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Remux failed with no further detail from MakeMKV." : job.message,
-      priority: null,
+      priority: job.immediate ? "immediate" : "window",
       detail: job.extras ? "Disc remux · longest title and extras" : "Disc remux · longest title only",
       progress: job.progress,
       createdAt: job.createdAt,
@@ -173,7 +173,7 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
       tag: job.mode === "deinterlace" ? "Deinterlace" : job.mode === "dovi" ? "Dolby Vision" : "Rewrap",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
-      priority: null,
+      priority: job.immediate ? "immediate" : "window",
       detail:
         job.mode === "deinterlace"
           ? "AVI to MKV · deinterlaced, picture re-encoded"

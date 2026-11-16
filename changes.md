@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.213
+
+- Add Force next to Remove on a waiting task, so that one job starts now and the schedule window stays as it is.
+
 ## 0.0.212
 
 - Show a rewrapped movie in Rips after Plex only has the MKV, and make Redo copy the picture again from the original. A language update was rewriting the MKV without touching the frames, so a jagged pan stayed.
