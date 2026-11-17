@@ -3,6 +3,7 @@ import path from "node:path";
 import { detectCounts, readDetectSettings } from "@/lib/detect/store";
 import { plexLibraryBusy } from "@/lib/detect/plex";
 import { inDetectWindow } from "@/lib/detect/schedule";
+import { promoteLead } from "@/lib/tasks/order";
 import { announceFolder } from "@/lib/announce";
 import { dryRun } from "@/lib/dry-run";
 import { assertWritableDiscFolder, discFolderProblem, friendlyFsError, remuxWorkDirectory, unreadablePathMessage } from "@/lib/remux/access";
@@ -59,6 +60,7 @@ function existsMedia(candidate: string): boolean {
 async function step() {
   if (stuckTools().length) return;
   const db = getDb();
+  promoteLead(db);
   const settings = readRemuxSettings(db);
   const urgent = hasImmediateRemux(db);
   if (!urgent) {

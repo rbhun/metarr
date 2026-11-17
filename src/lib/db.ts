@@ -264,6 +264,12 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_rewrap_jobs_status ON rewrap_jobs(status, id);
 
+    CREATE TABLE IF NOT EXISTS header_language_checks (
+      path TEXT PRIMARY KEY,
+      mtime_ms INTEGER NOT NULL,
+      checked_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS merge_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       left_path TEXT NOT NULL,
@@ -329,6 +335,10 @@ export function migrate(db: Database.Database) {
   ensureColumn(db, "detect_results", "write_stuck_at", "TEXT");
   ensureColumn(db, "rewrap_jobs", "replace_source", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "rewrap_jobs", "rebuild", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "detect_jobs", "rank", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "remux_jobs", "rank", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "rewrap_jobs", "rank", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "merge_jobs", "rank", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "enrichment", "content_rating", "TEXT");
   ensureColumn(db, "enrichment", "local_titles", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "enrichment", "episode_titles", "TEXT NOT NULL DEFAULT '{}'");

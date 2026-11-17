@@ -166,7 +166,7 @@ export function enqueueMerges(db: Database.Database, items: MergeItem[]): MergeE
 }
 
 export function claimNextMerge(db: Database.Database): MergeJob | null {
-  const row = db.prepare(`SELECT * FROM merge_jobs WHERE status = 'pending' ORDER BY id LIMIT 1`).get() as JobRow | undefined;
+  const row = db.prepare(`SELECT * FROM merge_jobs WHERE status = 'pending' ORDER BY rank ASC, id LIMIT 1`).get() as JobRow | undefined;
   if (!row) return null;
   const changed = db
     .prepare(`UPDATE merge_jobs SET status = 'running', started_at = ?, message = 'Waiting to start', progress = 0 WHERE id = ? AND status = 'pending'`)
@@ -324,7 +324,7 @@ export function listMergeJobs(
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM merge_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
-      ? `SELECT * FROM merge_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      ? `SELECT * FROM merge_jobs WHERE status = ? ORDER BY rank ASC, id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM merge_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
   const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
   return { jobs: rows.map(mapView), total };

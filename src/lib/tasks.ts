@@ -5,6 +5,7 @@ import { outputDirectory } from "@/lib/remux/source";
 import { listRemuxJobs, readRemuxPause, remuxTotals, type RemuxJobStatus, type RemuxPause } from "@/lib/remux/store";
 import { listRewrapJobs, readRewrapPause, rewrapTotals, type RewrapJobStatus, type RewrapPause } from "@/lib/rewrap/store";
 import { stuckTools, stuckWaiting } from "@/lib/stuck";
+import { rankLookup } from "@/lib/tasks/order";
 import { titleIdForPath } from "@/lib/title-link";
 
 export type TaskQueue = "language" | "remux" | "rewrap" | "merge";
@@ -12,7 +13,7 @@ export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
 export type TaskStatusFilter = TaskStatus | "all";
 
 /** Short name for what a task does, shown as a tag on the Tasks page. */
-export type TaskTag = "Rip" | "Rewrap" | "Deinterlace" | "Dolby Vision" | "Text recognition" | "Soundtrack recognition" | "Merge";
+export type TaskTag = "Rip" | "Rewrap" | "Deinterlace" | "Dolby Vision" | "Header languages" | "Text recognition" | "Soundtrack recognition" | "Merge";
 
 export type TaskJob = {
   key: string;
@@ -170,7 +171,7 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
       id: job.id,
       path: job.path,
       label: job.label,
-      tag: job.mode === "deinterlace" ? "Deinterlace" : job.mode === "dovi" ? "Dolby Vision" : "Rewrap",
+      tag: job.mode === "deinterlace" ? "Deinterlace" : job.mode === "dovi" ? "Dolby Vision" : job.mode === "header" ? "Header languages" : "Rewrap",
       status: job.status,
       message: job.status === "failed" && !job.message ? "Rewrap failed with no further detail from ffmpeg." : job.message,
       priority: job.immediate ? "immediate" : "window",
@@ -179,7 +180,9 @@ function mapRewrap(status: RewrapJobStatus | null, page: number, pageSize: numbe
           ? "AVI to MKV · deinterlaced, picture re-encoded"
           : job.mode === "dovi"
             ? "Dolby Vision for Apple TV · 7 to 8.1, or 5 to MP4 · no re-encoding"
-            : "AVI or M2TS to MKV · no re-encoding",
+            : job.mode === "header"
+              ? "Write an AVI header language onto blank MKV audio tracks"
+              : "AVI or M2TS to MKV · no re-encoding",
       progress: job.progress,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
@@ -213,9 +216,15 @@ function mapMerge(status: MergeJobStatus | null, page: number, pageSize: number,
   };
 }
 
-function mergeJobs(lists: TaskJob[][], status: TaskStatusFilter): TaskJob[] {
+function mergeJobs(lists: TaskJob[][], status: TaskStatusFilter, ranks: Map<string, number>): TaskJob[] {
   const merged = lists.flat();
-  if (status === "pending") return merged.sort((a, b) => a.id - b.id || a.key.localeCompare(b.key));
+  if (status === "pending") {
+    return merged.sort((a, b) => {
+      const left = ranks.get(`${a.queue}:${a.id}`) ?? 0;
+      const right = ranks.get(`${b.queue}:${b.id}`) ?? 0;
+      return left - right || a.queue.localeCompare(b.queue) || a.id - b.id;
+    });
+  }
   if (status === "all") {
     return merged.sort(
       (a, b) => statusRank(a.status) - statusRank(b.status) || stamp(b) - stamp(a) || b.id - a.id || a.key.localeCompare(b.key),
@@ -280,7 +289,7 @@ function pageOfTaskJobs(
   const remux = mapRemux(status, 1, need, db);
   const rewrap = mapRewrap(status, 1, need, db);
   const merge = mapMerge(status, 1, need, db);
-  const merged = mergeJobs([language.jobs, remux.jobs, rewrap.jobs, merge.jobs], query.status);
+  const merged = mergeJobs([language.jobs, remux.jobs, rewrap.jobs, merge.jobs], query.status, rankLookup(db));
   const total = language.total + remux.total + rewrap.total + merge.total;
   const start = (page - 1) * pageSize;
   return { jobs: merged.slice(start, start + pageSize), total };

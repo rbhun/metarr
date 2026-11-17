@@ -15,6 +15,8 @@ import { mergeIsRunning } from "@/lib/merge/store";
 import { recognizedAudioLanguages } from "@/lib/detect/plex-copy";
 import { libraryAvis } from "@/lib/rewrap/candidates";
 import { oldCopiesBeside, removeOldFiles } from "@/lib/rewrap/old-files";
+import { queueHeaderLanguageJob, repairBlankHeaderLanguages } from "@/lib/rewrap/header-repair";
+import { promoteLead } from "@/lib/tasks/order";
 import { framesJumpBack, rewrapAvi, tagMkvLanguages, withFileLanguages } from "@/lib/rewrap/run";
 import { canRewrap, isAvi, joinedTarget, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import {
@@ -50,11 +52,13 @@ function splitSourcesOnDisk(filePath: string): string[] | null {
 }
 
 const globalForRewrap = globalThis as {
-  __metarrRewrap?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null; scanned: boolean };
+  __metarrRewrap?: { timer: NodeJS.Timeout | null; working: boolean; syncTimer: NodeJS.Timeout | null; scanned: boolean; headerQueued: boolean };
 };
 
 function state() {
-  if (!globalForRewrap.__metarrRewrap) globalForRewrap.__metarrRewrap = { timer: null, working: false, syncTimer: null, scanned: false };
+  if (!globalForRewrap.__metarrRewrap) {
+    globalForRewrap.__metarrRewrap = { timer: null, working: false, syncTimer: null, scanned: false, headerQueued: false };
+  }
   return globalForRewrap.__metarrRewrap;
 }
 
@@ -221,6 +225,7 @@ async function convertDovi(db: ReturnType<typeof getDb>, id: number, libraryPath
 async function step() {
   if (stuckTools().length) return;
   const db = getDb();
+  promoteLead(db);
   const settings = readRewrapSettings(db);
   const urgent = hasImmediateRewrap(db);
   if (!urgent) {
@@ -259,6 +264,29 @@ async function step() {
     return;
   }
   writeRewrapPause(db, null);
+  if (job.mode === "header") {
+    try {
+      let restored = 0;
+      let guard = 0;
+      let batch = { restored: 0, probed: 0 };
+      do {
+        batch = await repairBlankHeaderLanguages(db, { ignoreSchedule: true, limit: 20 });
+        restored += batch.restored;
+        guard += 1;
+        updateRewrapProgress(db, job.id, 0, restored ? `Wrote languages on ${restored} files` : "Checking the library");
+      } while (batch.probed > 0 && guard < 500);
+      const message =
+        restored === 0
+          ? "Checked the library. No blank track had a header language."
+          : `Wrote a header language onto ${restored} ${restored === 1 ? "file" : "files"}.`;
+      finishRewrap(db, job.id, "done", message);
+      if (restored > 0) syncSoon();
+    } catch (caught) {
+      const fallback = caught instanceof Error ? caught.message : "Header languages could not be written.";
+      finishRewrap(db, job.id, "failed", fallback);
+    }
+    return;
+  }
   const workDir = rewrapWorkDirectory(db.name, job.id);
   try {
     const maps = readDetectSettings(db).pathMaps;
@@ -278,7 +306,8 @@ async function step() {
         }
         const known = currentLanguages(db, job.path);
         if (!dryRun()) {
-          await tagMkvLanguages(mkv, known?.languages ?? job.languages);
+          const languages = await withFileLanguages(mkv, known?.languages ?? job.languages);
+          await tagMkvLanguages(mkv, languages);
           moveDetections(db, job.path, rewrapTarget(job.path));
         }
         const aside = !dryRun() && settings.deleteOld && kept ? removeOldFiles(oldCopiesBeside([kept], mkv, existsFile)) : "";
@@ -415,6 +444,23 @@ async function loop() {
       if (queued > 0) console.log(`Queued ${queued} Dolby Vision 7 ${queued === 1 ? "file" : "files"} to convert to 8.1.`);
     } catch (caught) {
       console.error("Could not look for Dolby Vision 7 files.", caught);
+    }
+    if (!current.headerQueued) {
+      current.headerQueued = true;
+      try {
+        if (queueHeaderLanguageJob(getDb())) console.log("Queued header languages at the front of the list.");
+      } catch (caught) {
+        console.error("Could not queue the header language sweep.", caught);
+      }
+    }
+    try {
+      const { restored } = await repairBlankHeaderLanguages(getDb());
+      if (restored > 0) {
+        console.log(`Wrote a header language onto ${restored} MKV ${restored === 1 ? "file" : "files"}.`);
+        syncSoon();
+      }
+    } catch (caught) {
+      console.error("Could not write header languages onto blank MKV tracks.", caught);
     }
     await step();
   } catch (caught) {

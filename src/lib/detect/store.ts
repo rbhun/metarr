@@ -3,6 +3,7 @@ import type { PathMap } from "@/lib/detect/paths";
 import { parsePathMaps } from "@/lib/detect/paths";
 import { clampHour } from "@/lib/detect/schedule";
 import type { DetectTarget } from "@/lib/detect/targets";
+import { placeAtFront, placeGroupAtFront } from "@/lib/tasks/order";
 
 export type DetectPriority = "immediate" | "window";
 export type DetectJobStatus = "pending" | "running" | "done" | "failed" | "skipped";
@@ -120,19 +121,23 @@ export function enqueueTargets(db: Database.Database, targets: DetectTarget[], p
   const now = new Date().toISOString();
   let added = 0;
   let already = 0;
+  const front: number[] = [];
   const write = db.transaction(() => {
     for (const target of targets) {
       const row = existing.get(target.path, target.kind, target.ordinal) as { id: number; priority: string; status: string } | undefined;
       if (row) {
         if (priority === "immediate" && row.status === "pending" && row.priority !== "immediate") {
           promote.run(row.id);
+          front.push(row.id);
           added += 1;
         } else already += 1;
         continue;
       }
-      insert.run(target.path, target.kind, target.ordinal, priority, target.label, target.format, target.placement, target.streamLabel, now);
+      const inserted = insert.run(target.path, target.kind, target.ordinal, priority, target.label, target.format, target.placement, target.streamLabel, now);
+      if (priority === "immediate") front.push(Number(inserted.lastInsertRowid));
       added += 1;
     }
+    placeGroupAtFront(db, "language", front);
   });
   write();
   return { added, already };
@@ -162,7 +167,7 @@ export function claimNextJob(db: Database.Database, allowWindow: boolean): Detec
     .prepare(
       `SELECT * FROM detect_jobs
        WHERE status = 'pending' AND (priority = 'immediate' OR (? = 1 AND priority = 'window'))
-       ORDER BY CASE priority WHEN 'immediate' THEN 0 ELSE 1 END, id
+       ORDER BY CASE priority WHEN 'immediate' THEN 0 ELSE 1 END, rank ASC, id
        LIMIT 1`,
     )
     .get(allowWindow ? 1 : 0) as JobRow | undefined;
@@ -180,6 +185,7 @@ export function forceDetectJob(db: Database.Database, id: number): "forced" | "m
   const row = db.prepare(`SELECT status, priority FROM detect_jobs WHERE id = ?`).get(id) as { status: string; priority: string } | undefined;
   if (!row || row.status !== "pending") return "missing";
   if (row.priority === "immediate") return "already";
+  placeAtFront(db, "language", id);
   const changed = db.prepare(`UPDATE detect_jobs SET priority = 'immediate' WHERE id = ? AND status = 'pending' AND priority != 'immediate'`).run(id);
   return changed.changes === 1 ? "forced" : "already";
 }
@@ -442,7 +448,7 @@ export function listJobs(
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM detect_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
-      ? `SELECT * FROM detect_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      ? `SELECT * FROM detect_jobs WHERE status = ? ORDER BY rank ASC, id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM detect_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
   const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
   return { jobs: rows.map(mapJob), total };

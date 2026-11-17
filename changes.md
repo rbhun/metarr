@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.219
+
+- Waiting tasks can be moved up or down. The one at the front starts immediately, without waiting for the schedule. The header-language repair is placed at the front.
+
+## 0.0.218
+
+- During rewrap hours, write an AVI header language onto an MKV audio track that is still blank, so those titles do not have to be queued one by one. A track that already has a language is left as it is.
+
 ## 0.0.217
 
 - Keep an audio language stored in an AVI header, such as IAS1, and write it on the MKV track Plex reads. A blank track can still be listened to. A label the file already has is not replaced with an undetermined one.

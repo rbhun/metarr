@@ -2,6 +2,7 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { clampHour } from "@/lib/detect/schedule";
 import { languageCode } from "@/lib/media";
+import { placeAtFront, placeGroupAtFront } from "@/lib/tasks/order";
 
 export type RewrapPause = "window" | "plex" | "detect" | "remux" | "merge" | "off";
 
@@ -19,8 +20,8 @@ export type RewrapSettings = {
   doviDeleteOld: boolean;
 };
 
-/** `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV beside a profile 7 file. */
-export type RewrapMode = "rewrap" | "dovi";
+/** `rewrap` copies a file into an MKV; `dovi` writes a Dolby Vision 8.1 MKV; `header` writes AVI header languages onto blank tracks. */
+export type RewrapMode = "rewrap" | "dovi" | "header";
 
 export type RewrapItem = {
   path: string;
@@ -53,7 +54,7 @@ export type RewrapJobView = {
   id: number;
   path: string;
   label: string;
-  mode: "rewrap" | "dovi" | "deinterlace";
+  mode: "rewrap" | "dovi" | "deinterlace" | "header";
   status: RewrapJobStatus;
   message: string | null;
   progress: number | null;
@@ -85,7 +86,9 @@ type JobRow = {
 const DEFAULT_FIRST_LANGUAGE = "Hungarian";
 
 function modeOf(value: unknown): RewrapMode {
-  return value === "dovi" ? "dovi" : "rewrap";
+  if (value === "dovi") return "dovi";
+  if (value === "header") return "header";
+  return "rewrap";
 }
 
 function meta(db: Database.Database, key: string): string | null {
@@ -151,7 +154,7 @@ export type RewrapEnqueueResult = { added: number; already: number; promoted: nu
 /** `immediate` jobs skip the schedule window and the busy pauses; a waiting job for the same file is moved up. */
 export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immediate = false): RewrapEnqueueResult {
   const existing = db.prepare(
-    `SELECT status, immediate FROM rewrap_jobs WHERE path = ? AND mode = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`,
+    `SELECT id, status, immediate FROM rewrap_jobs WHERE path = ? AND mode = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`,
   );
   const promote = db.prepare(
     `UPDATE rewrap_jobs SET immediate = 1, rebuild = CASE WHEN ? = 1 THEN 1 ELSE rebuild END WHERE path = ? AND mode = ? AND status = 'pending'`,
@@ -164,6 +167,7 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
   let already = 0;
   let promoted = 0;
   const seen = new Set<string>();
+  const front: number[] = [];
   const write = db.transaction(() => {
     for (const item of items) {
       const filePath = item.path.trim();
@@ -171,10 +175,11 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
       const key = `${mode}:${filePath}`;
       if (!filePath || seen.has(key)) continue;
       seen.add(key);
-      const row = existing.get(filePath, mode) as { status: string; immediate: number } | undefined;
+      const row = existing.get(filePath, mode) as { id: number; status: string; immediate: number } | undefined;
       if (row) {
         if (immediate && row.status === "pending" && row.immediate !== 1) {
           promote.run(item.rebuild ? 1 : 0, filePath, mode);
+          front.push(row.id);
           promoted += 1;
         } else if (item.rebuild && row.status === "pending") {
           promote.run(1, filePath, mode);
@@ -188,9 +193,11 @@ export function enqueueRewraps(db: Database.Database, items: RewrapItem[], immed
       const languages = item.subtitleLanguages?.length
         ? { audio: item.languages ?? [], subtitles: item.subtitleLanguages }
         : (item.languages ?? []);
-      insert.run(filePath, mode, label, JSON.stringify(languages), immediate ? 1 : 0, now, item.rebuild ? 1 : 0);
+      const inserted = insert.run(filePath, mode, label, JSON.stringify(languages), immediate ? 1 : 0, now, item.rebuild ? 1 : 0);
+      if (immediate) front.push(Number(inserted.lastInsertRowid));
       added += 1;
     }
+    placeGroupAtFront(db, "rewrap", front);
   });
   write();
   return { added, already, promoted };
@@ -244,7 +251,7 @@ export function hasImmediateRewrap(db: Database.Database): boolean {
 /** Immediate jobs first; with `onlyImmediate`, scheduled jobs keep waiting for their window. */
 export function claimNextRewrap(db: Database.Database, onlyImmediate = false): RewrapJob | null {
   const row = db
-    .prepare(`SELECT * FROM rewrap_jobs WHERE status = 'pending' ${onlyImmediate ? "AND immediate = 1" : ""} ORDER BY immediate DESC, id LIMIT 1`)
+    .prepare(`SELECT * FROM rewrap_jobs WHERE status = 'pending' ${onlyImmediate ? "AND immediate = 1" : ""} ORDER BY immediate DESC, rank ASC, id LIMIT 1`)
     .get() as JobRow | undefined;
   if (!row) return null;
   const changed = db
@@ -300,11 +307,12 @@ export function finishRewrap(db: Database.Database, id: number, status: "done" |
   db.prepare(`UPDATE rewrap_jobs SET status = ?, message = ?, progress = NULL, finished_at = ? WHERE id = ?`).run(status, text, new Date().toISOString(), id);
 }
 
-/** Start one waiting rewrap now. The schedule window stays as it is. */
+/** Move one waiting rewrap to the front. The schedule window stays as it is for the jobs behind it. */
 export function forceRewrap(db: Database.Database, id: number): "forced" | "missing" | "already" {
   const row = db.prepare(`SELECT status, immediate FROM rewrap_jobs WHERE id = ?`).get(id) as { status: string; immediate: number } | undefined;
   if (!row || row.status !== "pending") return "missing";
   if (row.immediate === 1) return "already";
+  placeAtFront(db, "rewrap", id);
   const changed = db.prepare(`UPDATE rewrap_jobs SET immediate = 1 WHERE id = ? AND status = 'pending' AND immediate = 0`).run(id);
   return changed.changes === 1 ? "forced" : "already";
 }
@@ -405,7 +413,7 @@ function mapView(row: JobRow): RewrapJobView {
     id: row.id,
     path: row.path,
     label: row.label,
-    mode: row.mode === "dovi" || row.mode === "deinterlace" ? row.mode : "rewrap",
+    mode: row.mode === "dovi" || row.mode === "deinterlace" || row.mode === "header" ? row.mode : "rewrap",
     status: row.status as RewrapJobStatus,
     message: row.message,
     progress: row.progress,
@@ -438,7 +446,7 @@ export function listRewrapJobs(
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM rewrap_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
-      ? `SELECT * FROM rewrap_jobs WHERE status = ? ORDER BY immediate DESC, id ASC LIMIT ? OFFSET ?`
+      ? `SELECT * FROM rewrap_jobs WHERE status = ? ORDER BY rank ASC, id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM rewrap_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
   const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
   return { jobs: rows.map(mapView), total };

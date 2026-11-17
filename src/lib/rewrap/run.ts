@@ -55,6 +55,29 @@ export function parseProbe(json: string): Probe {
   };
 }
 
+/**
+ * Header languages for audio tracks that Plex would show as blank.
+ * A track that already has a language stays null, so a repair does not replace it.
+ */
+export function blankTracksFromHeader(probe: Probe): Array<string | null> {
+  const header = probe.headerLanguages ?? [];
+  return probe.streams
+    .filter((stream) => stream.codecType === "audio")
+    .map((stream, ordinal) => {
+      if (stream.language && languageCode(stream.language)) return null;
+      const tagged = header[ordinal];
+      if (tagged && languageCode(tagged)) return tagged;
+      return null;
+    });
+}
+
+/** Write an AVI header language onto each blank audio track. Returns how many tracks were tagged. */
+export async function restoreBlankHeaderLanguages(file: string): Promise<number> {
+  const filled = blankTracksFromHeader(await probe(file));
+  if (!filled.some((language) => (language ? languageCode(language) : null))) return 0;
+  return tagMkvLanguages(file, filled);
+}
+
 /** Audio languages already stored on the file, in track order. A header tag fills a track that has none. */
 export function audioLanguagesFromProbe(probe: Probe): Array<string | null> {
   const header = probe.headerLanguages ?? [];

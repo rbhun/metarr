@@ -147,8 +147,8 @@ test("Convert now jumps the queue and moves up a waiting disc", () => {
   const added = enqueuePaths(db, [{ path: "/movies/New.iso", label: "New (2020)" }], false, true);
   assert.equal(added.added, 1);
   assert.equal(hasImmediateRemux(db), true);
-  assert.equal(claimNextRemux(db, true)?.label, "Film (1999)");
   assert.equal(claimNextRemux(db, true)?.label, "New (2020)");
+  assert.equal(claimNextRemux(db, true)?.label, "Film (1999)");
   assert.equal(claimNextRemux(db, true), null);
   assert.equal(hasImmediateRemux(db), false);
   assert.equal(claimNextRemux(db)?.label, "Old (1990)");

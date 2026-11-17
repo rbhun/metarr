@@ -10,6 +10,7 @@ import { plexIsBusy } from "@/lib/detect/plex";
 import { notifyPlayers } from "@/lib/detect/publish";
 import { detectTrack } from "@/lib/detect/run";
 import { inDetectWindow, windowKey } from "@/lib/detect/schedule";
+import { promoteLead } from "@/lib/tasks/order";
 import { languageFromSubtitleName } from "@/lib/detect/sidecars";
 import {
   claimNextJob,
@@ -74,6 +75,7 @@ async function step() {
       writeWindowId(db, key);
     }
   }
+  promoteLead(db);
   const counts = detectCounts(db);
   const urgent = counts.immediate > 0;
   /** Overnight (and click-now) checks must not wait behind a backlog of file tag writes. */

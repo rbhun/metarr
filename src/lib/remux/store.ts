@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import type { ScanFile } from "@/lib/detect/targets";
 import { clampHour } from "@/lib/detect/schedule";
 import { discsFromFile } from "@/lib/remux/discs";
+import { placeAtFront, placeGroupAtFront } from "@/lib/tasks/order";
 
 export const KEEP_ALL_SELECTION = "+sel:all,-sel:mvcvideo";
 
@@ -107,7 +108,7 @@ export type EnqueueResult = { added: number; skipped: number; already: number; p
 
 /** `immediate` jobs skip the schedule window and the busy pauses; a waiting job for the same disc is moved up. */
 export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: boolean, immediate = false): EnqueueResult {
-  const existing = db.prepare(`SELECT status, immediate FROM remux_jobs WHERE path = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`);
+  const existing = db.prepare(`SELECT id, status, immediate FROM remux_jobs WHERE path = ? AND status IN ('pending', 'running') ORDER BY id LIMIT 1`);
   const promote = db.prepare(`UPDATE remux_jobs SET immediate = 1 WHERE path = ? AND status = 'pending'`);
   const insert = db.prepare(
     `INSERT INTO remux_jobs (path, label, extras, status, created_at, immediate) VALUES (?, ?, ?, 'pending', ?, ?)`,
@@ -117,6 +118,7 @@ export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: b
   let skipped = 0;
   let already = 0;
   let promoted = 0;
+  const front: number[] = [];
   const write = db.transaction(() => {
     for (const file of files) {
       const discs = discsFromFile(file);
@@ -125,20 +127,23 @@ export function enqueueDiscs(db: Database.Database, files: ScanFile[], extras: b
         continue;
       }
       for (const disc of discs) {
-        const row = existing.get(disc.path) as { status: string; immediate: number } | undefined;
+        const row = existing.get(disc.path) as { id: number; status: string; immediate: number } | undefined;
         if (row) {
           if (immediate && row.status === "pending" && row.immediate !== 1) {
             promote.run(disc.path);
+            front.push(row.id);
             promoted += 1;
           } else {
             already += 1;
           }
           continue;
         }
-        insert.run(disc.path, disc.label, extras ? 1 : 0, now, immediate ? 1 : 0);
+        const inserted = insert.run(disc.path, disc.label, extras ? 1 : 0, now, immediate ? 1 : 0);
+        if (immediate) front.push(Number(inserted.lastInsertRowid));
         added += 1;
       }
     }
+    placeGroupAtFront(db, "remux", front);
   });
   write();
   return { added, skipped, already, promoted };
@@ -162,7 +167,7 @@ export function hasImmediateRemux(db: Database.Database): boolean {
 /** Immediate jobs first; with `onlyImmediate`, scheduled jobs keep waiting for their window. */
 export function claimNextRemux(db: Database.Database, onlyImmediate = false): RemuxJob | null {
   const row = db
-    .prepare(`SELECT * FROM remux_jobs WHERE status = 'pending' ${onlyImmediate ? "AND immediate = 1" : ""} ORDER BY immediate DESC, id LIMIT 1`)
+    .prepare(`SELECT * FROM remux_jobs WHERE status = 'pending' ${onlyImmediate ? "AND immediate = 1" : ""} ORDER BY immediate DESC, rank ASC, id LIMIT 1`)
     .get() as JobRow | undefined;
   if (!row) return null;
   const changed = db
@@ -181,6 +186,7 @@ export function forceRemux(db: Database.Database, id: number): "forced" | "missi
   const row = db.prepare(`SELECT status, immediate FROM remux_jobs WHERE id = ?`).get(id) as { status: string; immediate: number } | undefined;
   if (!row || row.status !== "pending") return "missing";
   if (row.immediate === 1) return "already";
+  placeAtFront(db, "remux", id);
   const changed = db.prepare(`UPDATE remux_jobs SET immediate = 1 WHERE id = ? AND status = 'pending' AND immediate = 0`).run(id);
   return changed.changes === 1 ? "forced" : "already";
 }
@@ -330,7 +336,7 @@ export function listRemuxJobs(
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM remux_jobs WHERE status = ?`).get(query.status) as { count: number }).count;
   const sql =
     query.status === "pending"
-      ? `SELECT * FROM remux_jobs WHERE status = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      ? `SELECT * FROM remux_jobs WHERE status = ? ORDER BY rank ASC, id ASC LIMIT ? OFFSET ?`
       : `SELECT * FROM remux_jobs WHERE status = ? ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`;
   const rows = db.prepare(sql).all(query.status, pageSize, offset) as JobRow[];
   return { jobs: rows.map(mapRemuxRow), total };

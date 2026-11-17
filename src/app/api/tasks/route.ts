@@ -7,6 +7,7 @@ import { clearRewrapJobs, forceRewrap, removeRewrapJob, retryAllFailedRewrap, re
 import { kickRewrapWorker, startRewrapWorker } from "@/lib/rewrap/worker";
 import { kickDetectWorker, startDetectWorker } from "@/lib/detect/worker";
 import { listTaskJobs, taskTotalsFor, taskTotalsSum, type TaskQueue, type TaskStatus, type TaskStatusFilter } from "@/lib/tasks";
+import { moveTask, promoteLead } from "@/lib/tasks/order";
 import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
 
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
   startRewrapWorker();
   startMergeWorker();
   const db = getDb();
+  promoteLead(db);
   const url = new URL(request.url);
   const status = parseStatus(url.searchParams.get("status"));
   const rawQueue = url.searchParams.get("queue") ?? "all";
@@ -73,6 +75,22 @@ export async function POST(request: Request) {
   const id = typeof record.id === "number" && Number.isInteger(record.id) && record.id > 0 ? record.id : null;
   if (!queue) return NextResponse.json({ error: "Choose a failed task to redo." }, { status: 400 });
   const db = getDb();
+  if (record.action === "order") {
+    const direction = record.direction === "up" || record.direction === "down" || record.direction === "top" ? record.direction : null;
+    const jobQueue =
+      record.jobQueue === "language" || record.jobQueue === "remux" || record.jobQueue === "rewrap" || record.jobQueue === "merge"
+        ? record.jobQueue
+        : null;
+    if (!queue || !direction || !jobQueue || !id) return NextResponse.json({ error: "Choose a waiting task to move." }, { status: 400 });
+    const result = moveTask(db, queue, jobQueue, id, direction);
+    if (result === "missing") return NextResponse.json({ error: "That waiting task is no longer there." }, { status: 404 });
+    promoteLead(db);
+    kickDetectWorker();
+    kickRemuxWorker();
+    kickRewrapWorker();
+    kickMergeWorker();
+    return NextResponse.json({ result, totals: taskTotalsFor(db, queue) });
+  }
   if (record.action === "force") {
     if (queue === "all" || !id) return NextResponse.json({ error: "Choose a waiting task to start." }, { status: 400 });
     if (queue === "merge") return NextResponse.json({ error: "A merge already starts as soon as it can." }, { status: 400 });

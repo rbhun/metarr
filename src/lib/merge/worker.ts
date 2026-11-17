@@ -22,6 +22,7 @@ import { rewrapIsRunning } from "@/lib/rewrap/store";
 import { scratchRoot } from "@/lib/scratch";
 import { removeWorkDir, stuckTools } from "@/lib/stuck";
 import { startSync } from "@/lib/sync";
+import { leadTask, promoteLead } from "@/lib/tasks/order";
 
 const SYNC_AFTER_MS = 2 * 60 * 1000;
 
@@ -75,30 +76,34 @@ function waiting(db: ReturnType<typeof getDb>): boolean {
 async function step() {
   if (stuckTools().length) return;
   const db = getDb();
+  promoteLead(db);
   const settings = readMergeSettings(db);
-  if (!settings.enabled) {
-    writeMergePause(db, waiting(db) ? "off" : null);
-    return;
-  }
-  if (!waiting(db)) {
-    writeMergePause(db, null);
-    return;
-  }
-  if (remuxIsRunning(db)) {
-    writeMergePause(db, "remux");
-    return;
-  }
-  if (rewrapIsRunning(db)) {
-    writeMergePause(db, "rewrap");
-    return;
-  }
-  if (await plexLibraryBusy(db)) {
-    writeMergePause(db, "plex");
-    return;
-  }
-  if (detectCounts(db).running > 0) {
-    writeMergePause(db, "detect");
-    return;
+  const lead = leadTask(db);
+  if (lead?.queue !== "merge") {
+    if (!settings.enabled) {
+      writeMergePause(db, waiting(db) ? "off" : null);
+      return;
+    }
+    if (!waiting(db)) {
+      writeMergePause(db, null);
+      return;
+    }
+    if (remuxIsRunning(db)) {
+      writeMergePause(db, "remux");
+      return;
+    }
+    if (rewrapIsRunning(db)) {
+      writeMergePause(db, "rewrap");
+      return;
+    }
+    if (await plexLibraryBusy(db)) {
+      writeMergePause(db, "plex");
+      return;
+    }
+    if (detectCounts(db).running > 0) {
+      writeMergePause(db, "detect");
+      return;
+    }
   }
   const job = claimNextMerge(db);
   if (!job) {

@@ -100,11 +100,9 @@ function taskState(job: TaskJob): string {
     return job.detail.startsWith("Audio") ? "Listening" : "Reading";
   }
   if (job.status === "pending") {
+    if (job.priority === "immediate") return "Starting";
     if (job.waiting) return job.waiting;
-    // Window-priority jobs used to always say "Waiting for the window", even while
-    // the window was open and they were only next in line. Say Queued then.
-    if (job.priority === "window") return "Queued";
-    return "Starting";
+    return "Queued";
   }
   if (job.status === "failed") return "Failed";
   if (job.status === "skipped") return "Skipped";
@@ -161,7 +159,7 @@ export function TasksView() {
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
-  const [forcing, setForcing] = useState<string | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
   const [redoing, setRedoing] = useState<string | null>(null);
   const [redoingAll, setRedoingAll] = useState(false);
   const loadingList = useRef<string | null>(null);
@@ -280,23 +278,25 @@ export function TasksView() {
     }
   }
 
-  async function forceJob(job: TaskJob) {
-    if (job.status !== "pending" || job.priority === "immediate" || job.queue === "merge" || forcing || removing || redoing) return;
-    setForcing(job.key);
+  async function moveJob(job: TaskJob, direction: "up" | "down" | "top") {
+    if (job.status !== "pending" || moving || removing || redoing) return;
+    setMoving(job.key);
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "force", queue: job.queue, id: job.id }),
+        body: JSON.stringify({ action: "order", queue, jobQueue: job.queue, id: job.id, direction }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
-      if (!response.ok) throw new Error(body?.error || "That task could not be started.");
-      toast.success(body?.result === "already" ? "That task is already set to start now." : "Starting now. The schedule window stays as it is.");
+      if (!response.ok) throw new Error(body?.error || "That task could not be moved.");
+      if (body?.result === "edge") toast.message(direction === "up" ? "Already at the top." : "Already at the bottom.");
+      else if (body?.result === "already") toast.message("Already first.");
+      else if (direction === "top") toast.success("Moved to the front. It starts now.");
       await load();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "That task could not be started.");
+      toast.error(caught instanceof Error ? caught.message : "That task could not be moved.");
     } finally {
-      setForcing(null);
+      setMoving(null);
     }
   }
 
@@ -351,7 +351,7 @@ export function TasksView() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Each task is tagged with what it is: a rip, a rewrap, a deinterlace, a Dolby Vision reconvert, text recognition, soundtrack recognition, or a version merge. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
+                Each task is tagged with what it is: a rip, a rewrap, a deinterlace, a Dolby Vision reconvert, text recognition, soundtrack recognition, or a version merge. On Waiting, Up and Down set the order. The one at the front starts now, without waiting for the schedule. Failed jobs keep the reason they stopped, including a missing MakeMKV binary or a path this machine cannot open.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -424,26 +424,48 @@ export function TasksView() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {job.status === "failed" ? (
-                      <Button size="sm" variant="outline" disabled={redoing === job.key || removing === job.key || forcing === job.key} onClick={() => void redoJob(job)}>
+                      <Button size="sm" variant="outline" disabled={redoing === job.key || removing === job.key || moving === job.key} onClick={() => void redoJob(job)}>
                         {redoing === job.key ? "Queuing…" : "Redo"}
                       </Button>
                     ) : null}
-                    {job.status === "pending" && job.queue !== "merge" && job.priority !== "immediate" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={forcing === job.key || removing === job.key || redoing === job.key}
-                        onClick={() => void forceJob(job)}
-                        title="Start this now. The schedule window stays as it is."
-                      >
-                        {forcing === job.key ? "Starting…" : "Force"}
-                      </Button>
+                    {job.status === "pending" ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={job.priority === "immediate" || moving === job.key || removing === job.key}
+                          onClick={() => void moveJob(job, "up")}
+                          title="Move this up in the waiting list"
+                        >
+                          Up
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={moving === job.key || removing === job.key}
+                          onClick={() => void moveJob(job, "down")}
+                          title="Move this down in the waiting list"
+                        >
+                          Down
+                        </Button>
+                        {job.priority !== "immediate" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={moving === job.key || removing === job.key}
+                            onClick={() => void moveJob(job, "top")}
+                            title="Put this first. It starts now, without waiting for the schedule."
+                          >
+                            First
+                          </Button>
+                        ) : null}
+                      </>
                     ) : null}
                     {job.status === "pending" || job.status === "failed" ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={removing === job.key || redoing === job.key || forcing === job.key}
+                        disabled={removing === job.key || redoing === job.key || moving === job.key}
                         onClick={() => void removeJob(job)}
                         title={job.status === "pending" ? "Remove this job from the waiting list" : "Remove this failed job from the list"}
                       >

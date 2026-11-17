@@ -9,7 +9,9 @@ import Database from "better-sqlite3";
 import { migrate } from "@/lib/db";
 import { listTaskJobs } from "@/lib/tasks";
 import { avisFromFile, bundleRewraps, listRewrapCandidates } from "@/lib/rewrap/candidates";
-import { checkRewrap, framesJumpBack, jumpIntervals, packedMarker, parseProbe, progressFromLine, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
+import { blankMkvPaths, mkvsWithBlankAudio, queueHeaderLanguageJob } from "@/lib/rewrap/header-repair";
+import { moveTask, promoteLead } from "@/lib/tasks/order";
+import { blankTracksFromHeader, checkRewrap, framesJumpBack, jumpIntervals, packedMarker, parseProbe, progressFromLine, restoreBlankHeaderLanguages, rewrapArgs, rewrapAvi, rewrapStop, unpackArgs, type Probe } from "@/lib/rewrap/run";
 import { deleteAllOldFiles, supersededByMkv } from "@/lib/rewrap/old-files";
 import { canRewrap, isAvi, joinedTarget, needsRewrap, rewrappedPathFor, rewrapTarget, sourceKind, splitSources } from "@/lib/rewrap/source";
 import { queueShakyRewraps } from "@/lib/rewrap/worker";
@@ -412,6 +414,77 @@ test("a real Xvid AVI rewraps into an MKV beside it and the AVI stays", { skip: 
   }
 });
 
+test("waiting jobs keep the order you set, and a header sweep goes to the front", () => {
+  const db = new Database(":memory:");
+  migrate(db);
+  enqueueRewraps(db, [
+    { path: "/m/A.avi", label: "A" },
+    { path: "/m/B.avi", label: "B" },
+    { path: "/m/C.avi", label: "C" },
+  ]);
+  const ids = db.prepare(`SELECT id, label FROM rewrap_jobs ORDER BY id`).all() as Array<{ id: number; label: string }>;
+  const third = ids.find((row) => row.label === "C");
+  assert.ok(third);
+  assert.equal(moveTask(db, "rewrap", "rewrap", third.id, "up"), "moved");
+  assert.deepEqual(
+    db.prepare(`SELECT label FROM rewrap_jobs WHERE status = 'pending' ORDER BY rank ASC, id`).all(),
+    [{ label: "A" }, { label: "C" }, { label: "B" }],
+  );
+  promoteLead(db);
+  const lead = db.prepare(`SELECT label, immediate FROM rewrap_jobs WHERE immediate = 1`).get() as { label: string };
+  assert.equal(lead.label, "A");
+  assert.equal(queueHeaderLanguageJob(db), true);
+  const front = db.prepare(`SELECT label, mode FROM rewrap_jobs WHERE status = 'pending' ORDER BY rank ASC, id`).get() as { label: string; mode: string };
+  assert.equal(front.mode, "header");
+  assert.equal(front.label, "Header languages");
+  assert.equal(queueHeaderLanguageJob(db), false);
+  db.close();
+});
+
+test("a header language fills a blank audio track and leaves a labeled track alone", () => {
+  const blank = parseProbe(
+    JSON.stringify({
+      streams: [
+        { index: 0, codec_type: "video", codec_name: "mpeg4" },
+        { index: 1, codec_type: "audio", codec_name: "mp3", tags: { language: "und" } },
+      ],
+      format: { tags: { IAS1: "hun" } },
+    }),
+  );
+  assert.deepEqual(blankTracksFromHeader(blank), ["Hungarian"]);
+  const labeled = parseProbe(
+    JSON.stringify({
+      streams: [
+        { index: 0, codec_type: "video", codec_name: "mpeg4" },
+        { index: 1, codec_type: "audio", codec_name: "ac3", tags: { language: "eng" } },
+      ],
+      format: { tags: { IAS1: "hun" } },
+    }),
+  );
+  assert.deepEqual(blankTracksFromHeader(labeled), [null]);
+  assert.deepEqual(
+    mkvsWithBlankAudio([
+      { path: "/m/Blank.mkv", container: "mkv", audioTracks: [{ language: null, layout: "2.0", codec: "mp3" }] },
+      { path: "/m/Named.mkv", container: "mkv", audioTracks: [{ language: "English", layout: "2.0", codec: "ac3" }] },
+      { path: "/m/Und.mkv", container: "mkv", audioTracks: [{ language: "und", layout: "2.0", codec: "mp3" }] },
+      { path: "/m/Film.avi", container: "avi", audioTracks: [{ language: null, layout: "2.0", codec: "mp3" }] },
+      { path: "/m/Side.mkv", container: "mkv", audioTracks: [{ language: null, layout: null, codec: null, file: "/m/side.ac3" }] },
+    ]),
+    ["/m/Blank.mkv", "/m/Und.mkv"],
+  );
+
+  const db = new Database(":memory:");
+  migrate(db);
+  db.prepare(
+    `INSERT INTO catalog_titles (kind, title, sort_title, path, container, playable_label, audio_tracks) VALUES ('movie', 'Blank', 'blank', '/m/Blank.mkv', 'mkv', 'video', ?)`,
+  ).run(JSON.stringify([{ language: null, layout: "2.0", codec: "mp3" }]));
+  db.prepare(
+    `INSERT INTO catalog_titles (kind, title, sort_title, path, container, playable_label, audio_tracks) VALUES ('movie', 'Named', 'named', '/m/Named.mkv', 'mkv', 'video', ?)`,
+  ).run(JSON.stringify([{ language: "English", layout: "5.1", codec: "ac3" }]));
+  assert.deepEqual(blankMkvPaths(db), ["/m/Blank.mkv"]);
+  db.close();
+});
+
 test("an AVI header language is written on the MKV audio track", { skip: !hasFfmpeg }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-rewrap-ias-"));
   try {
@@ -434,6 +507,38 @@ test("an AVI header language is written on the MKV audio track", { skip: !hasFfm
     });
     const language = execFileSync("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=language", "-of", "default=nw=1:nk=1", path.join(root, "Film.mkv")]).toString().trim();
     assert.equal(language, "hun");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const hasMkvpropedit = (() => {
+  try {
+    execFileSync("mkvpropedit", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("a blank MKV track picks up the header language without copying the picture", { skip: !hasFfmpeg || !hasMkvpropedit }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-header-repair-"));
+  try {
+    const mkv = path.join(root, "Film.mkv");
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi", "-i", "testsrc=size=160x120:rate=25:duration=1",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+      "-map", "0", "-map", "1",
+      "-c:v", "mpeg4", "-c:a", "libmp3lame",
+      "-metadata:s:a:0", "language=und",
+      "-metadata", "IAS1=hun",
+      mkv,
+    ]);
+    assert.equal(await restoreBlankHeaderLanguages(mkv), 1);
+    const language = execFileSync("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=language", "-of", "default=nw=1:nk=1", mkv]).toString().trim();
+    assert.equal(language, "hun");
+    assert.equal(await restoreBlankHeaderLanguages(mkv), 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
