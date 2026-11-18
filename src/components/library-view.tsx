@@ -647,6 +647,18 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             <span>{data?.stats.missing ?? 0} missing</span>
             <span>{data?.stats.notInPlex ?? 0} not in Plex</span>
             <span>{data?.stats.notPlayable ?? 0} not playable</span>
+            {data?.stats.unreadable ? (
+              <button
+                type="button"
+                className="text-amber-800 dark:text-amber-200"
+                onClick={() => {
+                  setRules([{ id: "mask", field: "mask", op: "eq", value: "wrong" }]);
+                  setOffset(0);
+                }}
+              >
+                {data.stats.unreadable} wrong folder mask
+              </button>
+            ) : null}
           </div>
         </div>
         {data?.demo ? (

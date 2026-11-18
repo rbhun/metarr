@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 type FolderScanSettings = {
   enabled: boolean;
   roots: string[];
+  repair: boolean;
 };
 
 type PlexFolder = { path: string; library: string };
@@ -20,6 +21,7 @@ export function FolderScanCard() {
   const [settings, setSettings] = useState<FolderScanSettings | null>(null);
   const [roots, setRoots] = useState("");
   const [plexFolders, setPlexFolders] = useState<PlexFolder[]>([]);
+  const [unreadable, setUnreadable] = useState<string[]>([]);
   const [filledFromPlex, setFilledFromPlex] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -28,10 +30,11 @@ export function FolderScanCard() {
       void fetch("/api/folder-scan", { cache: "no-store" })
         .then(async (response) => {
           if (!response.ok) return;
-          const body = (await response.json()) as { settings?: FolderScanSettings; plexFolders?: PlexFolder[] };
+          const body = (await response.json()) as { settings?: FolderScanSettings; plexFolders?: PlexFolder[]; unreadable?: string[] };
           if (!body.settings) return;
           const suggested = body.plexFolders ?? [];
           setSettings(body.settings);
+          setUnreadable(body.unreadable ?? []);
           setPlexFolders(suggested);
           if (body.settings.roots.length) {
             setRoots(body.settings.roots.join("\n"));
@@ -55,7 +58,7 @@ export function FolderScanCard() {
       const response = await fetch("/api/folder-scan", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: settings.enabled, roots: roots.split(/\r?\n/) }),
+        body: JSON.stringify({ enabled: settings.enabled, roots: roots.split(/\r?\n/), repair: settings.repair }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; settings?: FolderScanSettings } | null;
       if (!response.ok) throw new Error(body?.error || "Could not save folder scan.");
@@ -77,10 +80,50 @@ export function FolderScanCard() {
       <CardHeader>
         <CardTitle>Folder scan</CardTitle>
         <CardDescription>
-          Reads the language tags stored in each video file and compares them with Plex, Radarr, and Sonarr. A mismatch stays visible on the track. Off until you enable it.
+          Reads the language tags stored in each video file and compares them with Plex, Radarr, and Sonarr. A mismatch stays visible on the track. It also checks that Plex's account can open each folder and read each file. Off until you enable it.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {unreadable.length ? (
+          <div className="rounded-lg border border-amber-700/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-950 dark:text-amber-100">
+            <p>Plex cannot read {unreadable.length === 1 ? "this path" : `${unreadable.length} paths`}.</p>
+            <ul className="mt-1 max-h-40 overflow-auto font-mono">
+              {unreadable.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+          <div className="space-y-1">
+            <Label htmlFor="folder-mask-repair">Open folders Plex cannot read</Label>
+            <p className="text-xs text-muted-foreground">Adds read and enter for everyone else. The owner and group stay as they are. On unless you turn it off.</p>
+          </div>
+          <Switch
+            id="folder-mask-repair"
+            checked={settings.repair}
+            disabled={busy}
+            onCheckedChange={(checked) => {
+              const previous = settings;
+              setSettings({ ...settings, repair: checked });
+              void fetch("/api/folder-scan", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: settings.enabled, roots: roots.split(/\r?\n/), repair: checked }),
+              })
+                .then(async (response) => {
+                  const body = (await response.json().catch(() => null)) as { error?: string; settings?: FolderScanSettings } | null;
+                  if (!response.ok) throw new Error(body?.error || "Could not save folder scan.");
+                  if (body?.settings) setSettings(body.settings);
+                  toast.success(checked ? "Closed folders will be opened on the next scan." : "Closed folders will be reported and left as they are.");
+                })
+                .catch((caught: unknown) => {
+                  setSettings(previous);
+                  toast.error(caught instanceof Error ? caught.message : "Could not save folder scan.");
+                });
+            }}
+          />
+        </div>
         <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
           <Label htmlFor="folder-scan-enabled">Include in sync</Label>
           <Switch

@@ -1398,6 +1398,7 @@ export function queryLibrary(query: LibraryQuery, db = getDb()): LibraryResponse
       missing: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE ${missingSql}`),
       notInPlex: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE in_plex = 0`),
       notPlayable: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE playable_label != 'video'`),
+      unreadable: countWhere(db, `SELECT COUNT(*) AS count FROM catalog_titles WHERE playable_note LIKE '%Plex cannot read%'`),
     },
     page: { offset: query.offset, limit: query.limit, filtered },
     titles: libraryTitles(rows, onlineByKey, language, db),

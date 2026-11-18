@@ -18,7 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CONNECTOR_LABEL, type ConnectorId, type SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Disc3, GitMerge, Library, ListTodo, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { Disc3, FolderLock, GitMerge, Library, ListTodo, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -98,6 +98,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [maskBusy, setMaskBusy] = useState(false);
   const pathname = usePathname();
   const bare = pathname === "/login" || pathname === "/setup";
 
@@ -167,6 +168,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [refresh, status?.running]);
 
+  async function fixFolders() {
+    setMaskBusy(true);
+    try {
+      const response = await fetch("/api/folder-mask", { method: "POST" });
+      const body = (await response.json().catch(() => null)) as {
+        error?: string;
+        opened?: string[];
+        failed?: Array<{ path: string; error: string }>;
+        remaining?: string[];
+      } | null;
+      if (!response.ok) throw new Error(body?.error || "Could not check the folders.");
+      const opened = body?.opened?.length ?? 0;
+      const remaining = body?.remaining?.length ?? 0;
+      const failed = body?.failed ?? [];
+      if (failed.length) toast.error(`${failed[0]?.path ?? "A folder"}: ${failed[0]?.error ?? "Could not change permissions."}`);
+      toast.success(
+        opened
+          ? `Opened ${opened === 1 ? "1 path" : `${opened} paths`}. ${remaining === 0 ? "The check is clear." : `${remaining} still closed.`}`
+          : remaining
+            ? `${remaining === 1 ? "1 path is" : `${remaining} paths are`} still closed.`
+            : "Every folder is open to Plex.",
+      );
+      bump();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not check the folders.");
+    } finally {
+      setMaskBusy(false);
+    }
+  }
+
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.assign("/login");
@@ -228,7 +259,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className={cn(collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
           </div>
-          <div className={cn("mt-auto pb-3", collapsed ? "px-2" : "px-3")}>
+          <div className={cn("mt-auto flex flex-col gap-1 pb-3", collapsed ? "px-2" : "px-3")}>
+            <button
+              type="button"
+              className={navItemClass(collapsed)}
+              title={collapsed ? "Fix folder permissions" : undefined}
+              disabled={maskBusy}
+              onClick={() => void fixFolders()}
+            >
+              <FolderLock />
+              {collapsed ? <span className="sr-only">Fix folder permissions</span> : maskBusy ? "Checking folders…" : "Fix folder permissions"}
+            </button>
             <button type="button" className={navItemClass(collapsed)} title={collapsed ? "Sign out" : undefined} onClick={() => void signOut()}>
               <LogOut />
               {collapsed ? <span className="sr-only">Sign out</span> : "Sign out"}
@@ -253,6 +294,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SheetHeader>
                 <div className="flex flex-col gap-2 px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
+                  <button type="button" className={navItemClass(false)} disabled={maskBusy} onClick={() => void fixFolders()}>
+                    <FolderLock />
+                    {maskBusy ? "Checking folders…" : "Fix folder permissions"}
+                  </button>
                   <button type="button" className={navItemClass(false)} onClick={() => void signOut()}>
                     <LogOut />
                     Sign out

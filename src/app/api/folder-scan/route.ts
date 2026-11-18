@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
 import { cleanRoots, readFolderScan, suggestedPlexFolders, writeFolderScan } from "@/lib/folder-scan";
+import { loadUnreadable } from "@/lib/plex-access";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -13,7 +14,7 @@ export async function GET() {
   } catch {
     plexFolders = [];
   }
-  return NextResponse.json({ settings: readFolderScan(db), plexFolders });
+  return NextResponse.json({ settings: readFolderScan(db), plexFolders, unreadable: loadUnreadable(db) });
 }
 
 export async function PUT(request: Request) {
@@ -25,9 +26,11 @@ export async function PUT(request: Request) {
   }
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   try {
+    const current = readFolderScan(getDb());
     const settings = {
       enabled: Boolean(record.enabled),
       roots: cleanRoots(record.roots),
+      repair: typeof record.repair === "boolean" ? record.repair : current.repair,
     };
     writeFolderScan(getDb(), settings);
     return NextResponse.json({ settings: readFolderScan(getDb()) });

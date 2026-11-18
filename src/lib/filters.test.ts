@@ -19,4 +19,8 @@ test("the library filter can require a movie or a series and a length in minutes
     clauses: ["runtime_minutes IS NULL"],
     params: [],
   });
+  assert.deepEqual(rulesWhere([{ id: "mask", field: "mask", op: "eq", value: "wrong" }]), {
+    clauses: ["IFNULL(playable_note, '') LIKE '%Plex cannot read%'"],
+    params: [],
+  });
 });

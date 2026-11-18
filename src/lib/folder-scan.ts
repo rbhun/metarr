@@ -17,6 +17,21 @@ import type { ProgressUpdate } from "@/lib/connectors/http";
 import { throwIfSyncCancelled } from "@/lib/sync-cancel";
 import type Database from "better-sqlite3";
 import { killTool } from "@/lib/stuck-tools";
+import { announceFolder } from "@/lib/announce";
+import { rebuildCatalog } from "@/lib/catalog";
+import {
+  coveredBy,
+  fileReadableBy,
+  FOLDER_MASK_OPENED_KEY,
+  markClosed,
+  maskRepairEnabled,
+  readPlexAccount,
+  readStat,
+  repairClosed,
+  saveUnreadable,
+  writeMaskRepair,
+  type PlexAccount,
+} from "@/lib/plex-access";
 
 const ROOTS_KEY = "folder_roots";
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "mov", "webm"]);
@@ -27,6 +42,8 @@ const FILE_LIMIT = 20_000;
 export type FolderScanSettings = {
   enabled: boolean;
   roots: string[];
+  /** Open a folder Plex cannot read by adding read and enter for everyone else. On unless turned off. */
+  repair: boolean;
 };
 
 export function pathKey(filePath: string | null | undefined): string | null {
@@ -56,12 +73,13 @@ export function readFolderScan(db: Database.Database): FolderScanSettings {
     parsed = [];
   }
   const roots = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
-  return { enabled, roots };
+  return { enabled, roots, repair: maskRepairEnabled(db) };
 }
 
 export function writeFolderScan(db: Database.Database, settings: FolderScanSettings) {
   saveConnector({ id: "files", baseUrl: "", apiKey: "", enabled: settings.enabled }, db);
   setMeta(db, ROOTS_KEY, JSON.stringify(settings.roots));
+  writeMaskRepair(db, settings.repair);
 }
 
 function localizeFolder(folder: string, maps: PathMap[]): string {
@@ -334,14 +352,16 @@ export function folderDraft(
   ]);
 }
 
-export function listVideos(root: string): string[] {
+export function listVideos(root: string, access?: { blocked: Set<string>; account: PlexAccount }): string[] {
   const found: string[] = [];
   const walk = (directory: string) => {
     if (found.length > FILE_LIMIT) return;
+    if (access) markClosed(directory, "directory", access.account, access.blocked);
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (access && denied(error)) access.blocked.add(directory);
       return;
     }
     for (const entry of entries) {
@@ -356,12 +376,22 @@ export function listVideos(root: string): string[] {
       }
       if (!entry.isFile()) continue;
       const ext = fileExtension(full);
-      if (ext && VIDEO.has(ext)) found.push(full);
+      const video = Boolean(ext && VIDEO.has(ext));
+      if (access && video && !coveredBy(full, access.blocked)) {
+        const info = readStat(full);
+        if (info === "denied" || (info && !info.directory && !fileReadableBy(info, access.account))) access.blocked.add(full);
+      }
+      if (video) found.push(full);
     }
   };
   walk(root);
   if (found.length > FILE_LIMIT) throw new Error("That folder has more than 20,000 video files. Point the scan at the movie or series folders.");
   return found;
+}
+
+function denied(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
+  return code === "EACCES" || code === "EPERM";
 }
 
 /** The streams inside the file, then the subtitle and separate audio files beside it. */
@@ -385,11 +415,61 @@ export async function scanOneFile(
   return folderDraft(filePath, withSidecarFiles(filePath, { ...probed, video: videoFromProbe(payload) }), match, options);
 }
 
+export type MaskPass = {
+  files: string[];
+  opened: string[];
+  failed: Array<{ path: string; error: string }>;
+  remaining: string[];
+};
+
+/** Walk the folders, open any Plex cannot read when repair is on, then walk again so the list matches the disk. */
+export async function passFolderMasks(db: Database.Database, roots: string[], repair: boolean, account: PlexAccount = readPlexAccount()): Promise<MaskPass> {
+  const present = roots.filter((root) => fs.existsSync(root));
+  const blocked = new Set<string>();
+  let files = present.flatMap((root) => listVideos(root, { blocked, account }));
+  const opened: string[] = [];
+  const failed: Array<{ path: string; error: string }> = [];
+  if (repair && blocked.size > 0) {
+    const ordered = [...blocked].sort((left, right) => left.length - right.length);
+    for (const item of ordered) {
+      const result = repairClosed(item, account);
+      opened.push(...result.opened);
+      failed.push(...result.failed);
+    }
+    blocked.clear();
+    files = present.flatMap((root) => listVideos(root, { blocked, account }));
+    const folders = opened.filter((item) => {
+      try {
+        return fs.statSync(item).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+    for (const folder of folders.slice(0, 40)) {
+      await announceFolder(db, [folder]).catch(() => "");
+    }
+  }
+  saveUnreadable(db, blocked);
+  setMeta(db, FOLDER_MASK_OPENED_KEY, String(opened.length));
+  return { files, opened, failed, remaining: [...blocked] };
+}
+
+/** Check the saved scan folders, correct closed ones, and rebuild the library notes. */
+export async function checkFolderMasks(db: Database.Database): Promise<MaskPass> {
+  const roots = readFolderScan(db).roots.filter((root) => fs.existsSync(root));
+  if (!roots.length) throw new Error("Add a folder under Settings, then check again.");
+  const pass = await passFolderMasks(db, roots, true);
+  rebuildCatalog(db);
+  return pass;
+}
+
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {
   const present = roots.filter((root) => fs.existsSync(root));
   const missing = roots.filter((root) => !fs.existsSync(root));
   if (!present.length) throw new Error(`Folder not found: ${missing[0] ?? "the scan folder"}`);
-  const files = filesRepresentingFolders(present.flatMap((root) => listVideos(root)), known);
+  const account = readPlexAccount();
+  const pass = await passFolderMasks(getDb(), present, maskRepairEnabled(getDb()), account);
+  const files = filesRepresentingFolders(pass.files, known);
   const indexed = indexKnown(known, present);
   const recognized = recognizedWrites(getDb());
   const drafts: SourceDraft[] = [];

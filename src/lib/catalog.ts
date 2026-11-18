@@ -30,6 +30,7 @@ import {
   mergeFilePresence,
 } from "@/lib/media";
 import { enrichmentKey } from "@/lib/online";
+import { loadUnreadable, noteForBlocks } from "@/lib/plex-access";
 import type { AudioTrack, HdrLabel, MediaFile, SourceDraft, SubtitleTrack, TitleKind } from "@/lib/types";
 
 type SeriesBucket = {
@@ -394,8 +395,16 @@ export function ensureHoverSources(db: Database.Database) {
   hoverReady = true;
 }
 
+function readNote(records: SourceDraft[], blocked: string[]): string | null {
+  return noteForBlocks(
+    records.flatMap((record) => [record.path, ...record.files.map((file) => file.path)]),
+    blocked,
+  );
+}
+
 export function rebuildCatalog(db: Database.Database) {
   const records = loadSourceRecords(db);
+  const unreadable = loadUnreadable(db);
   const movies = records.filter((record) => record.kind === "movie");
   const seriesRecords = records.filter((record) => record.kind === "series");
   const episodeRecords = records.filter((record) => record.kind === "episode");
@@ -475,7 +484,7 @@ export function rebuildCatalog(db: Database.Database) {
       const year = group.find((record) => record.year)?.year ?? null;
       const missingReason = hasFile ? null : inRadarr ? "No file in Radarr" : "No file";
       const hiddenFromPlex = hasFile && !inPlex ? "Not listed in Plex" : null;
-      const playableNote = [hasFile ? summary.playableNote : null, hiddenFromPlex].filter(Boolean).join(". ") || null;
+      const playableNote = [hasFile ? summary.playableNote : null, hiddenFromPlex, readNote(group, unreadable)].filter(Boolean).join(". ") || null;
       insertTitle.run({
         kind: "movie",
         title,
@@ -587,7 +596,7 @@ export function rebuildCatalog(db: Database.Database) {
         container: summary.container,
         path: summary.path,
         playableLabel: hasFile ? summary.playableLabel : "missing",
-        playableNote: hasFile ? summary.playableNote : null,
+        playableNote: [hasFile ? summary.playableNote : null, readNote(group.episodes, unreadable)].filter(Boolean).join(". ") || null,
         qualityName: summary.qualityName ?? firstText(group.episodes.map((record) => record.qualityName)),
         resolution: summary.resolution ?? bestResolution(episodes.map((episode) => episode.resolution)),
         hdr: summary.hdr === "none" ? bestHdr(episodes.map((episode) => episode.hdr)) : summary.hdr,

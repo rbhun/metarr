@@ -23,6 +23,7 @@ import { queueFormatRefresh } from "@/lib/detect/format-refresh";
 import { askPlexToReadSidecars } from "@/lib/detect/publish";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
+import { FOLDER_MASK_OPENED_KEY, loadUnreadable } from "@/lib/plex-access";
 import { isSyncCancelled, setSyncAbortSignal, throwIfSyncCancelled } from "@/lib/sync-cancel";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
@@ -196,7 +197,12 @@ async function runSyncBody(only?: ConnectorId) {
         if (refresh.length) queueFormatRefresh(db, refresh);
         if (refresh.length || hasUnwritten(db)) kickDetectWorker();
         slot.state = "success";
-        slot.message = describe(records);
+        const opened = Number(getMeta(db, FOLDER_MASK_OPENED_KEY) || 0);
+        const closed = loadUnreadable(db);
+        const parts = [describe(records)];
+        if (opened > 0) parts.push(`Opened ${opened === 1 ? "1 path" : `${opened} paths`} for Plex.`);
+        if (closed.length) parts.push(`Plex cannot read ${closed.length === 1 ? "1 path" : `${closed.length} paths`}.`);
+        slot.message = parts.join(" ");
         slot.fetched = records.length;
         slot.total = records.length;
       } catch (error) {

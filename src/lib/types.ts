@@ -348,6 +348,7 @@ export type LibraryResponse = {
     missing: number;
     notInPlex: number;
     notPlayable: number;
+    unreadable: number;
   };
   page: {
     offset: number;

@@ -1,5 +1,13 @@
 # Changes
 
+## 0.0.221
+
+- The library can filter titles whose folder Plex cannot read. A sidebar button checks those folders, opens them for everyone else, and checks again. The folder scan does the same unless that is turned off.
+
+## 0.0.220
+
+- The folder scan checks that Plex can open each folder and read each video. A closed folder stays visible on the title and in the library, so a movie does not vanish quietly.
+
 ## 0.0.219
 
 - Waiting tasks can be moved up or down. The one at the front starts immediately, without waiting for the schedule. The header-language repair is placed at the front.

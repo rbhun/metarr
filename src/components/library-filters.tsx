@@ -36,6 +36,7 @@ const FIELD_LABEL: Record<FilterField, string> = {
   stereo: "3D",
   suspect: "Sample or short",
   timing: "Subtitle timing",
+  mask: "Folder permissions",
 };
 
 const OP_LABEL: Record<FilterOp, string> = {
@@ -63,6 +64,7 @@ const PRESETS: Array<{ label: string; rule: Omit<FilterRule, "id"> }> = [
   { label: "Hungarian", rule: { field: "language", op: "includes", value: "Hungarian" } },
   { label: "Sample or short", rule: { field: "suspect", op: "eq", value: "either" } },
   { label: "Subtitle timing off", rule: { field: "timing", op: "eq", value: "off" } },
+  { label: "Wrong folder mask", rule: { field: "mask", op: "eq", value: "wrong" } },
   { label: "Dolby Vision 7", rule: { field: "dovi", op: "eq", value: "7" } },
   { label: "Dolby Vision 5", rule: { field: "dovi", op: "eq", value: "5" } },
 ];
@@ -224,6 +226,14 @@ function ValueControl({ rule, onChange }: { rule: FilterRule; onChange: (value: 
         <option value="shorter">stops well before the end</option>
         <option value="retimed">retimed by Metarr</option>
         <option value="auto">fixed automatically</option>
+      </select>
+    );
+  }
+  if (rule.field === "mask") {
+    return (
+      <select className={selectClass} aria-label="Folder permissions" value={rule.value} onChange={(event) => onChange(event.target.value)}>
+        <option value="wrong">closed to Plex</option>
+        <option value="ok">open to Plex</option>
       </select>
     );
   }

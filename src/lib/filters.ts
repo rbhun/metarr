@@ -20,6 +20,7 @@ export const FILTER_FIELDS = [
   "stereo",
   "suspect",
   "timing",
+  "mask",
 ] as const;
 
 export type FilterField = (typeof FILTER_FIELDS)[number];
@@ -45,7 +46,7 @@ export function fieldOps(field: FilterField): FilterOp[] {
   if (field === "genre") return ["includes", "excludes", "empty", "notEmpty"];
   if (field === "contentRating" || field === "resolution" || field === "hdr" || field === "container") return ["eq", "neq", "empty", "notEmpty"];
   if (field === "score" || field === "bitrate" || field === "year" || field === "length") return ["gt", "gte", "lt", "lte", "eq", "empty", "notEmpty"];
-  if (field === "kind" || field === "dovi") return ["eq", "neq"];
+  if (field === "kind" || field === "dovi" || field === "mask") return ["eq", "neq"];
   if (field === "version") return ["eq", "neq"];
   return ["eq"];
 }
@@ -89,6 +90,8 @@ export function defaultRule(id: string, field: FilterField = "language"): Filter
                             ? "either"
                             : field === "timing"
                               ? "off"
+                              : field === "mask"
+                                ? "wrong"
                               : "";
   return { id, field, op, value };
 }
@@ -427,6 +430,13 @@ export function ruleClause(rule: FilterRule): { sql: string; params: Array<strin
                 : null;
     if (!condition) return null;
     return { sql: timingExists(condition), params: [] };
+  }
+
+  if (rule.field === "mask" && (rule.op === "eq" || rule.op === "neq")) {
+    const wrong = `IFNULL(playable_note, '') LIKE '%Plex cannot read%'`;
+    const match = rule.value === "ok" ? `NOT (${wrong})` : rule.value === "wrong" ? wrong : null;
+    if (!match) return null;
+    return rule.op === "eq" ? { sql: match, params: [] } : { sql: `NOT (${match})`, params: [] };
   }
 
   if (rule.field === "stereo" && rule.op === "eq") {
