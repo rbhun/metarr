@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.223
+
+- Fix folders sits with the other sidebar items and opens a window that lists the closed paths, corrects them, and checks again.
+
 ## 0.0.222
 
 - Titles already stored from Radarr or Bazarr are checked for a folder Plex cannot read, so the library filter lists them.

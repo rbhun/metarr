@@ -98,7 +98,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [maskOpen, setMaskOpen] = useState(false);
   const [maskBusy, setMaskBusy] = useState(false);
+  const [closedPaths, setClosedPaths] = useState<string[] | null>(null);
+  const [maskFailures, setMaskFailures] = useState<Array<{ path: string; error: string }>>([]);
+  const [maskResult, setMaskResult] = useState<string | null>(null);
   const pathname = usePathname();
   const bare = pathname === "/login" || pathname === "/setup";
 
@@ -168,8 +172,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [refresh, status?.running]);
 
+  function openFolders() {
+    setMaskResult(null);
+    setMaskFailures([]);
+    setMaskOpen(true);
+    void fetch("/api/folder-scan", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json()) as { unreadable?: string[] };
+        setClosedPaths(body.unreadable ?? []);
+      })
+      .catch(() => setClosedPaths([]));
+  }
+
   async function fixFolders() {
     setMaskBusy(true);
+    setMaskResult(null);
     try {
       const response = await fetch("/api/folder-mask", { method: "POST" });
       const body = (await response.json().catch(() => null)) as {
@@ -180,19 +198,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       } | null;
       if (!response.ok) throw new Error(body?.error || "Could not check the folders.");
       const opened = body?.opened?.length ?? 0;
-      const remaining = body?.remaining?.length ?? 0;
+      const remaining = body?.remaining ?? [];
       const failed = body?.failed ?? [];
-      if (failed.length) toast.error(`${failed[0]?.path ?? "A folder"}: ${failed[0]?.error ?? "Could not change permissions."}`);
-      toast.success(
+      setClosedPaths(remaining);
+      setMaskFailures(failed);
+      setMaskResult(
         opened
-          ? `Opened ${opened === 1 ? "1 path" : `${opened} paths`}. ${remaining === 0 ? "The check is clear." : `${remaining} still closed.`}`
-          : remaining
-            ? `${remaining === 1 ? "1 path is" : `${remaining} paths are`} still closed.`
+          ? `Opened ${opened === 1 ? "1 path" : `${opened} paths`}. ${remaining.length === 0 ? "The check is clear." : `${remaining.length} still closed.`}`
+          : remaining.length
+            ? `${remaining.length === 1 ? "1 path is" : `${remaining.length} paths are`} still closed.`
             : "Every folder is open to Plex.",
       );
       bump();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "Could not check the folders.");
+      const message = caught instanceof Error ? caught.message : "Could not check the folders.";
+      setMaskResult(message);
+      toast.error(message);
     } finally {
       setMaskBusy(false);
     }
@@ -216,7 +237,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-dvh bg-background text-foreground">
         <aside
           className={cn(
-            "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex",
+            "hidden h-full min-h-0 shrink-0 flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar md:flex",
             collapsed ? "w-14" : "w-60",
           )}
         >
@@ -256,20 +277,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </>
             )}
           </div>
-          <div className={cn(collapsed ? "px-2" : "px-3")}>
+          <div className={cn("flex flex-col gap-1", collapsed ? "px-2" : "px-3")}>
             <NavLinks collapsed={collapsed} bump={bump} />
+            <button type="button" className={navItemClass(collapsed)} title={collapsed ? "Fix folders" : undefined} onClick={openFolders}>
+              <FolderLock />
+              {collapsed ? <span className="sr-only">Fix folders</span> : "Fix folders"}
+            </button>
           </div>
           <div className={cn("mt-auto flex flex-col gap-1 pb-3", collapsed ? "px-2" : "px-3")}>
-            <button
-              type="button"
-              className={navItemClass(collapsed)}
-              title={collapsed ? "Fix folder permissions" : undefined}
-              disabled={maskBusy}
-              onClick={() => void fixFolders()}
-            >
-              <FolderLock />
-              {collapsed ? <span className="sr-only">Fix folder permissions</span> : maskBusy ? "Checking folders…" : "Fix folder permissions"}
-            </button>
             <button type="button" className={navItemClass(collapsed)} title={collapsed ? "Sign out" : undefined} onClick={() => void signOut()}>
               <LogOut />
               {collapsed ? <span className="sr-only">Sign out</span> : "Sign out"}
@@ -294,9 +309,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SheetHeader>
                 <div className="flex flex-col gap-2 px-4">
                   <NavLinks onNavigate={() => setMenuOpen(false)} bump={bump} />
-                  <button type="button" className={navItemClass(false)} disabled={maskBusy} onClick={() => void fixFolders()}>
+                  <button
+                    type="button"
+                    className={navItemClass(false)}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      openFolders();
+                    }}
+                  >
                     <FolderLock />
-                    {maskBusy ? "Checking folders…" : "Fix folder permissions"}
+                    Fix folders
                   </button>
                   <button type="button" className={navItemClass(false)} onClick={() => void signOut()}>
                     <LogOut />
@@ -319,6 +341,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </div>
       </div>
+      <Dialog open={maskOpen} onOpenChange={setMaskOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Folder permissions</DialogTitle>
+            <DialogDescription>
+              Folders Plex cannot list. The check opens them for everyone else, then looks again. The owner and group stay as they are.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            {maskResult ? <p className="text-sm">{maskResult}</p> : null}
+            {closedPaths == null ? (
+              <p className="text-sm text-muted-foreground">Reading the stored folders…</p>
+            ) : closedPaths.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No closed folder is stored. Run the check to look again.</p>
+            ) : (
+              <ul className="max-h-64 overflow-auto rounded-lg border px-3 py-2 font-mono text-xs leading-5">
+                {closedPaths.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+            {maskFailures.length ? (
+              <ul className="max-h-32 overflow-auto text-xs leading-5 text-destructive">
+                {maskFailures.map((item) => (
+                  <li key={`${item.path}:${item.error}`}>
+                    {item.path}: {item.error}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMaskOpen(false)}>
+              Close
+            </Button>
+            <Button disabled={maskBusy} onClick={() => void fixFolders()}>
+              {maskBusy ? "Checking folders…" : "Check and correct"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={syncOpen} onOpenChange={setSyncOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
