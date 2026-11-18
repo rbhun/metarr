@@ -7,7 +7,7 @@ import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
 import { insertSourceRecords, migrate, setMeta } from "@/lib/db";
 import { listVideos, passFolderMasks, readFolderScan, writeFolderScan } from "@/lib/folder-scan";
-import { noteForBlocks, PLEX_UNREADABLE_KEY, type PlexAccount } from "@/lib/plex-access";
+import { noteForBlocks, PLEX_UNREADABLE_KEY, refreshClosedTitles, type PlexAccount } from "@/lib/plex-access";
 import { sourceDraft } from "@/lib/source";
 
 const other: PlexAccount = { uid: null, gids: [] };
@@ -92,6 +92,68 @@ test("a closed folder is opened and the check that follows is clear", async () =
   } finally {
     fs.chmodSync(folder, 0o755);
     fs.chmodSync(file, 0o644);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a title already stored from Radarr is marked when its folder is closed to Plex", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-plex-known-"));
+  fs.chmodSync(root, 0o755);
+  const closed = path.join(root, "The Flintstones - Jogging Fever (1981)");
+  const open = path.join(root, "Finding Nemo (2003)");
+  const closedFile = path.join(closed, "The Flintstones: Jogging Fever (1981).mkv");
+  const openFile = path.join(open, "film.mkv");
+  fs.mkdirSync(closed);
+  fs.mkdirSync(open);
+  fs.writeFileSync(closedFile, "x");
+  fs.writeFileSync(openFile, "x");
+  fs.chmodSync(closed, 0o2700);
+  fs.chmodSync(open, 0o755);
+  fs.chmodSync(openFile, 0o644);
+  const db = new Database(":memory:");
+  migrate(db);
+  insertSourceRecords(db, [
+    sourceDraft({
+      connector: "radarr",
+      kind: "movie",
+      externalKey: "1",
+      title: "The Flintstones: Jogging Fever",
+      year: 1981,
+      hasFile: true,
+      path: closedFile,
+      container: "mkv",
+    }),
+    sourceDraft({
+      connector: "bazarr",
+      kind: "movie",
+      externalKey: "1",
+      title: "The Flintstones: Jogging Fever",
+      year: 1981,
+      hasFile: true,
+      path: closedFile,
+      container: "mkv",
+    }),
+    sourceDraft({
+      connector: "radarr",
+      kind: "movie",
+      externalKey: "2",
+      title: "Finding Nemo",
+      year: 2003,
+      hasFile: true,
+      path: openFile,
+      container: "mkv",
+    }),
+  ]);
+  setMeta(db, PLEX_UNREADABLE_KEY, JSON.stringify([open]));
+  try {
+    const result = refreshClosedTitles(db, false);
+    assert.equal(result.updated, true);
+    rebuildCatalog(db);
+    const rows = db.prepare(`SELECT title, playable_note FROM catalog_titles ORDER BY title`).all() as Array<{ title: string; playable_note: string | null }>;
+    assert.match(rows.find((row) => row.title === "The Flintstones: Jogging Fever")?.playable_note ?? "", /Plex cannot read The Flintstones - Jogging Fever \(1981\)/);
+    assert.equal(rows.find((row) => row.title === "Finding Nemo")?.playable_note?.includes("Plex cannot read"), false);
+  } finally {
+    fs.chmodSync(closed, 0o755);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

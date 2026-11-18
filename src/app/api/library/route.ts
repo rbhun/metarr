@@ -1,6 +1,7 @@
-import { ensureHoverSources } from "@/lib/catalog";
-import { clearLibrary, getDb, queryLibrary } from "@/lib/db";
+import { ensureHoverSources, rebuildCatalog } from "@/lib/catalog";
+import { clearLibrary, getDb, getMeta, queryLibrary } from "@/lib/db";
 import { parseRules } from "@/lib/filters";
+import { FOLDER_MASK_KNOWN_KEY, refreshClosedTitles } from "@/lib/plex-access";
 import { outputDirectory } from "@/lib/remux/source";
 import { titleIdForPath } from "@/lib/title-link";
 import { getSyncStatus } from "@/lib/sync";
@@ -10,7 +11,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (!getSyncStatus().running) ensureHoverSources(getDb());
+  const db = getDb();
+  if (!getSyncStatus().running) {
+    ensureHoverSources(db);
+    // Titles from Radarr and Bazarr are already stored. Stamp the ones whose folder Plex cannot read.
+    if (getMeta(db, FOLDER_MASK_KNOWN_KEY) !== "1" && refreshClosedTitles(db, false).updated) rebuildCatalog(db);
+  }
   const url = new URL(request.url);
   const kindParam = url.searchParams.get("kind");
   const kind = kindParam === "movie" || kindParam === "series" ? kindParam : "all";

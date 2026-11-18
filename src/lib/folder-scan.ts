@@ -9,7 +9,7 @@ import { resolveMediaPath, mediaPathCandidates, type PathMap } from "@/lib/detec
 import { audioSidecarTracks, sidecarTracks } from "@/lib/detect/sidecars";
 import { readDetectSettings } from "@/lib/detect/store";
 import { fetchPlexLibraryFolders, type PlexLibraryFolder } from "@/lib/connectors/plex";
-import { getDb, getMeta, listConnectors, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
+import { getDb, getMeta, listConnectors, loadSourceRecords, plexExcludedLibraries, saveConnector, setMeta } from "@/lib/db";
 import { bonusFlag, doviProfileOf, fileExtension, normalizeImdb, normalizeNumericId, normalizeTitle, uniqueLanguages } from "@/lib/media";
 import { sourceDraft, withMedia } from "@/lib/source";
 import type { AudioTrack, HdrLabel, SourceDraft, SubtitleTrack } from "@/lib/types";
@@ -23,10 +23,13 @@ import {
   coveredBy,
   fileReadableBy,
   FOLDER_MASK_OPENED_KEY,
+  isDirectory,
+  loadUnreadable,
   markClosed,
   maskRepairEnabled,
   readPlexAccount,
   readStat,
+  refreshClosedTitles,
   repairClosed,
   saveUnreadable,
   writeMaskRepair,
@@ -454,13 +457,20 @@ export async function passFolderMasks(db: Database.Database, roots: string[], re
   return { files, opened, failed, remaining: [...blocked] };
 }
 
-/** Check the saved scan folders, correct closed ones, and rebuild the library notes. */
+/** Check the saved scan folders and the paths already stored on titles, correct closed ones, and rebuild the library notes. */
 export async function checkFolderMasks(db: Database.Database): Promise<MaskPass> {
   const roots = readFolderScan(db).roots.filter((root) => fs.existsSync(root));
-  if (!roots.length) throw new Error("Add a folder under Settings, then check again.");
-  const pass = await passFolderMasks(db, roots, true);
+  const known = loadSourceRecords(db).some((record) => record.path || record.files.some((file) => file.path));
+  if (!roots.length && !known) throw new Error("Add a folder under Settings, then check again.");
+  const pass = roots.length
+    ? await passFolderMasks(db, roots, true)
+    : { files: [] as string[], opened: [] as string[], failed: [] as Array<{ path: string; error: string }>, remaining: [] as string[] };
+  const mask = refreshClosedTitles(db, true);
+  const announced = new Set(pass.opened);
+  const folders = mask.opened.filter((item) => !announced.has(item) && isDirectory(item)).slice(0, 40);
+  for (const folder of folders) await announceFolder(db, [folder]).catch(() => "");
   rebuildCatalog(db);
-  return pass;
+  return { ...pass, opened: [...pass.opened, ...mask.opened], remaining: loadUnreadable(db) };
 }
 
 export async function scanFolders(roots: string[], known: SourceDraft[], onProgress: (update: ProgressUpdate) => void): Promise<SourceDraft[]> {

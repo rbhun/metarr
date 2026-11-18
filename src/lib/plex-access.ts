@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
-import { getMeta, setMeta } from "@/lib/db";
+import { getMeta, loadSourceRecords, setMeta } from "@/lib/db";
+import type { SourceDraft } from "@/lib/types";
 
 /** Who Plex runs as. An empty id means Plex is neither the owner nor in the file's group, so only the permissions for everyone else count. */
 export type PlexAccount = { uid: number | null; gids: number[] };
@@ -11,6 +12,8 @@ export type AccessStat = { uid: number; gid: number; mode: number; directory: bo
 export const PLEX_UNREADABLE_KEY = "plex_unreadable";
 export const FOLDER_MASK_REPAIR_KEY = "folder_mask_repair";
 export const FOLDER_MASK_OPENED_KEY = "folder_mask_opened";
+/** Set after the paths already stored on titles have been checked. */
+export const FOLDER_MASK_KNOWN_KEY = "folder_mask_known";
 
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "mov", "webm"]);
 const SKIP_DIR = new Set([".git", "node_modules", ".metarr-work", "#recycle", "@eadir"]);
@@ -61,6 +64,88 @@ export function saveUnreadable(db: Database.Database, paths: Iterable<string>) {
   setMeta(db, PLEX_UNREADABLE_KEY, JSON.stringify(unique));
 }
 
+/** File and folder paths Metarr already stored from Plex, Radarr, Sonarr, Bazarr, or a folder scan. */
+export function pathsOnTitles(records: SourceDraft[]): string[] {
+  const paths: string[] = [];
+  for (const record of records) {
+    if (record.path) paths.push(record.path);
+    for (const file of record.files) {
+      if (file.path) paths.push(file.path);
+    }
+  }
+  return paths;
+}
+
+function stillClosed(filePath: string, account: PlexAccount): boolean {
+  const info = readStat(filePath);
+  if (info == null) return false;
+  if (info === "denied") return true;
+  return info.directory ? !directoryOpenTo(info, account) : !fileReadableBy(info, account);
+}
+
+/**
+ * Folders and videos in `paths` that Plex cannot open.
+ * A path that does not exist on this machine is skipped.
+ */
+export function closedAmong(paths: Iterable<string>, account: PlexAccount): { closed: string[]; sawDisk: boolean } {
+  const blocked = new Set<string>();
+  const parents = new Set<string>();
+  const files: string[] = [];
+  let sawDisk = false;
+  for (const raw of paths) {
+    const filePath = normalized(raw);
+    if (!filePath) continue;
+    const info = readStat(filePath);
+    if (info === "denied") sawDisk = true;
+    if (info == null || info === "denied") {
+      if (info === "denied") {
+        parents.add(path.dirname(filePath));
+        files.push(filePath);
+      }
+      continue;
+    }
+    sawDisk = true;
+    if (info.directory) {
+      parents.add(filePath);
+      continue;
+    }
+    parents.add(path.dirname(filePath));
+    files.push(filePath);
+  }
+  for (const parent of parents) markClosed(parent, "directory", account, blocked);
+  for (const file of files) markClosed(file, "file", account, blocked);
+  return { closed: [...blocked], sawDisk };
+}
+
+/**
+ * Check the paths already stored on titles and remember the ones Plex cannot open.
+ * When `repair` is set, a closed path is opened for everyone else and then checked again.
+ * Returns updated: false when none of the paths exist on this machine, leaving the stored list as it is.
+ */
+export function refreshClosedTitles(db: Database.Database, repair: boolean): { updated: boolean; opened: string[] } {
+  const account = readPlexAccount();
+  const known = pathsOnTitles(loadSourceRecords(db));
+  let found = closedAmong(known, account);
+  if (!found.sawDisk && known.length > 0) return { updated: false, opened: [] };
+  const opened: string[] = [];
+  if (repair && found.closed.length > 0) {
+    const ordered = [...found.closed].sort((left, right) => left.length - right.length);
+    for (const item of ordered) {
+      const result = repairClosed(item, account);
+      opened.push(...result.opened);
+    }
+    found = closedAmong(known, account);
+  }
+  const blocked = new Set(found.closed);
+  for (const prior of loadUnreadable(db)) {
+    if (blocked.has(prior) || coveredBy(prior, blocked)) continue;
+    if (stillClosed(prior, account)) blocked.add(prior);
+  }
+  saveUnreadable(db, blocked);
+  setMeta(db, FOLDER_MASK_KNOWN_KEY, "1");
+  return { updated: true, opened };
+}
+
 function normalized(filePath: string): string {
   return filePath.replace(/\\/g, "/").replace(/\/+$/, "");
 }
@@ -90,6 +175,11 @@ export function noteForBlocks(paths: Array<string | null | undefined>, blocked: 
   if (names.size === 0) return null;
   if (names.size === 1) return `Plex cannot read ${[...names][0]}.`;
   return `Plex cannot read ${names.size} folders.`;
+}
+
+export function isDirectory(filePath: string): boolean {
+  const info = readStat(filePath);
+  return info != null && info !== "denied" && info.directory;
 }
 
 export function readStat(filePath: string): AccessStat | "denied" | null {

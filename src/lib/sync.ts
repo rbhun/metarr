@@ -23,7 +23,8 @@ import { queueFormatRefresh } from "@/lib/detect/format-refresh";
 import { askPlexToReadSidecars } from "@/lib/detect/publish";
 import { kickDetectWorker } from "@/lib/detect/worker";
 import { formatRefreshPaths, readFolderScan, scanFolders } from "@/lib/folder-scan";
-import { FOLDER_MASK_OPENED_KEY, loadUnreadable } from "@/lib/plex-access";
+import { announceFolder } from "@/lib/announce";
+import { FOLDER_MASK_OPENED_KEY, isDirectory, loadUnreadable, maskRepairEnabled, refreshClosedTitles } from "@/lib/plex-access";
 import { isSyncCancelled, setSyncAbortSignal, throwIfSyncCancelled } from "@/lib/sync-cancel";
 import { CONNECTORS, CONNECTOR_LABEL, type ConnectorId, type ConnectorProgress, type SourceDraft, type SyncNote, type SyncStatus } from "@/lib/types";
 
@@ -280,9 +281,12 @@ async function runSyncBody(only?: ConnectorId) {
         if (only && slot.id !== only) continue;
         if (slot.state === "error") recordConnectorSync(slot.id, false, slot.message, db);
       }
-      rebuildCatalog(db);
     });
     write();
+    const mask = refreshClosedTitles(db, maskRepairEnabled(db));
+    rebuildCatalog(db);
+    const folders = mask.opened.filter((item) => isDirectory(item)).slice(0, 40);
+    for (const folder of folders) await announceFolder(db, [folder]).catch(() => "");
     const files = status.connectors.find((slot) => slot.id === "files");
     if (staged.has("files") && files && !cancelled) {
       try {

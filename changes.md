@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.222
+
+- Titles already stored from Radarr or Bazarr are checked for a folder Plex cannot read, so the library filter lists them.
+
 ## 0.0.221
 
 - The library can filter titles whose folder Plex cannot read. A sidebar button checks those folders, opens them for everyone else, and checks again. The folder scan does the same unless that is turned off.
