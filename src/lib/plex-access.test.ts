@@ -7,7 +7,7 @@ import Database from "better-sqlite3";
 import { rebuildCatalog } from "@/lib/catalog";
 import { insertSourceRecords, migrate, setMeta } from "@/lib/db";
 import { listVideos, passFolderMasks, readFolderScan, writeFolderScan } from "@/lib/folder-scan";
-import { noteForBlocks, PLEX_UNREADABLE_KEY, refreshClosedTitles, type PlexAccount } from "@/lib/plex-access";
+import { loadUnreadable, noteForBlocks, PLEX_UNREADABLE_KEY, refreshClosedTitles, repairTitlePaths, type PlexAccount } from "@/lib/plex-access";
 import { sourceDraft } from "@/lib/source";
 
 const other: PlexAccount = { uid: null, gids: [] };
@@ -154,6 +154,34 @@ test("a title already stored from Radarr is marked when its folder is closed to 
     assert.equal(rows.find((row) => row.title === "Finding Nemo")?.playable_note?.includes("Plex cannot read"), false);
   } finally {
     fs.chmodSync(closed, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fixing one title opens its folder and leaves another closed folder alone", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "metarr-plex-one-"));
+  fs.chmodSync(root, 0o755);
+  const target = path.join(root, "The Flintstones - Jogging Fever (1981)");
+  const otherFolder = path.join(root, "Finding Nemo (2003)");
+  const targetFile = path.join(target, "film.mkv");
+  fs.mkdirSync(target);
+  fs.mkdirSync(otherFolder);
+  fs.writeFileSync(targetFile, "x");
+  fs.chmodSync(target, 0o2700);
+  fs.chmodSync(otherFolder, 0o2700);
+  const db = new Database(":memory:");
+  migrate(db);
+  setMeta(db, PLEX_UNREADABLE_KEY, JSON.stringify([target, otherFolder]));
+  try {
+    const result = repairTitlePaths(db, [targetFile]);
+    assert.equal(result.failed.length, 0);
+    assert.equal(result.remaining.length, 0);
+    assert.equal(fs.statSync(target).mode & 0o007, 0o005);
+    assert.equal(fs.statSync(otherFolder).mode & 0o007, 0);
+    assert.deepEqual(loadUnreadable(db), [otherFolder]);
+  } finally {
+    fs.chmodSync(target, 0o755);
+    fs.chmodSync(otherFolder, 0o755);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

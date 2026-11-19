@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.224
+
+- A title’s sidebar can open that title’s folder for Plex, and leave every other closed folder as it is.
+
 ## 0.0.223
 
 - Fix folders sits with the other sidebar items and opens a window that lists the closed paths, corrects them, and checks again.

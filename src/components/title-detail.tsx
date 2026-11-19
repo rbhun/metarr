@@ -64,6 +64,7 @@ export function TitleDetail({
   const [arrBusy, setArrBusy] = useState<"open" | "search" | "plex" | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
   const [rescanBusy, setRescanBusy] = useState(false);
+  const [maskBusy, setMaskBusy] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
@@ -83,6 +84,43 @@ export function TitleDetail({
       toast.error(caught instanceof Error ? caught.message : "Could not start language detection.");
     } finally {
       setDetectBusy(false);
+    }
+  }
+  async function fixFolder() {
+    if (!title) return;
+    setMaskBusy(true);
+    try {
+      const response = await fetch(`/api/library/${title.id}/folder-mask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        opened?: string[];
+        failed?: Array<{ path: string; error: string }>;
+        remaining?: string[];
+        catalogId?: number | null;
+      };
+      if (!response.ok) throw new Error(body.error || "Could not open the folder.");
+      const opened = body.opened?.length ?? 0;
+      const remaining = body.remaining?.length ?? 0;
+      const failed = body.failed ?? [];
+      if (failed.length) toast.error(`${failed[0]?.error ?? "Could not change permissions."}`);
+      toast.success(
+        opened
+          ? remaining
+            ? "Opened this folder. Plex still cannot read it."
+            : "Opened this folder for Plex."
+          : remaining
+            ? "This folder is still closed."
+            : "This folder is already open to Plex.",
+      );
+      onRescanned?.(body.catalogId ?? title.id);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not open the folder.");
+    } finally {
+      setMaskBusy(false);
     }
   }
   async function rescanFiles() {
@@ -290,6 +328,17 @@ export function TitleDetail({
                 >
                   {rescanBusy ? "Scanning…" : "Rescan files"}
                 </Button>
+                {title.playableNote?.includes("Plex cannot read") ? (
+                  <Button
+                    size="sm"
+                    className="w-fit"
+                    disabled={maskBusy}
+                    onClick={() => void fixFolder()}
+                    title="Add read and enter for everyone else on this title’s folder, then check it again"
+                  >
+                    {maskBusy ? "Opening folder…" : "Fix folder permissions"}
+                  </Button>
+                ) : null}
                 {title.kind === "series" ? (
                   <Button
                     size="sm"

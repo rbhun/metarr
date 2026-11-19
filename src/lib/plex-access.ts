@@ -117,6 +117,52 @@ export function closedAmong(paths: Iterable<string>, account: PlexAccount): { cl
   return { closed: [...blocked], sawDisk };
 }
 
+/** Directories above a file that Plex cannot open, stopping at the first folder this machine can see. */
+function closedChain(filePath: string, account: PlexAccount): string[] {
+  const closed: string[] = [];
+  let current = normalized(filePath);
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    const info = readStat(current);
+    if (info && info !== "denied") {
+      const open = info.directory ? directoryOpenTo(info, account) : fileReadableBy(info, account);
+      if (!open) closed.push(current);
+      if (info.directory) break;
+    }
+    const parent = path.dirname(current);
+    if (parent === current || parent === "/" || parent === ".") break;
+    current = parent;
+  }
+  return closed;
+}
+
+/**
+ * Open the folders for one title's files, then check those paths again.
+ * Other titles' closed folders stay on the list.
+ */
+export function repairTitlePaths(db: Database.Database, targets: string[]): { opened: string[]; failed: MaskFailure[]; remaining: string[] } {
+  const account = readPlexAccount();
+  const files = [...new Set(targets.map((item) => normalized(item)).filter(Boolean))];
+  const closed = new Set<string>();
+  for (const filePath of files) for (const item of closedChain(filePath, account)) closed.add(item);
+  const opened: string[] = [];
+  const failed: MaskFailure[] = [];
+  for (const item of [...closed].sort((left, right) => left.length - right.length)) {
+    const result = repairClosed(item, account);
+    opened.push(...result.opened);
+    failed.push(...result.failed);
+  }
+  const remaining = new Set<string>();
+  for (const filePath of files) for (const item of closedChain(filePath, account)) remaining.add(item);
+  const blocked = new Set(loadUnreadable(db));
+  for (const prior of [...blocked]) {
+    const touches = files.some((filePath) => pathInside(filePath, prior) || pathInside(prior, filePath));
+    if (touches && !stillClosed(prior, account)) blocked.delete(prior);
+  }
+  for (const item of remaining) blocked.add(item);
+  saveUnreadable(db, blocked);
+  return { opened, failed, remaining: [...remaining] };
+}
+
 /**
  * Check the paths already stored on titles and remember the ones Plex cannot open.
  * When `repair` is set, a closed path is opened for everyone else and then checked again.
