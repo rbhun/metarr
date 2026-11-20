@@ -1,5 +1,9 @@
 # Changes
 
+## 0.0.225
+
+- Fix folder permissions sits in the title panel's bottom row with Detect languages and Rescan files, and in the header for selected titles. The left sidebar keeps only the pages.
+
 ## 0.0.224
 
 - A title’s sidebar can open that title’s folder for Plex, and leave every other closed folder as it is.

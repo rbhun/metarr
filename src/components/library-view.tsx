@@ -38,7 +38,7 @@ import { VersionAudio, VersionLines, VersionSubtitles } from "@/components/versi
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
-import { openService, pushToPlex, scanInPlex, type ServiceApp } from "@/components/open-service";
+import { fixFolderMasks, openService, pushToPlex, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 
 type KindFilter = "all" | TitleKind;
@@ -298,6 +298,7 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupAllProgress, setLookupAllProgress] = useState<string | null>(null);
   const [plexBusy, setPlexBusy] = useState(false);
+  const [maskBusy, setMaskBusy] = useState(false);
   const [rewrapBusy, setRewrapBusy] = useState(false);
   const [remuxExtras, setRemuxExtras] = useState(false);
   const [episodes, setEpisodes] = useState<Record<number, LibraryEpisode[] | "loading" | "error">>({});
@@ -609,6 +610,21 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
     }
   }
 
+  async function fixSelectedFolders() {
+    const items = [...selected.values()].map((row) => (row.episodeId ? { catalogId: row.catalogId, episodeId: row.episodeId } : { catalogId: row.catalogId }));
+    setMaskBusy(true);
+    try {
+      const result = await fixFolderMasks(items);
+      if (result.failed) toast.error(result.failed);
+      toast.success(result.message);
+      bump();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Could not check the folders.");
+    } finally {
+      setMaskBusy(false);
+    }
+  }
+
   async function copySelected() {
     const rows = [...selected.values()];
     const text = rows.map((row) => `${row.label}\t${row.path ?? "no file"}`).join("\n");
@@ -726,6 +742,15 @@ export function LibraryView({ initial }: { initial?: LibraryResponse }) {
             </Button>
             <Button size="sm" variant="outline" disabled={plexBusy} onClick={() => void pushSelected()}>
               {plexBusy ? "Pushing…" : "Push to Plex"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={maskBusy}
+              onClick={() => void fixSelectedFolders()}
+              title="Add read and enter for everyone else on each selected title’s folder, then check them again. The owner and group stay as they are"
+            >
+              {maskBusy ? "Checking folders…" : "Fix folder permissions"}
             </Button>
             <Button
               size="sm"

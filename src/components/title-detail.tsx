@@ -24,7 +24,7 @@ import { timingFormat } from "@/lib/subtitle-timing";
 import { displayGenres, displayRating } from "@/lib/online";
 import type { ConnectorId, LibraryEpisode, LibraryTitle } from "@/lib/types";
 import { PROVIDER_LABEL } from "@/lib/types";
-import { openService, scanInPlex, type ServiceApp } from "@/components/open-service";
+import { fixFolderMasks, openService, scanInPlex, type ServiceApp } from "@/components/open-service";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -90,33 +90,10 @@ export function TitleDetail({
     if (!title) return;
     setMaskBusy(true);
     try {
-      const response = await fetch(`/api/library/${title.id}/folder-mask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(episode ? { episodeId: episode.id } : {}),
-      });
-      const body = (await response.json()) as {
-        error?: string;
-        opened?: string[];
-        failed?: Array<{ path: string; error: string }>;
-        remaining?: string[];
-        catalogId?: number | null;
-      };
-      if (!response.ok) throw new Error(body.error || "Could not open the folder.");
-      const opened = body.opened?.length ?? 0;
-      const remaining = body.remaining?.length ?? 0;
-      const failed = body.failed ?? [];
-      if (failed.length) toast.error(`${failed[0]?.error ?? "Could not change permissions."}`);
-      toast.success(
-        opened
-          ? remaining
-            ? "Opened this folder. Plex still cannot read it."
-            : "Opened this folder for Plex."
-          : remaining
-            ? "This folder is still closed."
-            : "This folder is already open to Plex.",
-      );
-      onRescanned?.(body.catalogId ?? title.id);
+      const result = await fixFolderMasks([episode ? { catalogId: title.id, episodeId: episode.id } : { catalogId: title.id }]);
+      if (result.failed) toast.error(result.failed);
+      toast.success(result.message);
+      onRescanned?.(title.id);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Could not open the folder.");
     } finally {
@@ -228,6 +205,8 @@ export function TitleDetail({
     : false;
   const canConvert = Boolean(title && (episode || title.kind === "movie") && hasDisc && file && !convertedFileFor(file));
   const knownPaths = file ? [file.path, ...file.versions.map((version) => version.path)] : [];
+  const hasPath = knownPaths.some(Boolean);
+  const folderClosed = Boolean(title?.playableNote?.includes("Plex cannot read"));
   const showRewrap = Boolean(title && (episode || title.kind === "movie") && needsRewrap(knownPaths));
   const showDovi = Boolean(
     title &&
@@ -314,31 +293,7 @@ export function TitleDetail({
                   ? ` · ${title.online.originalTitle}`
                   : ""}
               </SheetDescription>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" className="w-fit" disabled={detectBusy} onClick={() => void detectNow()}>
-                  {detectBusy ? "Queuing…" : "Detect languages now"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-fit"
-                  disabled={rescanBusy || !(file?.path || file?.versions.some((version) => version.path))}
-                  onClick={() => void rescanFiles()}
-                  title="Re-read this title’s files on disk and from the connected apps"
-                >
-                  {rescanBusy ? "Scanning…" : "Rescan files"}
-                </Button>
-                {title.playableNote?.includes("Plex cannot read") ? (
-                  <Button
-                    size="sm"
-                    className="w-fit"
-                    disabled={maskBusy}
-                    onClick={() => void fixFolder()}
-                    title="Add read and enter for everyone else on this title’s folder, then check it again"
-                  >
-                    {maskBusy ? "Opening folder…" : "Fix folder permissions"}
-                  </Button>
-                ) : null}
+              <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
                 {title.kind === "series" ? (
                   <Button
                     size="sm"
@@ -632,6 +587,27 @@ export function TitleDetail({
                 ) : null}
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => onLookup(title.id)}>
                   {busy ? "Looking up…" : "Look up this title"}
+                </Button>
+                <Button size="sm" variant="outline" disabled={detectBusy} onClick={() => void detectNow()}>
+                  {detectBusy ? "Queuing…" : "Detect languages now"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={rescanBusy || !hasPath}
+                  onClick={() => void rescanFiles()}
+                  title="Re-read this title’s files on disk and from the connected apps"
+                >
+                  {rescanBusy ? "Scanning…" : "Rescan files"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={folderClosed ? "default" : "outline"}
+                  disabled={maskBusy || !hasPath}
+                  onClick={() => void fixFolder()}
+                  title="Add read and enter for everyone else on this title’s folder, then check it again. The owner and group stay as they are"
+                >
+                  {maskBusy ? "Checking folder…" : "Fix folder permissions"}
                 </Button>
               </div>
             </div>
